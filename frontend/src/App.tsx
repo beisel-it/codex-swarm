@@ -1,6 +1,6 @@
 import { startTransition, useDeferredValue, useEffect, useState } from 'react'
 
-type ViewMode = 'board' | 'detail' | 'review'
+type ViewMode = 'board' | 'detail' | 'review' | 'admin'
 type RepositoryProvider = 'github' | 'gitlab' | 'local' | 'other'
 type RepositoryTrustLevel = 'trusted' | 'sandboxed' | 'restricted'
 type PullRequestStatus = 'draft' | 'open' | 'merged' | 'closed'
@@ -31,6 +31,7 @@ type AgentStatus = 'provisioning' | 'idle' | 'busy' | 'paused' | 'stopped' | 'fa
 type ApprovalStatus = 'pending' | 'approved' | 'rejected'
 type ValidationStatus = 'pending' | 'passed' | 'failed'
 type ArtifactKind = 'plan' | 'patch' | 'log' | 'report' | 'diff' | 'screenshot' | 'pr_link' | 'other'
+type ActorType = 'system' | 'user' | 'service'
 
 type Repository = {
   id: string
@@ -40,8 +41,152 @@ type Repository = {
   defaultBranch: string
   localPath: string | null
   trustLevel: RepositoryTrustLevel
+  approvalProfile?: string
   createdAt?: string
   updatedAt?: string
+}
+
+type WorkspaceRef = {
+  id: string
+  name: string
+}
+
+type TeamRef = {
+  id: string
+  workspaceId: string
+  name: string
+}
+
+type IdentityContext = {
+  principal: string
+  subject: string
+  email: string | null
+  roles: string[]
+  workspace: WorkspaceRef
+  team: TeamRef
+  actorType: ActorType
+}
+
+type ActorIdentity = {
+  principal: string
+  actorId: string
+  actorType: ActorType
+  email: string | null
+  role: string
+  workspaceId: string | null
+  workspaceName: string | null
+  teamId: string | null
+  teamName: string | null
+  policyProfile: string | null
+}
+
+type ApprovalAuditEntry = {
+  approvalId: string
+  runId: string
+  taskId: string | null
+  kind: string
+  status: ApprovalStatus
+  requestedAt: string
+  resolvedAt: string | null
+  requestedBy: string
+  requestedByActor: ActorIdentity | null
+  resolver: string | null
+  resolverActor: ActorIdentity | null
+  policyProfile: string | null
+  requestedPayload: Record<string, unknown>
+  resolutionPayload: Record<string, unknown>
+}
+
+type GovernanceAdminReport = {
+  generatedAt: string
+  requestedBy: ActorIdentity
+  retention: {
+    policy: {
+      runsDays: number
+      artifactsDays: number
+      eventsDays: number
+    }
+    runs: { total: number; expired: number; retained: number }
+    artifacts: { total: number; expired: number; retained: number }
+    events: { total: number; expired: number; retained: number }
+  }
+  approvals: {
+    total: number
+    pending: number
+    approved: number
+    rejected: number
+    history: ApprovalAuditEntry[]
+  }
+  policies: {
+    repositoryProfiles: Array<{
+      profile: string
+      repositoryCount: number
+      runCount: number
+    }>
+    sensitiveRepositories: Array<{
+      repositoryId: string
+      repositoryName: string
+      trustLevel: RepositoryTrustLevel
+      approvalProfile: string
+    }>
+  }
+  secrets: {
+    sourceMode: 'environment' | 'external_manager'
+    provider: string | null
+    remoteCredentialEnvNames: string[]
+    allowedRepositoryTrustLevels: RepositoryTrustLevel[]
+    sensitivePolicyProfiles: string[]
+    credentialDistribution: string[]
+    policyDrivenAccess: boolean
+  }
+}
+
+type SecretAccessPlan = {
+  repositoryId: string
+  repositoryName: string
+  trustLevel: RepositoryTrustLevel
+  policyProfile: string
+  access: 'allowed' | 'brokered' | 'denied'
+  sourceMode: 'environment' | 'external_manager'
+  provider: string | null
+  credentialEnvNames: string[]
+  distributionBoundary: string[]
+  reason: string
+}
+
+type RunAuditExport = {
+  repository: Repository
+  run: Run
+  tasks: Task[]
+  agents: Agent[]
+  sessions: Session[]
+  workerNodes: WorkerNode[]
+  approvals: Approval[]
+  validations: Validation[]
+  artifacts: Artifact[]
+  events: Array<{
+    id: string
+    runId: string | null
+    taskId: string | null
+    agentId: string | null
+    traceId: string
+    eventType: string
+    entityType: string
+    entityId: string
+    status: string
+    summary: string
+    actor: ActorIdentity | null
+    metadata: Record<string, unknown>
+    createdAt: string
+  }>
+  provenance: {
+    exportedBy: ActorIdentity
+    approvals: ApprovalAuditEntry[]
+    eventActors: ActorIdentity[]
+    generatedAt: string
+  }
+  retention: GovernanceAdminReport['retention']
+  exportedAt: string
 }
 
 type Run = {
@@ -203,6 +348,10 @@ type SwarmData = {
   validations: Validation[]
   artifacts: Artifact[]
   messages: Message[]
+  identity: IdentityContext
+  governance: GovernanceAdminReport
+  secretAccessPlan: SecretAccessPlan | null
+  auditExport: RunAuditExport | null
   source: 'mock' | 'api'
 }
 
@@ -210,6 +359,224 @@ const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? '').replace(/\/$/, ''
 const API_TOKEN = import.meta.env.VITE_API_TOKEN ?? 'codex-swarm-dev-token'
 const APPROVAL_RESOLVER = import.meta.env.VITE_APPROVAL_RESOLVER ?? 'frontend-dev'
 const REFRESH_MS = 15_000
+
+const mockIdentity: IdentityContext = {
+  principal: 'dev-user',
+  subject: 'dev-user',
+  email: 'dev-user@example.com',
+  roles: ['platform-admin'],
+  workspace: {
+    id: 'default-workspace',
+    name: 'Default Workspace',
+  },
+  team: {
+    id: 'codex-swarm',
+    workspaceId: 'default-workspace',
+    name: 'Codex Swarm',
+  },
+  actorType: 'user',
+}
+
+const mockGovernance: GovernanceAdminReport = {
+  generatedAt: '2026-03-28T22:20:00.000Z',
+  requestedBy: {
+    principal: 'dev-user',
+    actorId: 'dev-user',
+    actorType: 'user',
+    email: 'dev-user@example.com',
+    role: 'platform-admin',
+    workspaceId: 'default-workspace',
+    workspaceName: 'Default Workspace',
+    teamId: 'codex-swarm',
+    teamName: 'Codex Swarm',
+    policyProfile: 'standard',
+  },
+  retention: {
+    policy: { runsDays: 30, artifactsDays: 30, eventsDays: 30 },
+    runs: { total: 2, expired: 0, retained: 2 },
+    artifacts: { total: 4, expired: 0, retained: 4 },
+    events: { total: 18, expired: 2, retained: 16 },
+  },
+  approvals: {
+    total: 3,
+    pending: 1,
+    approved: 1,
+    rejected: 1,
+    history: [
+      {
+        approvalId: 'approval-plan',
+        runId: 'run-beta',
+        taskId: 'task-review',
+        kind: 'plan',
+        status: 'pending',
+        requestedAt: '2026-03-28T19:40:00.000Z',
+        resolvedAt: null,
+        requestedBy: 'tech-lead',
+        requestedByActor: {
+          principal: 'tech-lead',
+          actorId: 'tech-lead',
+          actorType: 'user',
+          email: 'lead@example.com',
+          role: 'platform-admin',
+          workspaceId: 'default-workspace',
+          workspaceName: 'Default Workspace',
+          teamId: 'codex-swarm',
+          teamName: 'Codex Swarm',
+          policyProfile: 'standard',
+        },
+        resolver: null,
+        resolverActor: null,
+        policyProfile: 'standard',
+        requestedPayload: { summary: 'Review beta handoff plan.' },
+        resolutionPayload: {},
+      },
+      {
+        approvalId: 'approval-policy',
+        runId: 'run-alpha',
+        taskId: 'task-runtime',
+        kind: 'policy_exception',
+        status: 'rejected',
+        requestedAt: '2026-03-28T18:35:00.000Z',
+        resolvedAt: '2026-03-28T20:03:00.000Z',
+        requestedBy: 'backend-dev',
+        requestedByActor: {
+          principal: 'backend-dev',
+          actorId: 'backend-dev',
+          actorType: 'user',
+          email: 'backend@example.com',
+          role: 'engineer',
+          workspaceId: 'default-workspace',
+          workspaceName: 'Default Workspace',
+          teamId: 'codex-swarm',
+          teamName: 'Codex Swarm',
+          policyProfile: 'standard',
+        },
+        resolver: 'security',
+        resolverActor: {
+          principal: 'security',
+          actorId: 'security',
+          actorType: 'user',
+          email: 'security@example.com',
+          role: 'security-admin',
+          workspaceId: 'default-workspace',
+          workspaceName: 'Default Workspace',
+          teamId: 'codex-swarm',
+          teamName: 'Codex Swarm',
+          policyProfile: 'restricted',
+        },
+        policyProfile: 'restricted',
+        requestedPayload: { summary: 'Request temporary network access for smoke tests.' },
+        resolutionPayload: { feedback: 'Denied until runtime bootstrap is stable.' },
+      },
+    ],
+  },
+  policies: {
+    repositoryProfiles: [
+      { profile: 'standard', repositoryCount: 1, runCount: 1 },
+      { profile: 'sandboxed-docs', repositoryCount: 1, runCount: 1 },
+    ],
+    sensitiveRepositories: [
+      {
+        repositoryId: 'repo-runbooks',
+        repositoryName: 'swarm-runbooks',
+        trustLevel: 'sandboxed',
+        approvalProfile: 'sandboxed-docs',
+      },
+    ],
+  },
+  secrets: {
+    sourceMode: 'environment',
+    provider: null,
+    remoteCredentialEnvNames: ['OPENAI_API_KEY'],
+    allowedRepositoryTrustLevels: ['trusted'],
+    sensitivePolicyProfiles: ['sandboxed-docs'],
+    credentialDistribution: ['control-plane issues short-lived credentials', 'workers get task-scoped env'],
+    policyDrivenAccess: true,
+  },
+}
+
+const mockSecretAccessPlan: SecretAccessPlan = {
+  repositoryId: 'repo-codex-swarm',
+  repositoryName: 'codex-swarm',
+  trustLevel: 'trusted',
+  policyProfile: 'standard',
+  access: 'allowed',
+  sourceMode: 'environment',
+  provider: null,
+  credentialEnvNames: ['OPENAI_API_KEY'],
+  distributionBoundary: ['workers get task-scoped env'],
+  reason: 'repository can receive the standard environment secret path',
+}
+
+const mockAuditExport: RunAuditExport = {
+  repository: {
+    id: 'repo-codex-swarm',
+    name: 'codex-swarm',
+    url: 'https://github.com/example/codex-swarm',
+    provider: 'github',
+    defaultBranch: 'main',
+    localPath: '/home/florian/codex-swarm',
+    trustLevel: 'trusted',
+    approvalProfile: 'standard',
+    createdAt: '2026-03-20T09:00:00.000Z',
+    updatedAt: '2026-03-28T20:58:00.000Z',
+  },
+  run: {
+    id: 'run-alpha',
+    repositoryId: 'repo-codex-swarm',
+    goal: 'Ship M5 governance surfaces',
+    status: 'in_progress',
+    branchName: 'runs/m5-governance',
+    planArtifactPath: null,
+    budgetTokens: 120000,
+    budgetCostUsd: 12.5,
+    concurrencyCap: 2,
+    policyProfile: 'standard',
+    publishedBranch: null,
+    branchPublishedAt: null,
+    pullRequestUrl: null,
+    pullRequestNumber: null,
+    pullRequestStatus: null,
+    handoffStatus: 'pending',
+    completedAt: null,
+    createdBy: 'tech-lead',
+    createdAt: '2026-03-28T10:00:00.000Z',
+    updatedAt: '2026-03-28T22:15:00.000Z',
+    metadata: {},
+  },
+  tasks: [],
+  agents: [],
+  sessions: [],
+  workerNodes: [],
+  approvals: [],
+  validations: [],
+  artifacts: [],
+  events: [
+    {
+      id: 'event-audit-1',
+      runId: 'run-alpha',
+      taskId: null,
+      agentId: null,
+      traceId: 'trace-audit',
+      eventType: 'admin.governance_report_generated',
+      entityType: 'admin_report',
+      entityId: 'run-alpha',
+      status: 'completed',
+      summary: 'Governance report generated for run-alpha',
+      actor: mockGovernance.requestedBy,
+      metadata: {},
+      createdAt: '2026-03-28T22:16:00.000Z',
+    },
+  ],
+  provenance: {
+    exportedBy: mockGovernance.requestedBy,
+    approvals: mockGovernance.approvals.history,
+    eventActors: [mockGovernance.requestedBy],
+    generatedAt: '2026-03-28T22:17:00.000Z',
+  },
+  retention: mockGovernance.retention,
+  exportedAt: '2026-03-28T22:17:00.000Z',
+}
 
 const mockData: SwarmData = {
   source: 'mock',
@@ -664,6 +1031,10 @@ const mockData: SwarmData = {
       createdAt: '2026-03-28T20:14:00.000Z',
     },
   ],
+  identity: mockIdentity,
+  governance: mockGovernance,
+  secretAccessPlan: mockSecretAccessPlan,
+  auditExport: mockAuditExport,
 }
 
 const taskStatusOrder: TaskStatus[] = ['pending', 'blocked', 'in_progress', 'awaiting_review', 'completed']
@@ -787,11 +1158,29 @@ async function loadApprovalDetail(approvalId: string): Promise<Approval> {
   return requestJson<Approval>(`/api/v1/approvals/${encodeURIComponent(approvalId)}`)
 }
 
+async function loadIdentity(): Promise<IdentityContext> {
+  return requestJson<IdentityContext>('/api/v1/me')
+}
+
+async function loadGovernanceReport(runId?: string): Promise<GovernanceAdminReport> {
+  const suffix = runId ? `?runId=${encodeURIComponent(runId)}` : ''
+  return requestJson<GovernanceAdminReport>(`/api/v1/admin/governance-report${suffix}`)
+}
+
+async function loadSecretAccessPlan(repositoryId: string): Promise<SecretAccessPlan> {
+  return requestJson<SecretAccessPlan>(`/api/v1/admin/secrets/access-plan/${encodeURIComponent(repositoryId)}`)
+}
+
+async function loadRunAuditExport(runId: string): Promise<RunAuditExport> {
+  return requestJson<RunAuditExport>(`/api/v1/runs/${encodeURIComponent(runId)}/audit-export`)
+}
+
 async function loadSwarmData(): Promise<SwarmData> {
   try {
     const repositories = await requestJson<Repository[]>('/api/v1/repositories')
     const runs = await requestJson<Run[]>('/api/v1/runs')
     const workerNodes = await requestJson<WorkerNode[]>('/api/v1/worker-nodes').catch(() => [])
+    const identity = await loadIdentity().catch(() => mockIdentity)
 
     if (repositories.length === 0 || runs.length === 0) {
       return mockData
@@ -835,6 +1224,18 @@ async function loadSwarmData(): Promise<SwarmData> {
       ),
     )
 
+    const primaryRun = runs[0]
+    const primaryRepository = repositories.find((repository) => repository.id === primaryRun?.repositoryId)
+    const governance = await loadGovernanceReport(primaryRun?.id).catch(() => mockGovernance)
+    const secretAccessPlan =
+      primaryRepository
+        ? await loadSecretAccessPlan(primaryRepository.id).catch(() => mockSecretAccessPlan)
+        : null
+    const auditExport =
+      primaryRun
+        ? await loadRunAuditExport(primaryRun.id).catch(() => mockAuditExport)
+        : null
+
     return {
       repositories,
       runs,
@@ -846,6 +1247,10 @@ async function loadSwarmData(): Promise<SwarmData> {
       validations: validationsPerRun.flat(),
       artifacts: artifactsPerRun.flat(),
       messages: messagesPerRun.flat(),
+      identity,
+      governance,
+      secretAccessPlan,
+      auditExport,
       source: 'api',
     }
   } catch {
@@ -940,6 +1345,14 @@ function describePlacement(session: Session, workerNode: WorkerNode | null, stic
   const stickyLabel = stickyNode?.name ?? session.stickyNodeId ?? 'none'
   const constraints = session.placementConstraintLabels.length > 0 ? session.placementConstraintLabels.join(', ') : 'none'
   return `Placed on ${nodeLabel} · sticky ${stickyLabel} · labels ${constraints}`
+}
+
+function formatActorLabel(actor: ActorIdentity | null | undefined) {
+  if (!actor) {
+    return 'System-unresolved'
+  }
+
+  return `${actor.actorId} · ${actor.role}`
 }
 
 function deriveActivity(
@@ -1087,6 +1500,8 @@ function App() {
   const selectedRepository = data.repositories.find(
     (repository) => repository.id === selectedRun?.repositoryId,
   ) ?? null
+  const selectedRunStableId = selectedRun?.id ?? null
+  const selectedRepositoryStableId = selectedRepository?.id ?? null
 
   const runTasks = data.tasks.filter((task) => task.runId === selectedRun?.id)
   const visibleTasks = runTasks.filter((task) => {
@@ -1156,10 +1571,40 @@ function App() {
     }
   }, [selectedApprovalId, runApprovals])
 
+  useEffect(() => {
+    let active = true
+
+    async function hydrateAdminSurface() {
+      if (!selectedRunStableId || !selectedRepositoryStableId) {
+        return
+      }
+
+      const [governance, secretAccessPlan, auditExport] = await Promise.all([
+        loadGovernanceReport(selectedRunStableId).catch(() => mockGovernance),
+        loadSecretAccessPlan(selectedRepositoryStableId).catch(() => mockSecretAccessPlan),
+        loadRunAuditExport(selectedRunStableId).catch(() => mockAuditExport),
+      ])
+
+      if (!active) {
+        return
+      }
+
+      setData((current) => ({
+        ...current,
+        governance,
+        secretAccessPlan,
+        auditExport,
+      }))
+    }
+
+    void hydrateAdminSurface()
+
+    return () => {
+      active = false
+    }
+  }, [selectedRepositoryStableId, selectedRunStableId])
+
   const blockedTasks = runTasks.filter((task) => task.status === 'blocked')
-  const degradedNodes = data.workerNodes.filter((workerNode) => workerNode.status === 'degraded' || workerNode.status === 'offline')
-  const drainingNodes = data.workerNodes.filter((workerNode) => workerNode.drainState !== 'active')
-  const openPullRequests = data.runs.filter((run) => run.pullRequestStatus === 'open' || run.pullRequestStatus === 'draft').length
 
   async function handleApprovalAction(status: ApprovalStatus) {
     if (!selectedApproval) {
@@ -1189,31 +1634,31 @@ function App() {
 
       <header className="hero-panel">
         <div className="hero-copy">
-          <p className="eyebrow">Codex Swarm M4 Board</p>
-          <h1>Fleet health, placement, and drain-aware execution in one board.</h1>
+          <p className="eyebrow">Codex Swarm M5 Board</p>
+          <h1>Governance, provenance, and admin controls in the same command surface.</h1>
           <p className="lede">
-            Phase 4 extends the board into distributed execution: worker-node health, utilization
-            hints, sticky placement, and drain or degraded indicators now sit beside the existing
-            run, provider, and review surfaces.
+            Phase 5 adds governance visibility on top of the execution board: actor identity,
+            approval provenance, policy profiles, secret access boundaries, retention posture,
+            and run-scoped audit views without leaving the browser.
           </p>
         </div>
 
         <div className="hero-metrics">
           <MetricCard label="Active runs" value={String(data.runs.filter((run) => run.status === 'in_progress' || run.status === 'awaiting_approval').length)} hint="Runs needing operator attention" />
-          <MetricCard label="Fleet alerts" value={String(degradedNodes.length + drainingNodes.length)} hint="Nodes that are degraded, offline, or draining" />
-          <MetricCard label="Open PRs" value={String(openPullRequests)} hint="Draft or open pull requests reflected from the API" />
+          <MetricCard label="Governed approvals" value={String(data.governance.approvals.total)} hint="Approval history with actor provenance" />
+          <MetricCard label="Sensitive repos" value={String(data.governance.policies.sensitiveRepositories.length)} hint="Repositories under tighter policy controls" />
         </div>
       </header>
 
       <div className="view-switcher">
-        {(['board', 'detail', 'review'] as ViewMode[]).map((view) => (
+        {(['board', 'detail', 'review', 'admin'] as ViewMode[]).map((view) => (
           <button
             key={view}
             type="button"
             className={`view-tab ${selectedView === view ? 'is-active' : ''}`}
             onClick={() => setSelectedView(view)}
           >
-            {view === 'board' ? 'Board' : view === 'detail' ? 'Run Detail' : 'Review'}
+            {view === 'board' ? 'Board' : view === 'detail' ? 'Run Detail' : view === 'review' ? 'Review' : 'Admin'}
           </button>
         ))}
       </div>
@@ -1929,6 +2374,173 @@ function App() {
                 </section>
               </>
             ) : null}
+
+            {selectedView === 'admin' ? (
+              <>
+                <section className="panel panel-admin-identity">
+                  <div className="panel-header">
+                    <div>
+                      <p className="panel-kicker">Admin context</p>
+                      <h2>Actor, workspace, and delegated policy state</h2>
+                    </div>
+                  </div>
+
+                  <div className="provider-detail-grid">
+                    <article className="detail-card">
+                      <p className="panel-kicker">Principal</p>
+                      <strong>{data.identity.subject}</strong>
+                      <div className="detail-list">
+                        <span>Principal: {data.identity.principal}</span>
+                        <span>Role: {data.identity.roles.join(', ')}</span>
+                        <span>Actor type: {data.identity.actorType}</span>
+                        <span>Email: {data.identity.email ?? 'No email asserted'}</span>
+                      </div>
+                    </article>
+
+                    <article className="detail-card">
+                      <p className="panel-kicker">Workspace boundary</p>
+                      <strong>{data.identity.workspace.name}</strong>
+                      <div className="detail-list">
+                        <span>Workspace ID: {data.identity.workspace.id}</span>
+                        <span>Team: {data.identity.team.name}</span>
+                        <span>Team ID: {data.identity.team.id}</span>
+                        <span>Policy profile: {data.governance.requestedBy.policyProfile ?? 'standard'}</span>
+                      </div>
+                    </article>
+
+                    <article className="detail-card">
+                      <p className="panel-kicker">Selected run</p>
+                      <strong>{selectedRun.goal}</strong>
+                      <div className="detail-list">
+                        <span>Repository profile: {selectedRepository?.approvalProfile ?? selectedRun.policyProfile ?? 'standard'}</span>
+                        <span>Run policy: {selectedRun.policyProfile ?? 'standard'}</span>
+                        <span>Delegation state: {runAgents.length} agents / {runSessions.length} sessions</span>
+                        <span>Workspace-scoped actor report generated {formatDate(data.governance.generatedAt)}</span>
+                      </div>
+                    </article>
+                  </div>
+                </section>
+
+                <section className="panel panel-admin-governance">
+                  <div className="panel-header">
+                    <div>
+                      <p className="panel-kicker">Governance report</p>
+                      <h2>Policy visibility and retention posture</h2>
+                    </div>
+                  </div>
+
+                  <div className="admin-grid">
+                    <article className="detail-card">
+                      <p className="panel-kicker">Approvals</p>
+                      <strong>{data.governance.approvals.total} governed approvals</strong>
+                      <div className="detail-list">
+                        <span>Pending: {data.governance.approvals.pending}</span>
+                        <span>Approved: {data.governance.approvals.approved}</span>
+                        <span>Rejected: {data.governance.approvals.rejected}</span>
+                      </div>
+                    </article>
+
+                    <article className="detail-card">
+                      <p className="panel-kicker">Retention</p>
+                      <strong>{data.governance.retention.policy.runsDays} day run window</strong>
+                      <div className="detail-list">
+                        <span>Runs retained: {data.governance.retention.runs.retained} / {data.governance.retention.runs.total}</span>
+                        <span>Artifacts retained: {data.governance.retention.artifacts.retained} / {data.governance.retention.artifacts.total}</span>
+                        <span>Events expired: {data.governance.retention.events.expired}</span>
+                      </div>
+                    </article>
+
+                    <article className="detail-card">
+                      <p className="panel-kicker">Secrets boundary</p>
+                      <strong>{data.governance.secrets.sourceMode}</strong>
+                      <div className="detail-list">
+                        <span>Policy-driven access: {data.governance.secrets.policyDrivenAccess ? 'enabled' : 'disabled'}</span>
+                        <span>Trust levels: {data.governance.secrets.allowedRepositoryTrustLevels.join(', ')}</span>
+                        <span>Credentials: {data.governance.secrets.remoteCredentialEnvNames.join(', ') || 'None listed'}</span>
+                      </div>
+                    </article>
+                  </div>
+                </section>
+
+                <section className="panel panel-admin-provenance">
+                  <div className="panel-header">
+                    <div>
+                      <p className="panel-kicker">Approval provenance</p>
+                      <h2>Who requested, delegated, and resolved approvals</h2>
+                    </div>
+                  </div>
+
+                  <div className="provenance-list">
+                    {data.governance.approvals.history.map((entry) => (
+                      <article key={entry.approvalId} className="placement-card">
+                        <div className="dag-card-header">
+                          <strong>{entry.kind}</strong>
+                          <span className={`tone-chip tone-${approvalStatusTone[entry.status]}`}>
+                            {entry.status}
+                          </span>
+                        </div>
+                        <p>{String(entry.requestedPayload?.summary ?? 'No textual approval summary recorded.')}</p>
+                        <div className="detail-list">
+                          <span>Requested by: {entry.requestedBy}</span>
+                          <span>Requested actor: {formatActorLabel(entry.requestedByActor)}</span>
+                          <span>Resolved by: {entry.resolver ?? 'Pending'}</span>
+                          <span>Resolver actor: {formatActorLabel(entry.resolverActor)}</span>
+                          <span>Policy profile: {entry.policyProfile ?? 'standard'}</span>
+                          <span>Resolved at: {entry.resolvedAt ? formatDate(entry.resolvedAt) : 'Not resolved'}</span>
+                        </div>
+                      </article>
+                    ))}
+                  </div>
+                </section>
+
+                <section className="panel panel-admin-audit">
+                  <div className="panel-header">
+                    <div>
+                      <p className="panel-kicker">Audit and secrets</p>
+                      <h2>Run audit export and repository secret access</h2>
+                    </div>
+                  </div>
+
+                  <div className="admin-grid">
+                    <article className="detail-card">
+                      <p className="panel-kicker">Secret access plan</p>
+                      <strong>{data.secretAccessPlan?.access ?? 'Unknown access'}</strong>
+                      <div className="detail-list">
+                        <span>Repository: {data.secretAccessPlan?.repositoryName ?? selectedRepository?.name ?? 'Unknown'}</span>
+                        <span>Policy profile: {data.secretAccessPlan?.policyProfile ?? selectedRun.policyProfile ?? 'standard'}</span>
+                        <span>Credentials: {data.secretAccessPlan?.credentialEnvNames.join(', ') || 'None listed'}</span>
+                        <span>Boundary: {data.secretAccessPlan?.distributionBoundary.join(', ') || 'No boundary text returned'}</span>
+                        <span>Reason: {data.secretAccessPlan?.reason ?? 'No reason returned'}</span>
+                      </div>
+                    </article>
+
+                    <article className="detail-card">
+                      <p className="panel-kicker">Audit export</p>
+                      <strong>{data.auditExport ? formatDate(data.auditExport.exportedAt) : 'Not exported'}</strong>
+                      <div className="detail-list">
+                        <span>Exported by: {data.auditExport ? formatActorLabel(data.auditExport.provenance.exportedBy) : 'Unknown'}</span>
+                        <span>Event actors: {data.auditExport?.provenance.eventActors.length ?? 0}</span>
+                        <span>Audit events: {data.auditExport?.events.length ?? 0}</span>
+                        <span>Approval entries: {data.auditExport?.provenance.approvals.length ?? 0}</span>
+                        <span>Run retention policy: {data.auditExport ? `${data.auditExport.retention.policy.runsDays} days` : 'Unknown'}</span>
+                      </div>
+                    </article>
+
+                    <article className="detail-card">
+                      <p className="panel-kicker">Repository profiles</p>
+                      <strong>{data.governance.policies.repositoryProfiles.length} active profiles</strong>
+                      <div className="detail-list">
+                        {data.governance.policies.repositoryProfiles.map((profile) => (
+                          <span key={profile.profile}>
+                            {profile.profile}: {profile.repositoryCount} repos / {profile.runCount} runs
+                          </span>
+                        ))}
+                      </div>
+                    </article>
+                  </div>
+                </section>
+              </>
+            ) : null}
           </>
         ) : null}
       </main>
@@ -1939,7 +2551,7 @@ function App() {
           {errorText
             ? `API fallback active: ${errorText}`
             : data.source === 'api'
-              ? 'Live repositories, worker nodes, placement, provider handoff, approvals, validations, artifacts, and messages are polling.'
+              ? 'Live repositories, worker nodes, governance/admin views, approvals, audits, and messages are polling.'
               : 'Using fallback seed data until the API is reachable.'}
         </span>
       </footer>

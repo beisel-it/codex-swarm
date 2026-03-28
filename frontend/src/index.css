@@ -266,7 +266,11 @@ code {
 .panel-placement,
 .panel-recovery,
 .panel-activity,
-.panel-review {
+.panel-review,
+.panel-admin-identity,
+.panel-admin-governance,
+.panel-admin-provenance,
+.panel-admin-audit {
   grid-column: 2 / 4;
 }
 
@@ -289,6 +293,8 @@ code {
 .validation-list,
 .artifact-list,
 .fleet-grid,
+.admin-grid,
+.provenance-list,
 .agent-list,
 .activity-list,
 .recovery-list,
@@ -432,7 +438,8 @@ code {
 .provider-grid,
 .provider-detail-grid,
 .fleet-grid,
-.placement-grid {
+.placement-grid,
+.admin-grid {
   display: grid;
   gap: 14px;
 }
@@ -620,6 +627,15 @@ code {
 
 .placement-grid {
   grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.admin-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.provenance-list {
+  display: grid;
+  gap: 14px;
 }
 
 .review-grid {
@@ -859,7 +875,11 @@ code {
   .panel-placement,
   .panel-recovery,
   .panel-activity,
-  .panel-review {
+  .panel-review,
+  .panel-admin-identity,
+  .panel-admin-governance,
+  .panel-admin-provenance,
+  .panel-admin-audit {
     grid-column: auto;
   }
 }
@@ -884,7 +904,8 @@ code {
   .provider-grid,
   .provider-detail-grid,
   .fleet-grid,
-  .placement-grid {
+  .placement-grid,
+  .admin-grid {
     grid-template-columns: 1fr;
   }
 
