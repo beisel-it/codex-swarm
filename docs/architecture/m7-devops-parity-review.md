@@ -255,3 +255,159 @@ Evidence:
 Residual risks:
 
 - The reporting surface is intentionally operational and governance-focused, not a full BI or historical analytics platform.
+
+## e505a812 — Review [137] Operational SLOs
+
+- Roadmap entry: `ROADMAP.md` Phase 6, Scope, `Operational SLOs`
+- Verdict: `better`
+- Reasoning: SLOs are not just listed in docs; they are exposed through live metrics, backed by config, and tied to operator workflows and support-envelope interpretation.
+
+Evidence:
+
+- [apps/api/src/config.ts](/home/florian/codex-swarm/apps/api/src/config.ts): the runtime defines `SLO_PENDING_APPROVAL_MAX_MINUTES`, `SLO_ACTIVE_RUN_MAX_MINUTES`, `SLO_TASK_QUEUE_MAX`, and `SLO_SUPPORT_RESPONSE_HOURS`.
+- [apps/api/src/lib/observability.ts](/home/florian/codex-swarm/apps/api/src/lib/observability.ts): `getMetrics()` computes `slo.objectives`, `slo.measurements`, and `slo.status`.
+- [docs/operations/slo-support.md](/home/florian/codex-swarm/docs/operations/slo-support.md): the supported objectives and operator workflow are documented.
+- [docs/operator-guide.md](/home/florian/codex-swarm/docs/operator-guide.md): the operator loop explicitly requires checking `GET /api/v1/metrics` against the documented envelope.
+
+Residual risks:
+
+- The SLO surface is intentionally bounded to control-plane backlog and operator response objectives, not a full externally monitored SLA program.
+
+## a8ea869b — Review [138] Backup/restore runbook
+
+- Roadmap entry: `ROADMAP.md` Phase 6, Scope, `Backup/restore runbook`
+- Verdict: `better`
+- Reasoning: the repo includes both the runbook and executable backup/restore tooling rather than documentation alone.
+
+Evidence:
+
+- [docs/operations/backup-restore-dr.md](/home/florian/codex-swarm/docs/operations/backup-restore-dr.md): documents supported backup and restore procedures, parameters, operator cautions, and recorded evidence.
+- [apps/api/scripts/ops/backup-control-plane.mjs](/home/florian/codex-swarm/apps/api/scripts/ops/backup-control-plane.mjs): implements logical control-plane backup.
+- [apps/api/scripts/ops/restore-control-plane.mjs](/home/florian/codex-swarm/apps/api/scripts/ops/restore-control-plane.mjs): implements restore from snapshot.
+- [README.md](/home/florian/codex-swarm/README.md): root ops commands are documented for operators.
+- [docs/qa/m6-rc-signoff.md](/home/florian/codex-swarm/docs/qa/m6-rc-signoff.md): RC signoff validates that the documented backup and restore commands exist and are part of the supported recovery flow.
+
+Residual risks:
+
+- The runbook is for logical control-plane backup/restore, not a full infrastructure or regional rebuild procedure.
+
+## 228c803b — Review [139] Disaster recovery testing
+
+- Roadmap entry: `ROADMAP.md` Phase 6, Scope, `Disaster recovery testing`
+- Verdict: `better`
+- Reasoning: the repo includes a dedicated DR drill script plus recorded drill evidence with timings and zero-mismatch validation, which is stronger than a documentation-only claim.
+
+Evidence:
+
+- [apps/api/scripts/ops/dr-exercise.mjs](/home/florian/codex-swarm/apps/api/scripts/ops/dr-exercise.mjs): implements a scratch-database backup/restore validation drill.
+- [docs/operations/backup-restore-dr.md](/home/florian/codex-swarm/docs/operations/backup-restore-dr.md): records the 2026-03-28 drill result with backup, restore, validation, and total timings, plus mismatch outcome.
+- [docs/support-playbooks.md](/home/florian/codex-swarm/docs/support-playbooks.md): includes a failure playbook for failed restore or DR drills.
+- [docs/qa/m6-rc-signoff.md](/home/florian/codex-swarm/docs/qa/m6-rc-signoff.md): QA signoff validates the DR evidence and support posture.
+
+Residual risks:
+
+- The drill is a bounded control-plane recovery exercise, not a full multi-region or infra-failover rehearsal.
+
+## 5ed05df2 — Review [140] Migration and upgrade path
+
+- Roadmap entry: `ROADMAP.md` Phase 6, Scope, `Migration and upgrade path`
+- Verdict: `better`
+- Reasoning: the upgrade path is documented, version-gated in code, and validated in QA signoff rather than being an implicit operator expectation.
+
+Evidence:
+
+- [docs/operations/upgrade-path.md](/home/florian/codex-swarm/docs/operations/upgrade-path.md): documents supported upgrade, failure handling, and restore-based rollback notes.
+- [apps/api/src/db/versioning.ts](/home/florian/codex-swarm/apps/api/src/db/versioning.ts): persists and reads schema/config version metadata.
+- [apps/api/src/db/check-version.ts](/home/florian/codex-swarm/apps/api/src/db/check-version.ts): enforces schema/config compatibility against persisted metadata.
+- [README.md](/home/florian/codex-swarm/README.md): setup and operator notes mention schema/config version expectations.
+- [docs/qa/m6-rc-signoff.md](/home/florian/codex-swarm/docs/qa/m6-rc-signoff.md): QA signoff explicitly validates version-gate behavior and the documented upgrade path.
+
+Residual risks:
+
+- Rollback remains restore-based and intentionally does not promise reverse migrations for every incompatible change.
+
+## f49aa2b4 — Review [141] Cost/usage reporting
+
+- Roadmap entry: `ROADMAP.md` Phase 6, Scope, `Cost/usage reporting`
+- Verdict: `better`
+- Reasoning: cost and usage reporting are exposed as live API fields and documented for operators/admins, not merely described as future reporting intent.
+
+Evidence:
+
+- [apps/api/src/lib/observability.ts](/home/florian/codex-swarm/apps/api/src/lib/observability.ts): `getMetrics()` returns `usage` and `cost` summaries from persisted control-plane state.
+- [packages/contracts/src/index.ts](/home/florian/codex-swarm/packages/contracts/src/index.ts): the metrics contract includes `usage` and `cost` schemas.
+- [docs/operations/cost-usage-performance.md](/home/florian/codex-swarm/docs/operations/cost-usage-performance.md): documents the reporting surface and its limitations.
+- [docs/operator-guide.md](/home/florian/codex-swarm/docs/operator-guide.md): operators are directed to use `GET /api/v1/metrics` for usage and budgeted-cost visibility.
+
+Residual risks:
+
+- The cost report is based on persisted Codex Swarm run data, not downstream provider invoice reconciliation.
+
+## b62becff — Review [142] Performance tuning
+
+- Roadmap entry: `ROADMAP.md` Phase 6, Scope, `Performance tuning`
+- Verdict: `superseded`
+- Reasoning: the delivered M6 shape is a measured performance envelope with bounded probe tooling and explicit limitations, rather than an open-ended “tuning” subsystem. Later M6 delivery docs and RC evidence treat this as performance baselining and operator verification.
+
+Evidence:
+
+- [docs/architecture/m6-delivery-plan.md](/home/florian/codex-swarm/docs/architecture/m6-delivery-plan.md): Track 4 reframes the GA work as `Cost, usage, and performance envelope`.
+- [docs/operations/cost-usage-performance.md](/home/florian/codex-swarm/docs/operations/cost-usage-performance.md): documents performance baselines, limitations, and the operator-facing concurrency probe.
+- [apps/api/scripts/ops/perf-envelope.mjs](/home/florian/codex-swarm/apps/api/scripts/ops/perf-envelope.mjs): implements the bounded HTTP concurrency probe.
+- [docs/qa/m6-rc-signoff.md](/home/florian/codex-swarm/docs/qa/m6-rc-signoff.md): residual risks explicitly describe the performance probe as a bounded smoke baseline rather than sustained production tuning.
+
+Residual risks:
+
+- If the product later needs autoscaling, sustained load tuning, or deeper latency optimization claims, that requires a new explicit backlog slice beyond the current envelope.
+
+## f263dc98 — Review [143] Support playbooks
+
+- Roadmap entry: `ROADMAP.md` Phase 6, Scope, `Support playbooks`
+- Verdict: `better`
+- Reasoning: the repo includes concrete playbooks tied to the documented support envelope, recovery, upgrade, governance, and secret-access failure modes.
+
+Evidence:
+
+- [docs/support-playbooks.md](/home/florian/codex-swarm/docs/support-playbooks.md): includes stepwise playbooks for SLO-envelope breaches, failed restore/DR drills, upgrade failures, governance discrepancies, and sensitive-repository secret-access issues.
+- [docs/operations/slo-support.md](/home/florian/codex-swarm/docs/operations/slo-support.md): defines the support envelope that the playbooks operationalize.
+- [docs/operator-guide.md](/home/florian/codex-swarm/docs/operator-guide.md): integrates the playbooks into the reference operating loop.
+- [docs/qa/m6-rc-signoff.md](/home/florian/codex-swarm/docs/qa/m6-rc-signoff.md): QA signoff validates that operator playbooks describe failure handling for failed restore/drill and upgrade scenarios.
+
+Residual risks:
+
+- The playbooks intentionally reflect the bounded support model and do not imply 24x7 managed operations.
+
+## d8b447e1 — Review [144] Reference deployments for single-host and multi-node environments
+
+- Roadmap entry: `ROADMAP.md` Phase 6, Scope, `Reference deployments for single-host and multi-node environments`
+- Verdict: `better`
+- Reasoning: the repo provides both deployment topologies, supporting checklist steps, and linked UI/runbook evidence rather than a minimal topology note.
+
+Evidence:
+
+- [docs/reference-deployments.md](/home/florian/codex-swarm/docs/reference-deployments.md): documents single-host and multi-node reference topologies, shared dependencies, and deployment checklist requirements.
+- [docs/operator-guide.md](/home/florian/codex-swarm/docs/operator-guide.md): ties the reference topologies into the operator operating loop.
+- [docs/qa/m6-rc-signoff.md](/home/florian/codex-swarm/docs/qa/m6-rc-signoff.md): QA signoff explicitly validates that single-host and multi-node reference deployments are both documented.
+- [README.md](/home/florian/codex-swarm/README.md): points operators to the deployment and operations docs set.
+
+Residual risks:
+
+- The reference deployments document supported shapes and evidence expectations, but they still assume operators provide reachable Postgres and Redis infrastructure.
+
+## 49d0d4a0 — Review [148] Published support boundaries and limitations
+
+- Roadmap entry: `ROADMAP.md` Phase 6, Deliverables, `Published support boundaries and limitations`
+- Verdict: `better`
+- Reasoning: support boundaries and limitations are published across multiple operator-facing docs and reinforced in QA RC signoff, rather than buried in implementation details.
+
+Evidence:
+
+- [docs/operations/slo-support.md](/home/florian/codex-swarm/docs/operations/slo-support.md): states what is and is not covered by the support envelope.
+- [docs/support-playbooks.md](/home/florian/codex-swarm/docs/support-playbooks.md): turns those boundaries into operator response procedures.
+- [docs/operator-guide.md](/home/florian/codex-swarm/docs/operator-guide.md): includes explicit operator boundaries.
+- [docs/reference-deployments.md](/home/florian/codex-swarm/docs/reference-deployments.md): defines supported deployment shapes and evidence expectations.
+- [docs/qa/m6-rc-signoff.md](/home/florian/codex-swarm/docs/qa/m6-rc-signoff.md): QA signoff explicitly validates that support boundaries and non-goals are documented rather than implied.
+
+Residual risks:
+
+- The published boundary is clear, but any future expansion into 24x7 support, provider-billing reconciliation, or broader SRE guarantees would need new roadmap language and implementation work.
