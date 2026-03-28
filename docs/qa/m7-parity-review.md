@@ -432,3 +432,29 @@ Evidence:
 Residual risks:
 
 - This verdict covers the existence and wiring of reusable starter-pack assets. Separate roadmap item `[102]` remains a gap because the repo does not prove these packs measurably reduce prompt/setup overhead.
+
+## Task `c504255d`
+
+Roadmap entry:
+
+- Phase 3 exit criterion: `A user can start from a GitHub or GitLab repo and end with a PR.`
+
+Verdict:
+
+- gap
+
+Evidence:
+
+- The repository onboarding path accepts provider metadata and persists it through `POST /api/v1/repositories` and `ControlPlaneService.createRepository`, but the checked-in API tests only exercise a GitHub example and not an end-to-end GitHub-or-GitLab workflow in `apps/api/src/routes/repositories.ts`, `apps/api/src/services/control-plane-service.ts`, and `apps/api/test/app.test.ts`.
+- Branch publication and PR progression are modeled as two separate follow-up actions, `POST /api/v1/runs/:id/publish-branch` and `POST /api/v1/runs/:id/pull-request-handoff`, in `apps/api/src/routes/runs.ts`.
+- `ControlPlaneService.createRunPullRequestHandoff` does not create a provider PR. It persists supplied PR metadata when a URL is already known, or falls back to a `.swarm/handoffs/.../pull-request.json` manual handoff artifact when no URL is provided in `apps/api/src/services/control-plane-service.ts`.
+- The integration coverage proves repository onboarding metadata, branch publish, and recording a GitHub PR handoff URL, but it does not prove a real provider-created PR or any GitLab path in `apps/api/test/app.test.ts`.
+- The user docs describe reviewing publish and PR handoff state in the UI, which is weaker than the roadmap’s end-to-end acceptance claim in `docs/user-guide.md`.
+
+Residual risks:
+
+- Reviewers can confirm structured provider metadata and PR-state tracking, but not a supportable flow where a user starts from a GitHub or GitLab repository and ends with an actually created pull request.
+
+Backlog follow-up:
+
+- Add a real provider-backed end-to-end acceptance path for GitHub and/or GitLab PR creation, or intentionally narrow the roadmap exit criterion to the current publish-plus-handoff tracking model.
