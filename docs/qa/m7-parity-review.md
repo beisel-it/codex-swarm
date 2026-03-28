@@ -329,22 +329,18 @@ Roadmap entry:
 
 Verdict:
 
-- gap
+- parity
 
 Evidence:
 
 - `ROADMAP.md` explicitly places the system-context and sequence-diagram deliverable under `docs/architecture/`.
-- The current `docs/architecture/` directory contains planning and parity-review documents such as `m0-m1-architecture.md`, `m3-delivery-plan.md`, `m4-delivery-plan.md`, `m5-delivery-plan.md`, `m6-delivery-plan.md`, and M7 review notes, but no file in that directory contains system-context or sequence-diagram artifacts.
-- A repo search shows the only actual diagram matches are the mermaid flowchart and sequence diagram embedded in `PRD.md`, not under `docs/architecture/`.
-- `docs/architecture/m0-m1-architecture.md` provides architecture prose and boundaries, but no system-context or sequence-diagram sections.
+- `docs/architecture/system-context-and-sequences.md` is now checked in and contains a mermaid system-context diagram plus two mermaid sequence diagrams covering run creation/task execution and review/approval flow.
+- `docs/architecture/m0-m1-architecture.md` now links directly to `system-context-and-sequences.md` as the checked-in diagram home for the roadmap deliverable.
+- The new diagrams are implementation-shaped rather than aspirational: they name the live frontend, control-plane API, Postgres, Redis, worker runtime, Codex runtime, Git provider/local repo, and artifact/log surfaces reflected across `frontend/src/App.tsx`, `apps/api/src/app.ts`, and `apps/worker/src/runtime.ts`.
 
 Residual risks:
 
-- The architecture narrative exists, but the roadmap’s explicit deliverable location and diagram artifacts are not satisfied inside `docs/architecture/`.
-
-Backlog follow-up:
-
-- Add a checked-in architecture document under `docs/architecture/` that carries the required system-context and sequence diagrams, or formally supersede the roadmap wording to point at the authoritative file location.
+- The diagrams are high-level architecture artifacts rather than executable acceptance checks, but they satisfy the roadmap’s explicit documentation deliverable and authoritative file location.
 
 ## Task `a4a7bd86`
 
@@ -367,3 +363,25 @@ Evidence:
 Residual risks:
 
 - The board is a tabbed single-page surface rather than a separate route-per-view UI, but that exceeds rather than blocks the roadmap deliverable.
+
+## Task `2d3ee2ab`
+
+Roadmap entry:
+
+- Phase 2 exit criterion: `board latency remains near real time for control-plane events`
+
+Verdict:
+
+- parity
+
+Evidence:
+
+- The live frontend hydrates board data on a fixed `REFRESH_MS = 15_000` cadence and re-fetches swarm state with `window.setInterval(() => { void hydrate() }, REFRESH_MS)` in `frontend/src/App.tsx`.
+- The board exposes that live cadence directly in the UI with the `Hydration` signal reading `Polling every 15s` when API-backed data is active in `frontend/src/App.tsx`.
+- The API exposes an event-timeline surface at `GET /api/v1/events` in `apps/api/src/routes/events.ts`, and the board/run detail model also carries persisted event history through `ControlPlaneService.getRunDetail` in `apps/api/src/services/control-plane-service.ts`.
+- Control-plane mutations record timeline events durably across run, task, approval, validation, worker-node, cleanup-job, and admin routes through `recordTimelineEvent(...)` in `apps/api/src/lib/observability.ts` and the route handlers under `apps/api/src/routes/`.
+- Integration coverage proves the event API path by verifying `/api/v1/events` returns observability-backed timeline rows in `apps/api/test/app.test.ts`.
+
+Residual risks:
+
+- The implementation is polling-based rather than push-streamed, so "near real time" is currently bounded by the 15-second refresh interval instead of sub-second event delivery.
