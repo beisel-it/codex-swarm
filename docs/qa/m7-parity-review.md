@@ -345,3 +345,25 @@ Residual risks:
 Backlog follow-up:
 
 - Add a checked-in architecture document under `docs/architecture/` that carries the required system-context and sequence diagrams, or formally supersede the roadmap wording to point at the authoritative file location.
+
+## Task `a4a7bd86`
+
+Roadmap entry:
+
+- Phase 2 deliverable: `Browser UI for active runs`
+
+Verdict:
+
+- better
+
+Evidence:
+
+- The live frontend renders an `Active runs` rail with run status, timestamps, branch or PR state, and provider/handoff metadata in `frontend/src/App.tsx`.
+- The same board surface includes run overview, fleet visibility, blocked-task counts, placement issues, and hydration state rather than only a minimal active-run list in `frontend/src/App.tsx`.
+- User documentation explicitly describes the board as the default landing surface for active work in `docs/user-guide.md`.
+- Screenshot evidence is shipped in `docs/assets/screenshots/user-board-overview.png`.
+- The existing frontend M7 parity review also validated the richer board surface against the live implementation in `docs/architecture/m7-parity-review-frontend.md`.
+
+Residual risks:
+
+- The board is a tabbed single-page surface rather than a separate route-per-view UI, but that exceeds rather than blocks the roadmap deliverable.
