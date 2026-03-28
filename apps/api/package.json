@@ -8,7 +8,7 @@
     "start": "node dist/src/server.js",
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "node --import tsx --test test/**/*.test.ts",
+    "test": "vitest run",
     "db:migrate": "tsx src/db/migrate.ts"
   },
   "dependencies": {
@@ -24,6 +24,7 @@
     "@types/node": "^24.5.2",
     "@types/pg": "^8.15.5",
     "tsx": "^4.20.6",
-    "typescript": "^5.9.2"
+    "typescript": "^5.9.2",
+    "vitest": "^3.2.4"
   }
 }

@@ -7,6 +7,9 @@
     "node": ">=22.0.0",
     "pnpm": ">=10.28.0"
   },
+  "devDependencies": {
+    "vitest": "^3.2.4"
+  },
   "scripts": {
     "dev:api": "pnpm --dir apps/api dev",
     "dev:frontend": "pnpm --dir frontend dev",

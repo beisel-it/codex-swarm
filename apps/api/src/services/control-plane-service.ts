@@ -1,9 +1,14 @@
 import { and, asc, eq, inArray } from "drizzle-orm";
 import {
+  type Run,
+  type Agent,
   type AgentCreateInput,
   type RepositoryCreateInput,
   type RunCreateInput,
+  type RunDetail,
   type RunStatusUpdateInput,
+  type Session,
+  type Task,
   type TaskCreateInput,
   type TaskStatusUpdateInput
 } from "@codex-swarm/contracts";
@@ -79,30 +84,36 @@ export class ControlPlaneService {
     return this.db.select().from(runs).orderBy(asc(runs.createdAt));
   }
 
-  async getRun(runId: string) {
+  async getRun(runId: string): Promise<RunDetail> {
     const [run] = await this.db.select().from(runs).where(eq(runs.id, runId));
 
     if (!run) {
       throw new HttpError(404, `run ${runId} not found`);
     }
 
-    const [runTasks, runAgents, runApprovals, runValidations, runArtifacts, runMessages] = await Promise.all([
+    const [runTasks, runAgents, runSessions] = await Promise.all([
       this.db.select().from(tasks).where(eq(tasks.runId, runId)).orderBy(asc(tasks.createdAt)),
       this.db.select().from(agents).where(eq(agents.runId, runId)).orderBy(asc(agents.createdAt)),
-      this.db.select().from(approvals).where(eq(approvals.runId, runId)).orderBy(asc(approvals.createdAt)),
-      this.db.select().from(validations).where(eq(validations.runId, runId)).orderBy(asc(validations.createdAt)),
-      this.db.select().from(artifacts).where(eq(artifacts.runId, runId)).orderBy(asc(artifacts.createdAt)),
-      this.db.select().from(messages).where(eq(messages.runId, runId)).orderBy(asc(messages.createdAt))
+      this.db
+        .select({ session: sessions })
+        .from(sessions)
+        .innerJoin(agents, eq(sessions.agentId, agents.id))
+        .where(eq(agents.runId, runId))
+        .orderBy(asc(sessions.createdAt))
     ]);
 
     return {
       ...run,
-      tasks: runTasks,
-      agents: runAgents,
-      approvals: runApprovals,
-      validations: runValidations,
-      artifacts: runArtifacts,
-      messages: runMessages
+      status: run.status as Run["status"],
+      tasks: runTasks.map((task): Task => ({
+        ...task,
+        status: task.status as Task["status"]
+      })),
+      agents: runAgents.map((agent): Agent => ({
+        ...agent,
+        status: agent.status as Agent["status"]
+      })),
+      sessions: runSessions.map(({ session }): Session => session)
     };
   }
 

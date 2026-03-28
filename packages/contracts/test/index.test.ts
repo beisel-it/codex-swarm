@@ -1,0 +1,67 @@
+import { describe, expect, it } from "vitest";
+
+import {
+  agentCreateSchema,
+  repositoryCreateSchema,
+  runCreateSchema,
+  taskCreateSchema
+} from "../src/index.js";
+
+describe("repositoryCreateSchema", () => {
+  it("defaults the branch name to main", () => {
+    const repository = repositoryCreateSchema.parse({
+      name: "codex-swarm",
+      url: "https://example.com/repo.git"
+    });
+
+    expect(repository.defaultBranch).toBe("main");
+  });
+});
+
+describe("runCreateSchema", () => {
+  it("defaults metadata to an empty object", () => {
+    const run = runCreateSchema.parse({
+      repositoryId: "550e8400-e29b-41d4-a716-446655440000",
+      goal: "Ship alpha"
+    });
+
+    expect(run.metadata).toEqual({});
+  });
+});
+
+describe("taskCreateSchema", () => {
+  it("applies default priority and list fields", () => {
+    const task = taskCreateSchema.parse({
+      runId: "550e8400-e29b-41d4-a716-446655440000",
+      title: "Write tests",
+      description: "Add coverage for core services",
+      role: "qa-engineer"
+    });
+
+    expect(task.priority).toBe(3);
+    expect(task.dependencyIds).toEqual([]);
+    expect(task.acceptanceCriteria).toEqual([]);
+  });
+});
+
+describe("agentCreateSchema", () => {
+  it("defaults agent status and session metadata", () => {
+    const agent = agentCreateSchema.parse({
+      runId: "550e8400-e29b-41d4-a716-446655440000",
+      name: "qa-engineer",
+      role: "qa-engineer",
+      session: {
+        threadId: "thread-1",
+        cwd: "/tmp/codex-swarm",
+        sandbox: "danger-full-access",
+        approvalPolicy: "never"
+      }
+    });
+
+    expect(agent.status).toBe("provisioning");
+    expect(agent.session).toMatchObject({
+      includePlanTool: false,
+      metadata: {}
+    });
+  });
+});
