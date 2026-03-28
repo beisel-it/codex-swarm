@@ -1,8 +1,33 @@
 import fp from "fastify-plugin";
 import type { FastifyInstance, FastifyRequest } from "fastify";
 
-import type { ActorIdentity } from "@codex-swarm/contracts";
+import type { ActorIdentity, GovernanceRole } from "@codex-swarm/contracts";
 import { HttpError } from "../lib/http-error.js";
+
+function parseRoles(
+  explicitRole: string | undefined,
+  headerValue: string | undefined,
+  fallbackRoles: string[],
+  fallbackRole: string
+): { primaryRole: GovernanceRole; roles: GovernanceRole[] } {
+  const headerRoles = (headerValue ?? "")
+    .split(",")
+    .map((value) => value.trim())
+    .filter((value) => value.length > 0);
+  const primaryRole = (explicitRole ?? headerRoles[0] ?? fallbackRole) as GovernanceRole;
+  const seededRoles = explicitRole
+    ? headerRoles.length > 0
+      ? [primaryRole, ...headerRoles]
+      : [primaryRole]
+    : headerRoles.length > 0
+      ? [primaryRole, ...headerRoles]
+      : [primaryRole, ...fallbackRoles];
+
+  return {
+    primaryRole,
+    roles: [...new Set(seededRoles)] as GovernanceRole[]
+  };
+}
 
 declare module "fastify" {
   interface FastifyRequest {
@@ -21,6 +46,7 @@ export const authPlugin = fp(async (app: FastifyInstance) => {
         actorType: "system",
         email: null,
         role: "system",
+        roles: ["system"],
         workspaceId: null,
         workspaceName: null,
         teamId: null,
@@ -39,6 +65,13 @@ export const authPlugin = fp(async (app: FastifyInstance) => {
       throw new HttpError(401, "missing or invalid bearer token");
     }
 
+    const { primaryRole, roles } = parseRoles(
+      request.headers["x-codex-role"]?.toString(),
+      request.headers["x-codex-roles"]?.toString(),
+      app.config.DEV_AUTH_ROLES,
+      app.config.DEV_AUTH_ROLE
+    );
+
     request.authContext = {
       principal: request.headers["x-codex-principal"]?.toString() ?? app.config.DEV_AUTH_PRINCIPAL,
       actorId: request.headers["x-codex-actor-id"]?.toString() ?? app.config.DEV_AUTH_ACTOR_ID,
@@ -48,7 +81,8 @@ export const authPlugin = fp(async (app: FastifyInstance) => {
           ? request.headers["x-codex-actor-type"]?.toString() as "service" | "system"
           : "user",
       email: request.headers["x-codex-email"]?.toString() ?? app.config.DEV_AUTH_EMAIL ?? null,
-      role: request.headers["x-codex-role"]?.toString() ?? app.config.DEV_AUTH_ROLE,
+      role: primaryRole,
+      roles,
       workspaceId: request.headers["x-codex-workspace-id"]?.toString() ?? app.config.DEV_AUTH_WORKSPACE_ID,
       workspaceName: request.headers["x-codex-workspace-name"]?.toString() ?? app.config.DEV_AUTH_WORKSPACE_NAME,
       teamId: request.headers["x-codex-team-id"]?.toString() ?? app.config.DEV_AUTH_TEAM_ID,

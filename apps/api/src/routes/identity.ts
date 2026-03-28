@@ -7,7 +7,7 @@ export const identityRoutes: FastifyPluginAsync = async (app) => {
     principal: request.authContext.principal,
     subject: request.authContext.actorId,
     email: request.authContext.email,
-    roles: [request.authContext.role],
+    roles: request.authContext.roles,
     workspace: {
       id: request.authContext.workspaceId ?? "unknown-workspace",
       name: request.authContext.workspaceName ?? request.authContext.workspaceId ?? "Unknown Workspace"

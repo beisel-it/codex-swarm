@@ -2,7 +2,7 @@ import type { FastifyPluginAsync } from "fastify";
 import { z } from "zod";
 
 import { getRetentionPolicy, getSecretIntegrationBoundary } from "../lib/governance-config.js";
-import { HttpError } from "../lib/http-error.js";
+import { requireAuthorizedAction } from "../lib/authorization.js";
 
 const governanceReportQuerySchema = z.object({
   runId: z.uuid().optional(),
@@ -18,16 +18,10 @@ const repositoryIdParamsSchema = z.object({
   id: z.uuid()
 });
 
-function assertAdminRole(role: string) {
-  if (!role.toLowerCase().includes("admin")) {
-    throw new HttpError(403, "admin role required");
-  }
-}
-
 export const adminRoutes: FastifyPluginAsync = async (app) => {
   app.get("/admin/governance-report", async (request) => {
     return app.observability.withTrace("api.admin.governance-report", async () => {
-      assertAdminRole(request.authContext.role);
+      requireAuthorizedAction(request.authContext, "admin.read");
       const query = governanceReportQuerySchema.parse(request.query);
       const report = await app.controlPlane.getGovernanceAdminReport({
         requestedBy: request.authContext,
@@ -55,14 +49,14 @@ export const adminRoutes: FastifyPluginAsync = async (app) => {
 
   app.get("/admin/secrets/integration-boundary", async (request) => {
     return app.observability.withTrace("api.admin.secrets-boundary", async () => {
-      assertAdminRole(request.authContext.role);
+      requireAuthorizedAction(request.authContext, "admin.read");
       return getSecretIntegrationBoundary(app.config);
     }, { route: "admin.secrets-boundary" });
   });
 
   app.get("/admin/secrets/access-plan/:id", async (request) => {
     return app.observability.withTrace("api.admin.secret-access-plan", async () => {
-      assertAdminRole(request.authContext.role);
+      requireAuthorizedAction(request.authContext, "admin.read");
       const { id } = repositoryIdParamsSchema.parse(request.params);
       return app.controlPlane.getRepositorySecretAccessPlan({
         repositoryId: id,
@@ -74,7 +68,7 @@ export const adminRoutes: FastifyPluginAsync = async (app) => {
 
   app.post("/admin/retention/reconcile", async (request) => {
     return app.observability.withTrace("api.admin.retention-reconcile", async () => {
-      assertAdminRole(request.authContext.role);
+      requireAuthorizedAction(request.authContext, "admin.write");
       const input = retentionReconcileSchema.parse(request.body);
       const report = await app.controlPlane.reconcileGovernanceRetention({
         requestedBy: request.authContext,
