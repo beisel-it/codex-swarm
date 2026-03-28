@@ -509,3 +509,24 @@ Residual risks:
 Backlog follow-up:
 
 - Add executable leader-placement behavior and acceptance coverage for a split leader/worker topology, or intentionally supersede the roadmap wording to the currently implemented multi-node worker-dispatch model.
+
+## Task `37d31b0f`
+
+Roadmap entry:
+
+- Phase 4 deliverable: `Shared board and task state across nodes`
+
+Verdict:
+
+- parity
+
+Evidence:
+
+- The frontend board hydrates centrally from `/api/v1/runs`, `/api/v1/worker-nodes`, and per-run detail reads in `loadSwarmData()` rather than from any node-local cache in `frontend/src/App.tsx`.
+- `ControlPlaneService.getRunDetail` aggregates persisted run, task, agent, session, approval, validation, artifact, event, and worker-node state from the shared control-plane database in `apps/api/src/services/control-plane-service.ts`.
+- The distributed regression `preserves distributed run visibility across two-node retry recovery` proves that shared run detail and worker-node list responses reflect node-a and node-b placement, offline reconciliation, and retry reassignment from the same central API surface in `apps/api/test/app.test.ts`.
+- User-facing docs describe the board and run-detail surfaces as the place to inspect task progression and worker placement across the fleet in `docs/user-guide.md`.
+
+Residual risks:
+
+- The shared-state proof is polling-based and API-centric; it does not separately prove websocket-style fanout, which the roadmap entry does not require.
