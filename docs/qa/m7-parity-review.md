@@ -278,3 +278,25 @@ Evidence:
 Residual risks:
 
 - The verified flow covers the in-repo two-node recovery path; it does not constitute broader chaos testing across larger fleets or external infrastructure failures.
+
+## Task `efe7e323`
+
+Roadmap entry:
+
+- Phase 5 deliverable: `Multi-user governance model`
+
+Verdict:
+
+- parity
+
+Evidence:
+
+- The control plane defines explicit governance roles and governed actions for run, review, approval, and admin behavior in `packages/contracts/src/index.ts` and `apps/api/src/lib/authorization.ts`.
+- Auth context carries actor, workspace, and team identity, and the service layer enforces workspace/team ownership boundaries across repositories, runs, approvals, and admin reporting in `apps/api/src/plugins/auth.ts` and `apps/api/src/services/control-plane-service.ts`.
+- Governance admin routes cover report generation, retention reconciliation, secret-integration boundaries, and repository access plans in `apps/api/src/routes/admin.ts`, with run-level audit export exposed in `apps/api/src/routes/runs.ts`.
+- Integration coverage verifies cross-team denial, role-gated run and approval actions, governance-report access, retention reconciliation, secret access planning, and audit/admin behavior in `apps/api/test/app.test.ts`, `apps/api/test/control-plane-service.governance.test.ts`, and `apps/api/test/admin-authorization.test.ts`.
+- The frontend admin surface renders actor/workspace/team context, governance posture, approval provenance, and audit/secret details in `frontend/src/App.tsx`, and the operator/admin docs describe the same multi-user governance flows in `docs/admin-guide.md` and `docs/user-guide.md`.
+
+Residual risks:
+
+- The repo supports a concrete multi-user governance model at the workspace/team and role boundary level, but it still relies on the current bounded auth implementation rather than production SSO/OIDC federation.
