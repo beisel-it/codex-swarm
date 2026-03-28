@@ -900,8 +900,12 @@ describe("buildApp", () => {
     });
 
     expect(response.statusCode).toBe(200);
-    expect(response.json()).toEqual({
-      status: "ok"
+    expect(response.json()).toMatchObject({
+      status: "ok",
+      versions: {
+        schema: "2026-03-29",
+        config: "1"
+      }
     });
 
     await app.close();

@@ -7,6 +7,7 @@ import pg from "pg";
 const { Pool } = pg;
 
 export const CONTROL_PLANE_TABLES = [
+  "control_plane_metadata",
   "workspaces",
   "teams",
   "repositories",
@@ -24,6 +25,7 @@ export const CONTROL_PLANE_TABLES = [
 ];
 
 const TABLE_ORDER_BY = {
+  control_plane_metadata: "id",
   workspaces: "id",
   teams: "id",
   repositories: "id",
@@ -102,7 +104,7 @@ export async function createControlPlaneSnapshot(connectionString) {
       metadata: {
         capturedAt: capturedAt.toISOString(),
         tableCount: CONTROL_PLANE_TABLES.length,
-        schema: "codex-swarm-control-plane-v1"
+        schema: "codex-swarm-control-plane-v2"
       },
       tables
     };

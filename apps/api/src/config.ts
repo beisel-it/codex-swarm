@@ -1,5 +1,10 @@
 import { z } from "zod";
 
+import {
+  CURRENT_CONTROL_PLANE_CONFIG_VERSION,
+  CURRENT_CONTROL_PLANE_SCHEMA_VERSION
+} from "./db/versioning.js";
+
 function createCsvSchema<T extends z.ZodTypeAny>(itemSchema: T, defaultValues: z.infer<T>[]) {
   return z.preprocess((value) => {
     if (value === undefined || value === null || value === "") {
@@ -44,6 +49,8 @@ const configSchema = z.object({
   PORT: z.coerce.number().int().positive().default(3000),
   HOST: z.string().min(1).default("0.0.0.0"),
   DATABASE_URL: z.string().min(1).default("postgres://postgres:postgres@localhost:5432/codex_swarm"),
+  CONTROL_PLANE_SCHEMA_VERSION: z.string().min(1).default(CURRENT_CONTROL_PLANE_SCHEMA_VERSION),
+  CONTROL_PLANE_CONFIG_VERSION: z.string().min(1).default(CURRENT_CONTROL_PLANE_CONFIG_VERSION),
   DEV_AUTH_TOKEN: z.string().min(1).default("codex-swarm-dev-token"),
   DEV_AUTH_PRINCIPAL: z.string().min(1).default("dev-user"),
   DEV_AUTH_ACTOR_ID: z.string().min(1).default("dev-user"),

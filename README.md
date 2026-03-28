@@ -19,6 +19,7 @@ TypeScript pnpm-workspace scaffold for the M0/M1 slice described in [PRD.md](./P
 1. Install workspace dependencies:
    `corepack pnpm install`
 2. Copy `.env.example` to `.env` and set `DATABASE_URL` and `DEV_AUTH_TOKEN`.
+   The M6 runtime also tracks `CONTROL_PLANE_SCHEMA_VERSION` and `CONTROL_PLANE_CONFIG_VERSION`; leave the shipped defaults unless you are validating an upgrade mismatch path.
 3. For governed-repo testing, optionally switch `SECRET_SOURCE_MODE=external_manager`, set `SECRET_PROVIDER=vault`, and list task-scoped credential names in `REMOTE_SECRET_ENV_NAMES`.
 4. Start the API package:
    `corepack pnpm --dir apps/api dev`
@@ -44,6 +45,8 @@ Admin-oriented governance endpoints:
 Operational tooling:
 
 - `GET /api/v1/metrics` exposes queue, failure, usage, cost, performance, and SLO envelope data.
+- `GET /health` reports the expected schema/config versions for the running build.
+- `corepack pnpm --dir apps/api db:status` verifies the live database metadata matches the running build.
 - `corepack pnpm ops:backup` writes a logical control-plane snapshot to `.ops/backups/`.
 - `corepack pnpm ops:restore` restores a snapshot from `BACKUP_FILE` into `RESTORE_DATABASE_URL` or `DATABASE_URL`.
 - `corepack pnpm ops:drill` creates a scratch Postgres database, restores a snapshot, and records counts/timings.
@@ -54,6 +57,7 @@ Operations docs:
 - [`docs/operations/security.md`](./docs/operations/security.md)
 - [`docs/operations/slo-support.md`](./docs/operations/slo-support.md)
 - [`docs/operations/backup-restore-dr.md`](./docs/operations/backup-restore-dr.md)
+- [`docs/operations/upgrade-path.md`](./docs/operations/upgrade-path.md)
 - [`docs/operations/cost-usage-performance.md`](./docs/operations/cost-usage-performance.md)
 
 ## Productivity Packs

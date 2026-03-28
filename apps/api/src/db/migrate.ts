@@ -1,8 +1,15 @@
 import { sql } from "drizzle-orm";
 
 import { createDb, createPool } from "./client.js";
+import {
+  CONTROL_PLANE_METADATA_ID,
+  CURRENT_CONTROL_PLANE_CONFIG_VERSION,
+  CURRENT_CONTROL_PLANE_SCHEMA_VERSION,
+  controlPlaneMetadataTableSql
+} from "./versioning.js";
 
 const statements = [
+  controlPlaneMetadataTableSql,
   `create table if not exists workspaces (
     id text primary key,
     name text not null,
@@ -271,6 +278,25 @@ async function main() {
   await db.execute(sql.raw("alter table runs add column if not exists handoff_status text not null default 'pending'"));
   await db.execute(sql.raw("alter table runs add column if not exists completed_at timestamptz"));
   await db.execute(sql.raw("alter table control_plane_events add column if not exists actor jsonb default null"));
+  await db.execute(sql.raw(controlPlaneMetadataTableSql));
+  await db.execute(sql.raw("alter table control_plane_metadata add column if not exists config_version text not null default '1'"));
+  await db.execute(sql.raw("alter table control_plane_metadata add column if not exists upgraded_at timestamptz not null default now()"));
+  await db.execute(sql.raw("alter table control_plane_metadata add column if not exists notes text"));
+  await db.execute(sql.raw(`
+    insert into control_plane_metadata (id, schema_version, config_version, upgraded_at, notes)
+    values (
+      '${CONTROL_PLANE_METADATA_ID}',
+      '${CURRENT_CONTROL_PLANE_SCHEMA_VERSION}',
+      '${CURRENT_CONTROL_PLANE_CONFIG_VERSION}',
+      now(),
+      'M6 upgrade-safe schema/config metadata'
+    )
+    on conflict (id) do update
+      set schema_version = excluded.schema_version,
+          config_version = excluded.config_version,
+          upgraded_at = excluded.upgraded_at,
+          notes = excluded.notes
+  `));
 
   await pool.end();
 }

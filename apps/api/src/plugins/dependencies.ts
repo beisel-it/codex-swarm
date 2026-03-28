@@ -2,6 +2,7 @@ import fp from "fastify-plugin";
 import type { FastifyInstance } from "fastify";
 
 import { createDb, createPool } from "../db/client.js";
+import { ensureControlPlaneCompatibility } from "../db/versioning.js";
 import { systemClock } from "../lib/clock.js";
 import { ObservabilityService } from "../lib/observability.js";
 import { ControlPlaneService } from "../services/control-plane-service.js";
@@ -18,6 +19,11 @@ declare module "fastify" {
 
 export const dependenciesPlugin = fp(async (app: FastifyInstance) => {
   const pool = createPool(app.config.DATABASE_URL);
+  await ensureControlPlaneCompatibility(
+    pool,
+    app.config.CONTROL_PLANE_SCHEMA_VERSION,
+    app.config.CONTROL_PLANE_CONFIG_VERSION
+  );
   const db = createDb(pool);
   const observability = new ObservabilityService(db, systemClock, app.config);
 

@@ -4,6 +4,7 @@
 
 The supported backup path is a logical JSON snapshot of the core control-plane tables:
 
+- `control_plane_metadata`
 - `workspaces`
 - `teams`
 - `repositories`
@@ -94,4 +95,4 @@ This is a bounded control-plane drill, not a full regional failover rehearsal.
 
 - if backup succeeds and restore fails, preserve the snapshot and investigate the target database state before rerunning
 - if count validation fails, treat the drill as unsuccessful and compare the mismatched tables before cutting over any restore path
-- after a real restore, rerun migrations and application health checks before reopening traffic
+- after a real restore, rerun migrations, `corepack pnpm --dir apps/api db:status`, and application health checks before reopening traffic
