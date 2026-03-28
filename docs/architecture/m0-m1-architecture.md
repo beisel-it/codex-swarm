@@ -5,6 +5,9 @@
 This document freezes the initial technical direction for Codex Swarm's first executable implementation slice.
 It translates the PRD and roadmap into a TypeScript-first build plan for Milestone 0 and Milestone 1.
 
+For the checked-in system-context and sequence diagrams referenced by the
+roadmap, see [`system-context-and-sequences.md`](./system-context-and-sequences.md).
+
 ## Decision Summary
 
 - Language: TypeScript across backend, frontend, shared contracts, and worker-facing libraries
