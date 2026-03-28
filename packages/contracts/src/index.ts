@@ -375,6 +375,7 @@ export const workerDispatchAssignmentSchema = z.object({
   state: z.enum(workerDispatchStates).default("queued"),
   stickyNodeId: z.string().min(1).nullable().default(null),
   preferredNodeId: z.string().min(1).nullable().default(null),
+  claimedByNodeId: z.string().min(1).nullable().default(null),
   requiredCapabilities: z.array(z.string().min(1)).default([]),
   worktreePath: z.string().min(1),
   branchName: z.string().min(1).nullable().default(null),
@@ -388,6 +389,54 @@ export const workerDispatchAssignmentSchema = z.object({
   maxAttempts: z.number().int().positive().default(3),
   leaseTtlSeconds: z.number().int().positive().default(300),
   createdAt: z.date()
+});
+
+export const workerDispatchCreateSchema = z.object({
+  runId: z.uuid(),
+  taskId: z.uuid(),
+  agentId: z.uuid(),
+  sessionId: z.uuid().optional(),
+  repositoryId: z.uuid(),
+  repositoryName: z.string().min(1),
+  queue: z.string().min(1).default("worker-dispatch"),
+  stickyNodeId: z.string().min(1).nullable().default(null),
+  preferredNodeId: z.string().min(1).nullable().default(null),
+  requiredCapabilities: z.array(z.string().min(1)).default([]),
+  worktreePath: z.string().min(1),
+  branchName: z.string().min(1).nullable().default(null),
+  prompt: z.string().min(1),
+  profile: z.string().min(1),
+  sandbox: z.string().min(1),
+  approvalPolicy: z.string().min(1),
+  includePlanTool: z.boolean().default(false),
+  metadata: z.record(z.string(), z.unknown()).default({}),
+  maxAttempts: z.number().int().positive().default(3),
+  leaseTtlSeconds: z.number().int().positive().default(300)
+});
+
+export const workerDispatchListQuerySchema = z.object({
+  runId: z.uuid().optional(),
+  nodeId: z.uuid().optional(),
+  state: z.enum(workerDispatchStates).optional()
+});
+
+export const workerDispatchCompleteSchema = z.object({
+  nodeId: z.uuid(),
+  status: z.enum(["completed", "failed"]),
+  reason: z.string().min(1).optional()
+});
+
+export const workerNodeReconcileSchema = z.object({
+  reason: z.string().min(1),
+  markOffline: z.boolean().default(true)
+});
+
+export const workerNodeReconcileReportSchema = z.object({
+  nodeId: z.uuid(),
+  retriedAssignments: z.number().int().nonnegative(),
+  failedAssignments: z.number().int().nonnegative(),
+  staleSessions: z.number().int().nonnegative(),
+  completedAt: z.date()
 });
 
 export const workerNodeRuntimeSchema = z.object({
@@ -492,8 +541,13 @@ export type EventsListQuery = z.infer<typeof eventsListQuerySchema>;
 export type ControlPlaneEvent = z.infer<typeof controlPlaneEventSchema>;
 export type ControlPlaneMetrics = z.infer<typeof controlPlaneMetricsSchema>;
 export type WorkerDispatchAssignment = z.infer<typeof workerDispatchAssignmentSchema>;
+export type WorkerDispatchCreateInput = z.infer<typeof workerDispatchCreateSchema>;
+export type WorkerDispatchListQuery = z.infer<typeof workerDispatchListQuerySchema>;
+export type WorkerDispatchCompleteInput = z.infer<typeof workerDispatchCompleteSchema>;
 export type WorkerNodeRuntime = z.infer<typeof workerNodeRuntimeSchema>;
 export type WorkerRuntimeDependencyCheck = z.infer<typeof workerRuntimeDependencyCheckSchema>;
 export type RemoteWorkerBootstrap = z.infer<typeof remoteWorkerBootstrapSchema>;
 export type WorkerDrainCommand = z.infer<typeof workerDrainCommandSchema>;
 export type WorkerDrainStatus = z.infer<typeof workerDrainStatusSchema>;
+export type WorkerNodeReconcileInput = z.infer<typeof workerNodeReconcileSchema>;
+export type WorkerNodeReconcileReport = z.infer<typeof workerNodeReconcileReportSchema>;

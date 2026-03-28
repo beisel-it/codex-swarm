@@ -97,6 +97,7 @@ function createAssignment(overrides: Partial<WorkerDispatchAssignment> = {}): Wo
     state: "queued",
     stickyNodeId: null,
     preferredNodeId: null,
+    claimedByNodeId: null,
     requiredCapabilities: [],
     worktreePath: "/tmp/codex-swarm/run-001/agent-001",
     branchName: null,

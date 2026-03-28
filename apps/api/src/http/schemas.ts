@@ -17,8 +17,12 @@ import {
   taskStatusUpdateSchema,
   validationCreateSchema as contractValidationCreateSchema,
   validationsListQuerySchema,
+  workerDispatchCompleteSchema,
+  workerDispatchCreateSchema,
+  workerDispatchListQuerySchema,
   workerNodeDrainUpdateSchema,
   workerNodeHeartbeatSchema,
+  workerNodeReconcileSchema,
   workerNodeRegisterSchema
 } from "@codex-swarm/contracts";
 
@@ -60,7 +64,11 @@ export {
   taskCreateSchema,
   taskStatusUpdateSchema,
   validationsListQuerySchema,
+  workerDispatchCompleteSchema,
+  workerDispatchCreateSchema,
+  workerDispatchListQuerySchema,
   workerNodeDrainUpdateSchema,
   workerNodeHeartbeatSchema,
+  workerNodeReconcileSchema,
   workerNodeRegisterSchema
 };

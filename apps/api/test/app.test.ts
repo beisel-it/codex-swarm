@@ -10,7 +10,9 @@ const ids = {
   taskB: "44444444-4444-4444-8444-444444444444",
   agent: "55555555-5555-4555-8555-555555555555",
   session: "66666666-6666-4666-8666-666666666666",
-  workerNode: "77777777-7777-4777-8777-777777777777"
+  workerNode: "77777777-7777-4777-8777-777777777777",
+  workerNodeB: "88888888-8888-4888-8888-888888888888",
+  dispatch: "99999999-9999-4999-8999-999999999999"
 } as const;
 
 const controlPlane = {
@@ -32,6 +34,11 @@ const controlPlane = {
   registerWorkerNode: vi.fn(),
   recordWorkerNodeHeartbeat: vi.fn(),
   updateWorkerNodeDrainState: vi.fn(),
+  listWorkerDispatchAssignments: vi.fn(),
+  createWorkerDispatchAssignment: vi.fn(),
+  claimNextWorkerDispatch: vi.fn(),
+  completeWorkerDispatch: vi.fn(),
+  reconcileWorkerNode: vi.fn(),
   listMessages: vi.fn(),
   createMessage: vi.fn(),
   listApprovals: vi.fn(),
@@ -85,8 +92,22 @@ class FakeVerticalSliceControlPlane {
       eligibleForScheduling: true,
       createdAt: new Date("2026-03-28T00:00:00.000Z"),
       updatedAt: new Date("2026-03-28T11:50:00.000Z")
+    },
+    {
+      id: ids.workerNodeB,
+      name: "node-b",
+      endpoint: "tcp://node-b.internal:7777",
+      capabilityLabels: ["linux", "node", "remote"],
+      status: "online",
+      drainState: "active",
+      lastHeartbeatAt: new Date("2026-03-28T11:51:00.000Z"),
+      metadata: {},
+      eligibleForScheduling: true,
+      createdAt: new Date("2026-03-28T00:00:00.000Z"),
+      updatedAt: new Date("2026-03-28T11:51:00.000Z")
     }
   ];
+  private readonly workerDispatchAssignments: any[] = [];
 
   async listRepositories() {
     return this.repositories;
@@ -365,6 +386,178 @@ class FakeVerticalSliceControlPlane {
     }
 
     return agent;
+  }
+
+  async listWorkerDispatchAssignments(query: any = {}) {
+    return this.workerDispatchAssignments
+      .filter((assignment) => query.runId ? assignment.runId === query.runId : true)
+      .filter((assignment) => query.nodeId ? assignment.claimedByNodeId === query.nodeId : true)
+      .filter((assignment) => query.state ? assignment.state === query.state : true);
+  }
+
+  async createWorkerDispatchAssignment(input: any) {
+    const assignment = {
+      id: ids.dispatch,
+      runId: input.runId,
+      taskId: input.taskId,
+      agentId: input.agentId,
+      sessionId: input.sessionId,
+      repositoryId: input.repositoryId,
+      repositoryName: input.repositoryName,
+      queue: input.queue ?? "worker-dispatch",
+      state: "queued",
+      stickyNodeId: input.stickyNodeId ?? null,
+      preferredNodeId: input.preferredNodeId ?? null,
+      claimedByNodeId: null,
+      requiredCapabilities: input.requiredCapabilities ?? [],
+      worktreePath: input.worktreePath,
+      branchName: input.branchName ?? null,
+      prompt: input.prompt,
+      profile: input.profile,
+      sandbox: input.sandbox,
+      approvalPolicy: input.approvalPolicy,
+      includePlanTool: input.includePlanTool ?? false,
+      metadata: input.metadata ?? {},
+      attempt: 0,
+      maxAttempts: input.maxAttempts ?? 3,
+      leaseTtlSeconds: input.leaseTtlSeconds ?? 300,
+      claimedAt: null,
+      completedAt: null,
+      lastFailureReason: null,
+      createdAt: new Date("2026-03-28T12:00:00.000Z"),
+      updatedAt: new Date("2026-03-28T12:00:00.000Z")
+    };
+
+    this.workerDispatchAssignments.push(assignment);
+    return assignment;
+  }
+
+  async claimNextWorkerDispatch(nodeId: string) {
+    const workerNode = this.workerNodes.find((candidate) => candidate.id === nodeId);
+
+    if (!workerNode) {
+      throw new HttpError(404, `worker node ${nodeId} not found`);
+    }
+
+    if (!workerNode.eligibleForScheduling) {
+      throw new HttpError(409, `worker node ${nodeId} is not eligible for scheduling`);
+    }
+
+    const candidate = this.workerDispatchAssignments.find((assignment) =>
+      (assignment.state === "queued" || assignment.state === "retrying")
+      && (!assignment.stickyNodeId || assignment.stickyNodeId === nodeId)
+      && assignment.requiredCapabilities.every((capability: string) => workerNode.capabilityLabels.includes(capability)));
+
+    if (!candidate) {
+      return null;
+    }
+
+    candidate.state = "claimed";
+    candidate.stickyNodeId = candidate.stickyNodeId ?? nodeId;
+    candidate.preferredNodeId = nodeId;
+    candidate.claimedByNodeId = nodeId;
+    candidate.claimedAt = new Date("2026-03-28T12:05:00.000Z");
+    candidate.updatedAt = new Date("2026-03-28T12:05:00.000Z");
+
+    if (candidate.sessionId) {
+      const run = await this.getRun(candidate.runId);
+      const session = run.sessions.find((item: any) => item.id === candidate.sessionId);
+
+      if (session) {
+        session.workerNodeId = nodeId;
+        session.stickyNodeId = candidate.stickyNodeId;
+        session.state = "active";
+        session.staleReason = null;
+      }
+    }
+
+    return candidate;
+  }
+
+  async completeWorkerDispatch(assignmentId: string, input: any) {
+    const assignment = this.workerDispatchAssignments.find((candidate) => candidate.id === assignmentId);
+
+    if (!assignment) {
+      throw new HttpError(404, `worker dispatch assignment ${assignmentId} not found`);
+    }
+
+    const run = await this.getRun(assignment.runId);
+    const session = run.sessions.find((item: any) => item.id === assignment.sessionId);
+
+    if (input.status === "completed") {
+      assignment.state = "completed";
+      assignment.completedAt = new Date("2026-03-28T12:10:00.000Z");
+      assignment.updatedAt = new Date("2026-03-28T12:10:00.000Z");
+      return assignment;
+    }
+
+    assignment.attempt += 1;
+    assignment.lastFailureReason = input.reason ?? null;
+    assignment.claimedByNodeId = null;
+    assignment.claimedAt = null;
+    assignment.updatedAt = new Date("2026-03-28T12:10:00.000Z");
+
+    if (assignment.attempt < assignment.maxAttempts) {
+      assignment.state = "retrying";
+      assignment.stickyNodeId = null;
+      assignment.preferredNodeId = null;
+
+      if (session) {
+        session.workerNodeId = null;
+        session.stickyNodeId = null;
+        session.state = "pending";
+        session.staleReason = input.reason ?? null;
+      }
+    } else {
+      assignment.state = "failed";
+      assignment.completedAt = new Date("2026-03-28T12:10:00.000Z");
+
+      if (session) {
+        session.workerNodeId = null;
+        session.state = "stale";
+        session.staleReason = input.reason ?? null;
+      }
+    }
+
+    return assignment;
+  }
+
+  async reconcileWorkerNode(nodeId: string, input: any) {
+    const workerNode = this.workerNodes.find((candidate) => candidate.id === nodeId);
+
+    if (!workerNode) {
+      throw new HttpError(404, `worker node ${nodeId} not found`);
+    }
+
+    workerNode.status = input.markOffline ? "offline" : workerNode.status;
+    workerNode.drainState = input.markOffline ? "drained" : workerNode.drainState;
+    workerNode.eligibleForScheduling = false;
+
+    let retriedAssignments = 0;
+    let failedAssignments = 0;
+
+    for (const assignment of this.workerDispatchAssignments.filter((candidate) =>
+      candidate.claimedByNodeId === nodeId && candidate.state === "claimed")) {
+      const updated = await this.completeWorkerDispatch(assignment.id, {
+        nodeId,
+        status: "failed",
+        reason: `node_lost:${input.reason}`
+      });
+
+      if (updated.state === "retrying") {
+        retriedAssignments += 1;
+      } else if (updated.state === "failed") {
+        failedAssignments += 1;
+      }
+    }
+
+    return {
+      nodeId,
+      retriedAssignments,
+      failedAssignments,
+      staleSessions: retriedAssignments + failedAssignments,
+      completedAt: new Date("2026-03-28T12:15:00.000Z")
+    };
   }
 
   async listMessages() {
@@ -1061,6 +1254,191 @@ describe("buildApp", () => {
     expect(controlPlane.updateWorkerNodeDrainState).toHaveBeenCalledWith(ids.workerNode, {
       drainState: "draining",
       reason: "maintenance"
+    });
+
+    await app.close();
+  });
+
+  it("creates and lists worker dispatch assignments", async () => {
+    controlPlane.createWorkerDispatchAssignment.mockResolvedValueOnce({
+      id: ids.dispatch,
+      runId: ids.run,
+      taskId: ids.taskA,
+      agentId: ids.agent,
+      sessionId: ids.session,
+      repositoryId: ids.repository,
+      repositoryName: "codex-swarm",
+      queue: "worker-dispatch",
+      state: "queued",
+      stickyNodeId: null,
+      preferredNodeId: null,
+      claimedByNodeId: null,
+      requiredCapabilities: ["remote"],
+      worktreePath: "/tmp/codex-swarm/run-1/worker-1",
+      branchName: null,
+      prompt: "Run the task",
+      profile: "default",
+      sandbox: "workspace-write",
+      approvalPolicy: "on-request",
+      includePlanTool: false,
+      metadata: {},
+      attempt: 0,
+      maxAttempts: 3,
+      leaseTtlSeconds: 300,
+      claimedAt: null,
+      completedAt: null,
+      lastFailureReason: null,
+      createdAt: "2026-03-28T12:00:00.000Z",
+      updatedAt: "2026-03-28T12:00:00.000Z"
+    });
+    controlPlane.listWorkerDispatchAssignments.mockResolvedValueOnce([
+      {
+        id: ids.dispatch,
+        runId: ids.run,
+        state: "queued"
+      }
+    ]);
+
+    const app = await buildApp({
+      controlPlane: controlPlane as unknown as ControlPlaneService
+    });
+
+    const createResponse = await app.inject({
+      method: "POST",
+      url: "/api/v1/worker-dispatch-assignments",
+      headers: {
+        authorization: "Bearer codex-swarm-dev-token"
+      },
+      payload: {
+        runId: ids.run,
+        taskId: ids.taskA,
+        agentId: ids.agent,
+        sessionId: ids.session,
+        repositoryId: ids.repository,
+        repositoryName: "codex-swarm",
+        requiredCapabilities: ["remote"],
+        worktreePath: "/tmp/codex-swarm/run-1/worker-1",
+        prompt: "Run the task",
+        profile: "default",
+        sandbox: "workspace-write",
+        approvalPolicy: "on-request"
+      }
+    });
+
+    expect(createResponse.statusCode).toBe(201);
+    expect(controlPlane.createWorkerDispatchAssignment).toHaveBeenCalledWith({
+      runId: ids.run,
+      taskId: ids.taskA,
+      agentId: ids.agent,
+      sessionId: ids.session,
+      repositoryId: ids.repository,
+      repositoryName: "codex-swarm",
+      queue: "worker-dispatch",
+      stickyNodeId: null,
+      preferredNodeId: null,
+      requiredCapabilities: ["remote"],
+      worktreePath: "/tmp/codex-swarm/run-1/worker-1",
+      branchName: null,
+      prompt: "Run the task",
+      profile: "default",
+      sandbox: "workspace-write",
+      approvalPolicy: "on-request",
+      includePlanTool: false,
+      metadata: {},
+      maxAttempts: 3,
+      leaseTtlSeconds: 300
+    });
+
+    const listResponse = await app.inject({
+      method: "GET",
+      url: `/api/v1/worker-dispatch-assignments?runId=${ids.run}&state=queued`,
+      headers: {
+        authorization: "Bearer codex-swarm-dev-token"
+      }
+    });
+
+    expect(listResponse.statusCode).toBe(200);
+    expect(controlPlane.listWorkerDispatchAssignments).toHaveBeenCalledWith({
+      runId: ids.run,
+      state: "queued"
+    });
+
+    await app.close();
+  });
+
+  it("claims dispatch work and reconciles node loss", async () => {
+    controlPlane.claimNextWorkerDispatch.mockResolvedValueOnce({
+      id: ids.dispatch,
+      runId: ids.run,
+      taskId: ids.taskA,
+      agentId: ids.agent,
+      sessionId: ids.session,
+      repositoryId: ids.repository,
+      repositoryName: "codex-swarm",
+      queue: "worker-dispatch",
+      state: "claimed",
+      stickyNodeId: ids.workerNode,
+      preferredNodeId: ids.workerNode,
+      claimedByNodeId: ids.workerNode,
+      requiredCapabilities: ["remote"],
+      worktreePath: "/tmp/codex-swarm/run-1/worker-1",
+      branchName: null,
+      prompt: "Run the task",
+      profile: "default",
+      sandbox: "workspace-write",
+      approvalPolicy: "on-request",
+      includePlanTool: false,
+      metadata: {},
+      attempt: 0,
+      maxAttempts: 3,
+      leaseTtlSeconds: 300,
+      claimedAt: "2026-03-28T12:05:00.000Z",
+      completedAt: null,
+      lastFailureReason: null,
+      createdAt: "2026-03-28T12:00:00.000Z",
+      updatedAt: "2026-03-28T12:05:00.000Z"
+    });
+    controlPlane.reconcileWorkerNode.mockResolvedValueOnce({
+      nodeId: ids.workerNode,
+      retriedAssignments: 1,
+      failedAssignments: 0,
+      staleSessions: 1,
+      completedAt: "2026-03-28T12:15:00.000Z"
+    });
+
+    const app = await buildApp({
+      controlPlane: controlPlane as unknown as ControlPlaneService
+    });
+
+    const claimResponse = await app.inject({
+      method: "POST",
+      url: `/api/v1/worker-nodes/${ids.workerNode}/claim-dispatch`,
+      headers: {
+        authorization: "Bearer codex-swarm-dev-token"
+      }
+    });
+
+    expect(claimResponse.statusCode).toBe(200);
+    expect(controlPlane.claimNextWorkerDispatch).toHaveBeenCalledWith(ids.workerNode);
+
+    const reconcileResponse = await app.inject({
+      method: "POST",
+      url: `/api/v1/worker-nodes/${ids.workerNode}/reconcile`,
+      headers: {
+        authorization: "Bearer codex-swarm-dev-token"
+      },
+      payload: {
+        reason: "heartbeat expired"
+      }
+    });
+
+    expect(reconcileResponse.statusCode).toBe(200);
+    expect(reconcileResponse.json()).toMatchObject({
+      retriedAssignments: 1
+    });
+    expect(controlPlane.reconcileWorkerNode).toHaveBeenCalledWith(ids.workerNode, {
+      reason: "heartbeat expired",
+      markOffline: true
     });
 
     await app.close();

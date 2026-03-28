@@ -11,7 +11,11 @@ import {
   runCreateSchema,
   runPullRequestHandoffSchema,
   workerDispatchAssignmentSchema,
+  workerDispatchCompleteSchema,
+  workerDispatchCreateSchema,
+  workerDispatchListQuerySchema,
   workerDrainCommandSchema,
+  workerNodeReconcileSchema,
   workerNodeDrainUpdateSchema,
   workerNodeHeartbeatSchema,
   workerNodeRuntimeSchema,
@@ -224,6 +228,7 @@ describe("workerDispatchAssignmentSchema", () => {
       state: "queued",
       stickyNodeId: null,
       preferredNodeId: null,
+      claimedByNodeId: null,
       requiredCapabilities: [],
       branchName: null,
       includePlanTool: false,
@@ -232,6 +237,60 @@ describe("workerDispatchAssignmentSchema", () => {
       maxAttempts: 3,
       leaseTtlSeconds: 300
     });
+  });
+});
+
+describe("workerDispatchCreateSchema", () => {
+  it("defaults dispatch creation controls", () => {
+    const assignment = workerDispatchCreateSchema.parse({
+      runId: "550e8400-e29b-41d4-a716-446655440001",
+      taskId: "550e8400-e29b-41d4-a716-446655440002",
+      agentId: "550e8400-e29b-41d4-a716-446655440003",
+      repositoryId: "550e8400-e29b-41d4-a716-446655440004",
+      repositoryName: "codex-swarm",
+      worktreePath: "/tmp/codex-swarm/run-001/agent-001",
+      prompt: "Run the task",
+      profile: "default",
+      sandbox: "danger-full-access",
+      approvalPolicy: "never"
+    });
+
+    expect(assignment.queue).toBe("worker-dispatch");
+    expect(assignment.stickyNodeId).toBeNull();
+    expect(assignment.requiredCapabilities).toEqual([]);
+    expect(assignment.maxAttempts).toBe(3);
+  });
+});
+
+describe("workerDispatchListQuerySchema", () => {
+  it("accepts optional dispatch filters", () => {
+    const query = workerDispatchListQuerySchema.parse({
+      state: "claimed"
+    });
+
+    expect(query.state).toBe("claimed");
+  });
+});
+
+describe("workerDispatchCompleteSchema", () => {
+  it("accepts completion and failure transitions", () => {
+    const completion = workerDispatchCompleteSchema.parse({
+      nodeId: "550e8400-e29b-41d4-a716-446655440011",
+      status: "failed",
+      reason: "node lost"
+    });
+
+    expect(completion.status).toBe("failed");
+  });
+});
+
+describe("workerNodeReconcileSchema", () => {
+  it("defaults reconciliation to marking nodes offline", () => {
+    const reconciliation = workerNodeReconcileSchema.parse({
+      reason: "node heartbeat expired"
+    });
+
+    expect(reconciliation.markOffline).toBe(true);
   });
 });
 

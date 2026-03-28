@@ -4,6 +4,7 @@ import {
   idParamSchema,
   workerNodeDrainUpdateSchema,
   workerNodeHeartbeatSchema,
+  workerNodeReconcileSchema,
   workerNodeRegisterSchema
 } from "../http/schemas.js";
 import { requireValue } from "../lib/require-value.js";
@@ -74,5 +75,55 @@ export const workerNodeRoutes: FastifyPluginAsync = async (app) => {
 
       return workerNode;
     }, { route: "worker-nodes.drain" });
+  });
+
+  app.post("/worker-nodes/:id/claim-dispatch", async (request) => {
+    return app.observability.withTrace("api.worker-nodes.claim-dispatch", async () => {
+      const { id } = idParamSchema.parse(request.params);
+      const assignment = await app.controlPlane.claimNextWorkerDispatch(id);
+
+      if (!assignment) {
+        return null;
+      }
+
+      await app.observability.recordTimelineEvent({
+        runId: assignment.runId,
+        taskId: assignment.taskId,
+        agentId: assignment.agentId,
+        eventType: "worker_dispatch_assignment.claimed",
+        entityType: "worker_dispatch_assignment",
+        entityId: assignment.id,
+        status: assignment.state,
+        summary: `Worker node ${id} claimed dispatch assignment ${assignment.id}`
+      });
+
+      return assignment;
+    }, { route: "worker-nodes.claim-dispatch" });
+  });
+
+  app.post("/worker-nodes/:id/reconcile", async (request) => {
+    return app.observability.withTrace("api.worker-nodes.reconcile", async () => {
+      const { id } = idParamSchema.parse(request.params);
+      const input = workerNodeReconcileSchema.parse(request.body);
+      const report = requireValue(
+        await app.controlPlane.reconcileWorkerNode(id, input),
+        "control plane returned no worker node reconciliation report"
+      );
+
+      await app.observability.recordTimelineEvent({
+        eventType: "worker_node.reconciled",
+        entityType: "worker_node",
+        entityId: id,
+        status: "completed",
+        summary: `Worker node ${id} reconciled after ${input.reason}`,
+        metadata: {
+          retriedAssignments: report.retriedAssignments,
+          failedAssignments: report.failedAssignments,
+          staleSessions: report.staleSessions
+        }
+      });
+
+      return report;
+    }, { route: "worker-nodes.reconcile" });
   });
 };

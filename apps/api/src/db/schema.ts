@@ -105,6 +105,38 @@ export const sessions = pgTable("sessions", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
 });
 
+export const workerDispatchAssignments = pgTable("worker_dispatch_assignments", {
+  id: text("id").primaryKey(),
+  runId: text("run_id").notNull().references(() => runs.id),
+  taskId: text("task_id").notNull().references(() => tasks.id),
+  agentId: text("agent_id").notNull().references(() => agents.id),
+  sessionId: text("session_id").references(() => sessions.id),
+  repositoryId: text("repository_id").notNull().references(() => repositories.id),
+  repositoryName: text("repository_name").notNull(),
+  queue: text("queue").notNull().default("worker-dispatch"),
+  state: text("state").notNull().default("queued"),
+  stickyNodeId: text("sticky_node_id").references(() => workerNodes.id),
+  preferredNodeId: text("preferred_node_id").references(() => workerNodes.id),
+  claimedByNodeId: text("claimed_by_node_id").references(() => workerNodes.id),
+  requiredCapabilities: jsonb("required_capabilities").$type<string[]>().notNull().default([]),
+  worktreePath: text("worktree_path").notNull(),
+  branchName: text("branch_name"),
+  prompt: text("prompt").notNull(),
+  profile: text("profile").notNull(),
+  sandbox: text("sandbox").notNull(),
+  approvalPolicy: text("approval_policy").notNull(),
+  includePlanTool: boolean("include_plan_tool").notNull().default(false),
+  metadata: jsonb("metadata").$type<Record<string, unknown>>().notNull().default({}),
+  attempt: integer("attempt").notNull().default(0),
+  maxAttempts: integer("max_attempts").notNull().default(3),
+  leaseTtlSeconds: integer("lease_ttl_seconds").notNull().default(300),
+  claimedAt: timestamp("claimed_at", { withTimezone: true }),
+  completedAt: timestamp("completed_at", { withTimezone: true }),
+  lastFailureReason: text("last_failure_reason"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
+});
+
 export const messages = pgTable("messages", {
   id: text("id").primaryKey(),
   runId: text("run_id").notNull().references(() => runs.id),

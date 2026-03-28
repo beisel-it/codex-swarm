@@ -15,6 +15,12 @@ import {
   type Repository,
   type RepositoryCreateInput,
   type RunCreateInput,
+  type WorkerDispatchAssignment,
+  type WorkerDispatchCompleteInput,
+  type WorkerDispatchCreateInput,
+  type WorkerDispatchListQuery,
+  type WorkerNodeReconcileInput,
+  type WorkerNodeReconcileReport,
   type RunDetail,
   type RunStatusUpdateInput,
   type Session,
@@ -43,6 +49,7 @@ import {
   sessions,
   tasks,
   validations,
+  workerDispatchAssignments,
   workerNodes
 } from "../db/schema.js";
 import type { Clock } from "../lib/clock.js";
@@ -73,6 +80,40 @@ type RunPullRequestHandoff = z.infer<typeof runPullRequestHandoffSchema>;
 type WorkerNodeRegister = WorkerNodeRegisterInput;
 type WorkerNodeHeartbeat = WorkerNodeHeartbeatInput;
 type WorkerNodeDrainUpdate = WorkerNodeDrainUpdateInput;
+type WorkerDispatchCreate = WorkerDispatchCreateInput;
+type WorkerDispatchComplete = WorkerDispatchCompleteInput;
+type WorkerNodeReconcile = WorkerNodeReconcileInput;
+
+function workerNodeSupportsAssignment(
+  workerNode: Pick<WorkerNode, "capabilityLabels" | "status" | "drainState" | "id">,
+  assignment: Pick<WorkerDispatchAssignment, "stickyNodeId" | "requiredCapabilities">
+) {
+  if (!isWorkerNodeEligible(workerNode)) {
+    return false;
+  }
+
+  if (assignment.stickyNodeId && assignment.stickyNodeId !== workerNode.id) {
+    return false;
+  }
+
+  return assignment.requiredCapabilities.every((capability) => workerNode.capabilityLabels.includes(capability));
+}
+
+function workerDispatchRank(nodeId: string, assignment: Pick<WorkerDispatchAssignment, "stickyNodeId" | "preferredNodeId" | "createdAt">) {
+  if (assignment.stickyNodeId === nodeId) {
+    return 0;
+  }
+
+  if (assignment.preferredNodeId === nodeId) {
+    return 1;
+  }
+
+  if (assignment.preferredNodeId === null) {
+    return 2;
+  }
+
+  return 3;
+}
 
 function isWorkerNodeEligible(workerNode: Pick<WorkerNode, "status" | "drainState">) {
   return workerNode.status === "online" && workerNode.drainState === "active";
@@ -695,6 +736,205 @@ export class ControlPlaneService {
     return expectPersistedRecord(artifact, "artifact");
   }
 
+  async listWorkerDispatchAssignments(query: WorkerDispatchListQuery = {}) {
+    const rows = await this.db.select().from(workerDispatchAssignments).orderBy(asc(workerDispatchAssignments.createdAt));
+
+    return rows
+      .filter((assignment) => query.runId ? assignment.runId === query.runId : true)
+      .filter((assignment) => query.nodeId ? assignment.claimedByNodeId === query.nodeId : true)
+      .filter((assignment) => query.state ? assignment.state === query.state : true)
+      .map((assignment) => this.mapWorkerDispatchAssignment(assignment));
+  }
+
+  async createWorkerDispatchAssignment(input: WorkerDispatchCreate) {
+    await this.assertRunExists(input.runId);
+    await this.assertTaskExists(input.taskId);
+    await this.assertAgentExists(input.agentId);
+    await this.assertRepositoryExists(input.repositoryId);
+
+    if (input.sessionId) {
+      await this.assertSessionExists(input.sessionId);
+    }
+
+    if (input.stickyNodeId) {
+      await this.assertWorkerNodeExists(input.stickyNodeId);
+    }
+
+    if (input.preferredNodeId) {
+      await this.assertWorkerNodeExists(input.preferredNodeId);
+    }
+
+    const now = this.clock.now();
+    const [assignment] = await this.db.insert(workerDispatchAssignments).values({
+      id: crypto.randomUUID(),
+      runId: input.runId,
+      taskId: input.taskId,
+      agentId: input.agentId,
+      sessionId: input.sessionId ?? null,
+      repositoryId: input.repositoryId,
+      repositoryName: input.repositoryName,
+      queue: input.queue,
+      state: "queued",
+      stickyNodeId: input.stickyNodeId,
+      preferredNodeId: input.preferredNodeId,
+      claimedByNodeId: null,
+      requiredCapabilities: input.requiredCapabilities,
+      worktreePath: input.worktreePath,
+      branchName: input.branchName,
+      prompt: input.prompt,
+      profile: input.profile,
+      sandbox: input.sandbox,
+      approvalPolicy: input.approvalPolicy,
+      includePlanTool: input.includePlanTool,
+      metadata: input.metadata,
+      attempt: 0,
+      maxAttempts: input.maxAttempts,
+      leaseTtlSeconds: input.leaseTtlSeconds,
+      claimedAt: null,
+      completedAt: null,
+      lastFailureReason: null,
+      createdAt: now,
+      updatedAt: now
+    }).returning();
+
+    return this.mapWorkerDispatchAssignment(expectPersistedRecord(assignment, "worker dispatch assignment"));
+  }
+
+  async claimNextWorkerDispatch(nodeId: string) {
+    const workerNode = this.mapWorkerNode(await this.assertWorkerNodeExists(nodeId));
+
+    if (!isWorkerNodeEligible(workerNode)) {
+      throw new HttpError(409, `worker node ${workerNode.id} is not eligible for scheduling`);
+    }
+
+    const rows = await this.db
+      .select()
+      .from(workerDispatchAssignments)
+      .where(inArray(workerDispatchAssignments.state, ["queued", "retrying"]))
+      .orderBy(asc(workerDispatchAssignments.createdAt));
+
+    const candidates = rows
+      .map((assignment) => this.mapWorkerDispatchAssignment(assignment))
+      .filter((assignment) => workerNodeSupportsAssignment(workerNode, assignment))
+      .sort((left, right) => {
+        const leftRank = workerDispatchRank(nodeId, left);
+        const rightRank = workerDispatchRank(nodeId, right);
+
+        if (leftRank !== rightRank) {
+          return leftRank - rightRank;
+        }
+
+        return left.createdAt.getTime() - right.createdAt.getTime();
+      });
+
+    const nextAssignment = candidates[0];
+
+    if (!nextAssignment) {
+      return null;
+    }
+
+    const now = this.clock.now();
+    const [updatedAssignment] = await this.db.update(workerDispatchAssignments).set({
+      state: "claimed",
+      stickyNodeId: nextAssignment.stickyNodeId ?? nodeId,
+      preferredNodeId: nodeId,
+      claimedByNodeId: nodeId,
+      claimedAt: now,
+      updatedAt: now
+    }).where(eq(workerDispatchAssignments.id, nextAssignment.id)).returning();
+
+    if (nextAssignment.sessionId) {
+      await this.db.update(sessions).set({
+        workerNodeId: nodeId,
+        stickyNodeId: nextAssignment.stickyNodeId ?? nodeId,
+        state: "active",
+        staleReason: null,
+        updatedAt: now
+      }).where(eq(sessions.id, nextAssignment.sessionId));
+    }
+
+    await this.db.update(agents).set({
+      status: "busy",
+      lastHeartbeatAt: now,
+      updatedAt: now
+    }).where(eq(agents.id, nextAssignment.agentId));
+
+    return this.mapWorkerDispatchAssignment(expectPersistedRecord(updatedAssignment, "worker dispatch assignment"));
+  }
+
+  async completeWorkerDispatch(assignmentId: string, input: WorkerDispatchComplete) {
+    const assignment = this.mapWorkerDispatchAssignment(await this.assertWorkerDispatchAssignmentExists(assignmentId));
+
+    if (assignment.claimedByNodeId && assignment.claimedByNodeId !== input.nodeId) {
+      throw new HttpError(409, `worker dispatch assignment ${assignmentId} is claimed by a different node`);
+    }
+
+    return this.transitionWorkerDispatchFailureOrCompletion(assignment, input.status, input.reason ?? null, input.nodeId);
+  }
+
+  async reconcileWorkerNode(nodeId: string, input: WorkerNodeReconcile): Promise<WorkerNodeReconcileReport> {
+    await this.assertWorkerNodeExists(nodeId);
+    const now = this.clock.now();
+
+    if (input.markOffline) {
+      await this.db.update(workerNodes).set({
+        status: "offline",
+        drainState: "drained",
+        updatedAt: now
+      }).where(eq(workerNodes.id, nodeId));
+    }
+
+    const claimedAssignments = await this.db.select().from(workerDispatchAssignments)
+      .where(and(
+        eq(workerDispatchAssignments.claimedByNodeId, nodeId),
+        eq(workerDispatchAssignments.state, "claimed")
+      ))
+      .orderBy(asc(workerDispatchAssignments.createdAt));
+    const nodeAssignments = claimedAssignments.map((assignment) => this.mapWorkerDispatchAssignment(assignment));
+
+    let retriedAssignments = 0;
+    let failedAssignments = 0;
+
+    for (const assignment of nodeAssignments) {
+      const updated = await this.transitionWorkerDispatchFailureOrCompletion(
+        assignment,
+        "failed",
+        `node_lost:${input.reason}`,
+        nodeId
+      );
+
+      if (updated.state === "retrying") {
+        retriedAssignments += 1;
+      } else if (updated.state === "failed") {
+        failedAssignments += 1;
+      }
+    }
+
+    const strandedSessions = await this.db.select().from(sessions)
+      .where(eq(sessions.workerNodeId, nodeId))
+      .orderBy(asc(sessions.createdAt));
+    const trackedSessionIds = new Set(nodeAssignments.map((assignment) => assignment.sessionId).filter((sessionId): sessionId is string => sessionId !== undefined));
+    const orphanSessions = strandedSessions.filter((session) => !trackedSessionIds.has(session.id));
+
+    for (const session of orphanSessions) {
+      await this.db.update(sessions).set({
+        workerNodeId: null,
+        stickyNodeId: null,
+        state: "stale",
+        staleReason: `node_lost:${input.reason}`,
+        updatedAt: now
+      }).where(eq(sessions.id, session.id));
+    }
+
+    return {
+      nodeId,
+      retriedAssignments,
+      failedAssignments,
+      staleSessions: nodeAssignments.length + orphanSessions.length,
+      completedAt: now
+    };
+  }
+
   async listArtifacts(runId: string) {
     await this.assertRunExists(runId);
     const rows = await this.db.select().from(artifacts).where(eq(artifacts.runId, runId)).orderBy(asc(artifacts.createdAt));
@@ -895,6 +1135,26 @@ export class ControlPlaneService {
     return workerNode;
   }
 
+  private async assertSessionExists(sessionId: string) {
+    const [session] = await this.db.select().from(sessions).where(eq(sessions.id, sessionId));
+
+    if (!session) {
+      throw new HttpError(404, `session ${sessionId} not found`);
+    }
+
+    return session;
+  }
+
+  private async assertWorkerDispatchAssignmentExists(assignmentId: string) {
+    const [assignment] = await this.db.select().from(workerDispatchAssignments).where(eq(workerDispatchAssignments.id, assignmentId));
+
+    if (!assignment) {
+      throw new HttpError(404, `worker dispatch assignment ${assignmentId} not found`);
+    }
+
+    return assignment;
+  }
+
   private async assertRunExists(runId: string) {
     const [run] = await this.db.select().from(runs).where(eq(runs.id, runId));
 
@@ -995,6 +1255,76 @@ export class ControlPlaneService {
     return {
       ...session,
       state: session.state as Session["state"]
+    };
+  }
+
+  private async transitionWorkerDispatchFailureOrCompletion(
+    assignment: WorkerDispatchAssignment,
+    status: "completed" | "failed",
+    reason: string | null,
+    nodeId: string
+  ) {
+    const now = this.clock.now();
+
+    if (status === "completed") {
+      const [updatedAssignment] = await this.db.update(workerDispatchAssignments).set({
+        state: "completed",
+        claimedByNodeId: nodeId,
+        completedAt: now,
+        lastFailureReason: null,
+        updatedAt: now
+      }).where(eq(workerDispatchAssignments.id, assignment.id)).returning();
+
+      await this.db.update(agents).set({
+        status: "idle",
+        updatedAt: now
+      }).where(eq(agents.id, assignment.agentId));
+
+      return this.mapWorkerDispatchAssignment(expectPersistedRecord(updatedAssignment, "worker dispatch assignment"));
+    }
+
+    const nextAttempt = assignment.attempt + 1;
+    const canRetry = nextAttempt < assignment.maxAttempts;
+    const [updatedAssignment] = await this.db.update(workerDispatchAssignments).set({
+      state: canRetry ? "retrying" : "failed",
+      attempt: nextAttempt,
+      stickyNodeId: canRetry ? null : assignment.stickyNodeId,
+      preferredNodeId: canRetry ? null : assignment.preferredNodeId,
+      claimedByNodeId: null,
+      claimedAt: null,
+      completedAt: canRetry ? null : now,
+      lastFailureReason: reason,
+      updatedAt: now
+    }).where(eq(workerDispatchAssignments.id, assignment.id)).returning();
+
+    if (assignment.sessionId) {
+      await this.db.update(sessions).set({
+        workerNodeId: null,
+        stickyNodeId: canRetry ? null : assignment.stickyNodeId,
+        state: canRetry ? "pending" : "stale",
+        staleReason: reason,
+        updatedAt: now
+      }).where(eq(sessions.id, assignment.sessionId));
+    }
+
+    await this.db.update(agents).set({
+      status: canRetry ? "idle" : "failed",
+      updatedAt: now
+    }).where(eq(agents.id, assignment.agentId));
+
+    return this.mapWorkerDispatchAssignment(expectPersistedRecord(updatedAssignment, "worker dispatch assignment"));
+  }
+
+  private mapWorkerDispatchAssignment(
+    assignment: typeof workerDispatchAssignments.$inferSelect
+  ): WorkerDispatchAssignment {
+    return {
+      ...assignment,
+      sessionId: assignment.sessionId ?? undefined,
+      stickyNodeId: assignment.stickyNodeId ?? null,
+      preferredNodeId: assignment.preferredNodeId ?? null,
+      state: assignment.state as WorkerDispatchAssignment["state"],
+      branchName: assignment.branchName ?? null
     };
   }
 

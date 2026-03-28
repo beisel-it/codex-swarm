@@ -95,6 +95,37 @@ const statements = [
     created_at timestamptz not null default now(),
     updated_at timestamptz not null default now()
   )`,
+  `create table if not exists worker_dispatch_assignments (
+    id text primary key,
+    run_id text not null references runs(id),
+    task_id text not null references tasks(id),
+    agent_id text not null references agents(id),
+    session_id text references sessions(id),
+    repository_id text not null references repositories(id),
+    repository_name text not null,
+    queue text not null default 'worker-dispatch',
+    state text not null default 'queued',
+    sticky_node_id text references worker_nodes(id),
+    preferred_node_id text references worker_nodes(id),
+    claimed_by_node_id text references worker_nodes(id),
+    required_capabilities jsonb not null default '[]'::jsonb,
+    worktree_path text not null,
+    branch_name text,
+    prompt text not null,
+    profile text not null,
+    sandbox text not null,
+    approval_policy text not null,
+    include_plan_tool boolean not null default false,
+    metadata jsonb not null default '{}'::jsonb,
+    attempt integer not null default 0,
+    max_attempts integer not null default 3,
+    lease_ttl_seconds integer not null default 300,
+    claimed_at timestamptz,
+    completed_at timestamptz,
+    last_failure_reason text,
+    created_at timestamptz not null default now(),
+    updated_at timestamptz not null default now()
+  )`,
   `create table if not exists messages (
     id text primary key,
     run_id text not null references runs(id),
@@ -170,6 +201,9 @@ async function main() {
   await db.execute(sql.raw("alter table approvals add column if not exists resolver text"));
   await db.execute(sql.raw("alter table approvals add column if not exists resolved_at timestamptz"));
   await db.execute(sql.raw("alter table validations add column if not exists artifact_ids jsonb not null default '[]'::jsonb"));
+  await db.execute(sql.raw("alter table worker_dispatch_assignments add column if not exists claimed_at timestamptz"));
+  await db.execute(sql.raw("alter table worker_dispatch_assignments add column if not exists completed_at timestamptz"));
+  await db.execute(sql.raw("alter table worker_dispatch_assignments add column if not exists last_failure_reason text"));
   await db.execute(sql.raw("alter table sessions add column if not exists worker_node_id text references worker_nodes(id)"));
   await db.execute(sql.raw("alter table sessions add column if not exists sticky_node_id text references worker_nodes(id)"));
   await db.execute(sql.raw("alter table sessions add column if not exists placement_constraint_labels jsonb not null default '[]'::jsonb"));

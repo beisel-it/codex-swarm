@@ -18,6 +18,7 @@ import { repositoryRoutes } from "./routes/repositories.js";
 import { runRoutes } from "./routes/runs.js";
 import { taskRoutes } from "./routes/tasks.js";
 import { validationRoutes } from "./routes/validations.js";
+import { workerDispatchAssignmentRoutes } from "./routes/worker-dispatch-assignments.js";
 import { workerNodeRoutes } from "./routes/worker-nodes.js";
 import type { ControlPlaneService } from "./services/control-plane-service.js";
 
@@ -121,6 +122,7 @@ export async function buildApp(options: BuildAppOptions = {}) {
   await app.register(taskRoutes, { prefix: "/api/v1" });
   await app.register(agentRoutes, { prefix: "/api/v1" });
   await app.register(workerNodeRoutes, { prefix: "/api/v1" });
+  await app.register(workerDispatchAssignmentRoutes, { prefix: "/api/v1" });
   await app.register(messageRoutes, { prefix: "/api/v1" });
   await app.register(approvalRoutes, { prefix: "/api/v1" });
   await app.register(validationRoutes, { prefix: "/api/v1" });
