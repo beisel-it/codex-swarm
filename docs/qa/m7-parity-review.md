@@ -234,3 +234,47 @@ Residual risks:
 Backlog follow-up:
 
 - Add a concrete acceptance measure or documented superseding criterion for role/skill productivity gains, such as a repeatable setup comparison, onboarding runbook evidence, or another explicit outcome tied to the shipped assets.
+
+## Task `27a74967`
+
+Roadmap entry:
+
+- Phase 4 exit criterion: `session ownership remains sticky and explicit`
+
+Verdict:
+
+- parity
+
+Evidence:
+
+- Distributed session state stores both current node ownership and explicit sticky placement through `workerNodeId` and `stickyNodeId` in the control-plane schema and service layer in `apps/api/src/db/schema.ts` and `apps/api/src/services/control-plane-service.ts`.
+- Dispatch claiming preserves or assigns sticky ownership explicitly during distributed scheduling in `apps/api/src/services/control-plane-service.ts`.
+- The M4 regression test proves run-detail payloads expose sticky and current node ownership across placement and recovery in `apps/api/test/app.test.ts`.
+- The frontend placement surface renders thread, current node, sticky node, constraint labels, and stale markers from live run/session data in `frontend/src/App.tsx`.
+- The M4 delivery plan names explicit sticky ownership as part of the exit criteria and runtime model in `docs/architecture/m4-delivery-plan.md`.
+
+Residual risks:
+
+- Sticky ownership is explicit and visible, but node-loss recovery may intentionally clear or reassign stickiness when failure handling requires it; that behavior is covered by the separate safe-retry criterion.
+
+## Task `0ff46f44`
+
+Roadmap entry:
+
+- Phase 4 exit criterion: `lost worker node causes bounded task failure and safe retry`
+
+Verdict:
+
+- parity
+
+Evidence:
+
+- Worker-node reconciliation marks the failed node offline, transitions claimed assignments into `retrying` or `failed`, and updates stranded sessions into bounded stale/pending states in `apps/api/src/services/control-plane-service.ts`.
+- Assignment failure handling clears placement and requeues work only up to the configured retry limit, preventing silent drift in `apps/api/src/services/control-plane-service.ts`.
+- The M4 regression test `preserves distributed run visibility across two-node retry recovery` proves node-loss reconciliation, bounded retry, and safe reclamation onto a surviving node in `apps/api/test/app.test.ts`.
+- The distributed UI surfaces explain placement degradation and retry/reassignment context in `frontend/src/App.tsx`.
+- The M4 delivery plan explicitly defines bounded failure and safe retry as the milestone acceptance rule in `docs/architecture/m4-delivery-plan.md`.
+
+Residual risks:
+
+- The verified flow covers the in-repo two-node recovery path; it does not constitute broader chaos testing across larger fleets or external infrastructure failures.
