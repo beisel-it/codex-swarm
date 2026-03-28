@@ -14,6 +14,31 @@ Reviewed on HEAD `0c27745` against the live frontend implementation in `frontend
 - Residual risk:
   - The evidence is strong for parity, but the board remains a single-page tabbed surface rather than a route-per-surface app. That does not block the roadmap item.
 
+## Task 52
+
+- Roadmap entry: `ROADMAP.md` UI scope, `Browser board showing: agent lanes` ([ROADMAP.md](/home/florian/codex-swarm/ROADMAP.md#L146))
+- Verdict: `better`
+- Evidence:
+  - Board view includes a dedicated `Agent lanes` panel, not a secondary detail-only surface ([frontend/src/App.tsx](/home/florian/codex-swarm/frontend/src/App.tsx#L1950))
+  - Each lane shows worker ownership, current task, branch, Codex session thread, placement, session state, heartbeat, and drain-state metadata ([frontend/src/App.tsx](/home/florian/codex-swarm/frontend/src/App.tsx#L1958))
+  - User docs describe the board as covering tasks, approvals, agents, and worker placement, which is consistent with the implemented board surface ([docs/user-guide.md](/home/florian/codex-swarm/docs/user-guide.md#L102))
+  - Screenshot evidence: [user-board-overview.png](/home/florian/codex-swarm/docs/assets/screenshots/user-board-overview.png)
+- Residual risk:
+  - The screenshot evidence is wider than the specific lane panel, so the strongest support is the live implementation in `App.tsx`.
+
+## Task 53
+
+- Roadmap entry: `ROADMAP.md` UI scope, `Browser board showing: blocked work` ([ROADMAP.md](/home/florian/codex-swarm/ROADMAP.md#L147))
+- Verdict: `better`
+- Evidence:
+  - The board sidebar exposes a `Blocked tasks` metric for the selected run ([frontend/src/App.tsx](/home/florian/codex-swarm/frontend/src/App.tsx#L1708))
+  - The task board includes a dedicated blocked lane because blocked status is part of the task status order ([frontend/src/App.tsx](/home/florian/codex-swarm/frontend/src/App.tsx#L1040), [frontend/src/App.tsx](/home/florian/codex-swarm/frontend/src/App.tsx#L1864))
+  - Blocked tasks render dependency chips labeled `blocked by ...`, making the specific blocker visible from the board itself ([frontend/src/App.tsx](/home/florian/codex-swarm/frontend/src/App.tsx#L1884))
+  - User docs instruct operators to scan blocked work from the board before acting ([docs/user-guide.md](/home/florian/codex-swarm/docs/user-guide.md#L58))
+  - Screenshot evidence: [user-board-overview.png](/home/florian/codex-swarm/docs/assets/screenshots/user-board-overview.png)
+- Residual risk:
+  - The blocked-work signal is per selected run rather than a cross-run aggregate, which still satisfies the roadmap wording.
+
 ## Task 56
 
 - Roadmap entry: `ROADMAP.md` UI scope, `Run details page` ([ROADMAP.md](/home/florian/codex-swarm/ROADMAP.md#L150))
@@ -41,6 +66,32 @@ Reviewed on HEAD `0c27745` against the live frontend implementation in `frontend
   - Reviewers can inspect generic artifacts, but the roadmap wording promised explicit diff-summary behavior in the review page.
 - Follow-up:
   - Reported to `tech-lead`; backlog follow-up has already been created per direct confirmation.
+
+## Task 54
+
+- Roadmap entry: `ROADMAP.md` UI scope, `Browser board showing: pending approvals` ([ROADMAP.md](/home/florian/codex-swarm/ROADMAP.md#L148))
+- Verdict: `gap`
+- Evidence:
+  - The board view renders fleet, provider, task lanes/DAG, and agent lanes, but no dedicated approvals panel or pending-approval list in the board surface ([frontend/src/App.tsx](/home/florian/codex-swarm/frontend/src/App.tsx#L1753))
+  - Approval data is loaded and filtered for the selected run, but the rendered approval list only appears in the `Review workspace` tab ([frontend/src/App.tsx](/home/florian/codex-swarm/frontend/src/App.tsx#L1524), [frontend/src/App.tsx](/home/florian/codex-swarm/frontend/src/App.tsx#L2222))
+  - The board overview docs mention blocked work and task lanes, while approvals are documented under the review console instead ([docs/user-guide.md](/home/florian/codex-swarm/docs/user-guide.md#L58), [docs/user-guide.md](/home/florian/codex-swarm/docs/user-guide.md#L80))
+- Residual risk:
+  - Operators can still infer approval pressure from run status such as `awaiting_approval`, but that is not the same as explicit pending approvals on the board.
+- Follow-up:
+  - Reported to `tech-lead`; backlog follow-up requested if board-level approval visibility remains required by roadmap parity.
+
+## Task 55
+
+- Roadmap entry: `ROADMAP.md` UI scope, `Browser board showing: recent validations` ([ROADMAP.md](/home/florian/codex-swarm/ROADMAP.md#L149))
+- Verdict: `gap`
+- Evidence:
+  - Validation data is loaded and filtered for the selected run, but it is rendered in `Validation history` inside the `Review` tab rather than on the board surface ([frontend/src/App.tsx](/home/florian/codex-swarm/frontend/src/App.tsx#L1525), [frontend/src/App.tsx](/home/florian/codex-swarm/frontend/src/App.tsx#L2321))
+  - The board view panels do not include a validation summary card, validation timeline, or recent-checks section ([frontend/src/App.tsx](/home/florian/codex-swarm/frontend/src/App.tsx#L1753))
+  - User docs describe validations as part of the review console workflow, not the board overview ([docs/user-guide.md](/home/florian/codex-swarm/docs/user-guide.md#L80))
+- Residual risk:
+  - Users must switch tabs to inspect validations, which weakens the operator signal the roadmap promised directly on the board.
+- Follow-up:
+  - Reported to `tech-lead`; backlog follow-up requested if board-level validation visibility remains required by roadmap parity.
 
 ## Task 82
 
