@@ -210,3 +210,27 @@ Residual risks:
 Backlog follow-up:
 
 - Add a real single-action PR handoff flow that either invokes provider PR creation directly or clearly supersedes the roadmap claim with a documented replacement interaction and acceptance evidence.
+
+## Task `ee969b7a`
+
+Roadmap entry:
+
+- Phase 3 exit criterion: `curated skills and roles reduce prompt/setup overhead`
+
+Verdict:
+
+- gap
+
+Evidence:
+
+- The repo does include curated role-pack and skill assets in `.codex/agents/*.toml`, `.agents/skills/*/SKILL.md`, `templates/repo-profiles/*.md`, and `.codex/config.toml`.
+- The README documents those starter assets and the M3 plan states the intended outcome, but there is no acceptance check, benchmark, usage study, or documented replacement criterion proving that prompt/setup overhead was actually reduced in practice.
+- The strongest live evidence is asset existence and packaging, which supports roadmap items about starter-pack presence but not the stronger exit criterion about measurable overhead reduction.
+
+Residual risks:
+
+- Reviewers can confirm the packs exist, but not that they improve team setup time or reduce prompt burden in a supportable way.
+
+Backlog follow-up:
+
+- Add a concrete acceptance measure or documented superseding criterion for role/skill productivity gains, such as a repeatable setup comparison, onboarding runbook evidence, or another explicit outcome tied to the shipped assets.
