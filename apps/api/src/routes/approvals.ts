@@ -1,6 +1,7 @@
 import type { FastifyPluginAsync } from "fastify";
 
 import { approvalCreateSchema, approvalResolveSchema, approvalsListQuerySchema, idParamSchema } from "../http/schemas.js";
+import { requireAuthorizedAction } from "../lib/authorization.js";
 import { requireValue } from "../lib/require-value.js";
 
 export const approvalRoutes: FastifyPluginAsync = async (app) => {
@@ -16,6 +17,7 @@ export const approvalRoutes: FastifyPluginAsync = async (app) => {
 
   app.post("/approvals", async (request, reply) => {
     return app.observability.withTrace("api.approvals.create", async () => {
+      requireAuthorizedAction(request.authContext, "approval.request");
       const parsed = approvalCreateSchema.parse(request.body);
       const input = {
         ...parsed,
@@ -43,6 +45,7 @@ export const approvalRoutes: FastifyPluginAsync = async (app) => {
   app.patch("/approvals/:id", async (request) => {
     return app.observability.withTrace("api.approvals.resolve", async () => {
       const { id } = idParamSchema.parse(request.params);
+      requireAuthorizedAction(request.authContext, "approval.resolve");
       const parsed = approvalResolveSchema.parse(request.body);
       const input = {
         ...parsed,

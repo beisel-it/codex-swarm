@@ -1,4 +1,9 @@
-import type { ActorIdentity, GovernedAction, GovernanceRole } from "@codex-swarm/contracts";
+import type {
+  ActorIdentity,
+  GovernedAction,
+  GovernanceRole,
+  RunStatusUpdateInput
+} from "@codex-swarm/contracts";
 
 import { HttpError } from "./http-error.js";
 
@@ -32,4 +37,19 @@ export function requireAuthorizedAction(actor: Pick<ActorIdentity, "role" | "rol
     workspaceId: actor.workspaceId ?? null,
     teamId: actor.teamId ?? null
   });
+}
+
+export function resolveRunStatusAction(status: RunStatusUpdateInput["status"]): GovernedAction {
+  switch (status) {
+    case "pending":
+    case "planning":
+    case "in_progress":
+      return "run.retry";
+    case "awaiting_approval":
+    case "completed":
+      return "run.review";
+    case "failed":
+    case "cancelled":
+      return "run.stop";
+  }
 }

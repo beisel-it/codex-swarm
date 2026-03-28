@@ -2844,6 +2844,319 @@ describe("buildApp", () => {
     await app.close();
   });
 
+  it("allows members to create runs and request approvals", async () => {
+    const app = await buildApp({
+      config: getConfig({
+        NODE_ENV: "test",
+        PORT: 3000,
+        HOST: "127.0.0.1",
+        DATABASE_URL: "postgres://unused/test",
+        DEV_AUTH_TOKEN: "test-token",
+        OPENAI_TRACING_DISABLED: true
+      }),
+      controlPlane: new FakeVerticalSliceControlPlane() as unknown as ControlPlaneService
+    });
+
+    const memberHeaders = {
+      authorization: "Bearer test-token",
+      "x-codex-role": "member",
+      "x-codex-roles": "member"
+    };
+
+    const runResponse = await app.inject({
+      method: "POST",
+      url: "/api/v1/runs",
+      headers: memberHeaders,
+      payload: {
+        repositoryId: ids.repository,
+        goal: "Member-owned run creation",
+        metadata: {}
+      }
+    });
+
+    expect(runResponse.statusCode).toBe(201);
+    expect(runResponse.json()).toMatchObject({
+      id: ids.run,
+      createdBy: "dev-user"
+    });
+
+    const approvalResponse = await app.inject({
+      method: "POST",
+      url: "/api/v1/approvals",
+      headers: memberHeaders,
+      payload: {
+        runId: ids.run,
+        taskId: ids.taskA,
+        kind: "plan",
+        requestedBy: "ignored-by-route",
+        requestedPayload: {
+          summary: "Request execution review"
+        }
+      }
+    });
+
+    expect(approvalResponse.statusCode).toBe(201);
+    expect(approvalResponse.json()).toMatchObject({
+      status: "pending",
+      requestedBy: "dev-user"
+    });
+
+    await app.close();
+  });
+
+  it("allows reviewers to review runs and resolve approvals", async () => {
+    const app = await buildApp({
+      config: getConfig({
+        NODE_ENV: "test",
+        PORT: 3000,
+        HOST: "127.0.0.1",
+        DATABASE_URL: "postgres://unused/test",
+        DEV_AUTH_TOKEN: "test-token",
+        OPENAI_TRACING_DISABLED: true
+      }),
+      controlPlane: new FakeVerticalSliceControlPlane() as unknown as ControlPlaneService
+    });
+
+    await app.inject({
+      method: "POST",
+      url: "/api/v1/runs",
+      headers: {
+        authorization: "Bearer test-token"
+      },
+      payload: {
+        repositoryId: ids.repository,
+        goal: "Reviewer-governed run status",
+        metadata: {}
+      }
+    });
+
+    const reviewerHeaders = {
+      authorization: "Bearer test-token",
+      "x-codex-role": "reviewer",
+      "x-codex-roles": "reviewer"
+    };
+
+    const reviewResponse = await app.inject({
+      method: "PATCH",
+      url: `/api/v1/runs/${ids.run}/status`,
+      headers: reviewerHeaders,
+      payload: {
+        status: "completed"
+      }
+    });
+
+    expect(reviewResponse.statusCode).toBe(200);
+    expect(reviewResponse.json()).toMatchObject({
+      status: "completed"
+    });
+
+    const approvalResponse = await app.inject({
+      method: "PATCH",
+      url: `/api/v1/approvals/${ids.workerNode}`,
+      headers: reviewerHeaders,
+      payload: {
+        status: "approved",
+        resolver: "ignored-by-route"
+      }
+    });
+
+    expect(approvalResponse.statusCode).toBe(200);
+    expect(approvalResponse.json()).toMatchObject({
+      status: "approved",
+      resolver: "dev-user"
+    });
+
+    await app.close();
+  });
+
+  it("allows operators to retry and stop runs", async () => {
+    const app = await buildApp({
+      config: getConfig({
+        NODE_ENV: "test",
+        PORT: 3000,
+        HOST: "127.0.0.1",
+        DATABASE_URL: "postgres://unused/test",
+        DEV_AUTH_TOKEN: "test-token",
+        OPENAI_TRACING_DISABLED: true
+      }),
+      controlPlane: new FakeVerticalSliceControlPlane() as unknown as ControlPlaneService
+    });
+
+    await app.inject({
+      method: "POST",
+      url: "/api/v1/runs",
+      headers: {
+        authorization: "Bearer test-token"
+      },
+      payload: {
+        repositoryId: ids.repository,
+        goal: "Operator-owned stop and retry",
+        metadata: {}
+      }
+    });
+
+    const operatorHeaders = {
+      authorization: "Bearer test-token",
+      "x-codex-role": "operator",
+      "x-codex-roles": "operator"
+    };
+
+    const retryResponse = await app.inject({
+      method: "PATCH",
+      url: `/api/v1/runs/${ids.run}/status`,
+      headers: operatorHeaders,
+      payload: {
+        status: "in_progress"
+      }
+    });
+
+    expect(retryResponse.statusCode).toBe(200);
+    expect(retryResponse.json()).toMatchObject({
+      status: "in_progress"
+    });
+
+    const stopResponse = await app.inject({
+      method: "PATCH",
+      url: `/api/v1/runs/${ids.run}/status`,
+      headers: operatorHeaders,
+      payload: {
+        status: "cancelled"
+      }
+    });
+
+    expect(stopResponse.statusCode).toBe(200);
+    expect(stopResponse.json()).toMatchObject({
+      status: "cancelled"
+    });
+
+    await app.close();
+  });
+
+  it("rejects out-of-role governed actions with deterministic details", async () => {
+    const app = await buildApp({
+      config: getConfig({
+        NODE_ENV: "test",
+        PORT: 3000,
+        HOST: "127.0.0.1",
+        DATABASE_URL: "postgres://unused/test",
+        DEV_AUTH_TOKEN: "test-token",
+        OPENAI_TRACING_DISABLED: true
+      }),
+      controlPlane: controlPlane as unknown as ControlPlaneService
+    });
+
+    const createRunResponse = await app.inject({
+      method: "POST",
+      url: "/api/v1/runs",
+      headers: {
+        authorization: "Bearer test-token",
+        "x-codex-role": "reviewer",
+        "x-codex-roles": "reviewer"
+      },
+      payload: {
+        repositoryId: ids.repository,
+        goal: "Denied run creation",
+        metadata: {}
+      }
+    });
+
+    expect(createRunResponse.statusCode).toBe(403);
+    expect(createRunResponse.json()).toEqual({
+      error: "actor role is not permitted to perform run.create",
+      details: {
+        action: "run.create",
+        roles: ["reviewer"],
+        workspaceId: defaultBoundary.workspaceId,
+        teamId: defaultBoundary.teamId
+      }
+    });
+    expect(controlPlane.createRun).not.toHaveBeenCalled();
+
+    const stopResponse = await app.inject({
+      method: "PATCH",
+      url: `/api/v1/runs/${ids.run}/status`,
+      headers: {
+        authorization: "Bearer test-token",
+        "x-codex-role": "member",
+        "x-codex-roles": "member"
+      },
+      payload: {
+        status: "cancelled"
+      }
+    });
+
+    expect(stopResponse.statusCode).toBe(403);
+    expect(stopResponse.json()).toEqual({
+      error: "actor role is not permitted to perform run.stop",
+      details: {
+        action: "run.stop",
+        roles: ["member"],
+        workspaceId: defaultBoundary.workspaceId,
+        teamId: defaultBoundary.teamId
+      }
+    });
+    expect(controlPlane.updateRunStatus).not.toHaveBeenCalled();
+
+    const requestApprovalResponse = await app.inject({
+      method: "POST",
+      url: "/api/v1/approvals",
+      headers: {
+        authorization: "Bearer test-token",
+        "x-codex-role": "reviewer",
+        "x-codex-roles": "reviewer"
+      },
+      payload: {
+        runId: ids.run,
+        taskId: ids.taskA,
+        kind: "plan",
+        requestedBy: "ignored-by-route",
+        requestedPayload: {
+          summary: "Denied approval request"
+        }
+      }
+    });
+
+    expect(requestApprovalResponse.statusCode).toBe(403);
+    expect(requestApprovalResponse.json()).toEqual({
+      error: "actor role is not permitted to perform approval.request",
+      details: {
+        action: "approval.request",
+        roles: ["reviewer"],
+        workspaceId: defaultBoundary.workspaceId,
+        teamId: defaultBoundary.teamId
+      }
+    });
+    expect(controlPlane.createApproval).not.toHaveBeenCalled();
+
+    const resolveApprovalResponse = await app.inject({
+      method: "PATCH",
+      url: `/api/v1/approvals/${ids.workerNode}`,
+      headers: {
+        authorization: "Bearer test-token",
+        "x-codex-role": "member",
+        "x-codex-roles": "member"
+      },
+      payload: {
+        status: "approved",
+        resolver: "ignored-by-route"
+      }
+    });
+
+    expect(resolveApprovalResponse.statusCode).toBe(403);
+    expect(resolveApprovalResponse.json()).toEqual({
+      error: "actor role is not permitted to perform approval.resolve",
+      details: {
+        action: "approval.resolve",
+        roles: ["member"],
+        workspaceId: defaultBoundary.workspaceId,
+        teamId: defaultBoundary.teamId
+      }
+    });
+    expect(controlPlane.resolveApproval).not.toHaveBeenCalled();
+
+    await app.close();
+  });
+
   it("supports approval cards from persisted approval rows", async () => {
     const app = await buildApp({
       config: getConfig({

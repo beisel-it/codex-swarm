@@ -7,6 +7,7 @@ import {
   runPullRequestHandoffSchema,
   runStatusUpdateSchema
 } from "../http/schemas.js";
+import { requireAuthorizedAction, resolveRunStatusAction } from "../lib/authorization.js";
 import { getRetentionPolicy } from "../lib/governance-config.js";
 import { isRecoverableDatabaseError } from "../lib/database-fallback.js";
 import { requireValue } from "../lib/require-value.js";
@@ -57,6 +58,7 @@ export const runRoutes: FastifyPluginAsync = async (app) => {
 
   app.post("/runs", async (request, reply) => {
     return app.observability.withTrace("api.runs.create", async () => {
+      requireAuthorizedAction(request.authContext, "run.create");
       const input = runCreateSchema.parse(request.body);
       const run = requireValue(
         await app.controlPlane.createRun(input, request.authContext.principal, request.authContext),
@@ -80,6 +82,7 @@ export const runRoutes: FastifyPluginAsync = async (app) => {
     return app.observability.withTrace("api.runs.update-status", async () => {
       const { id } = idParamSchema.parse(request.params);
       const input = runStatusUpdateSchema.parse(request.body);
+      requireAuthorizedAction(request.authContext, resolveRunStatusAction(input.status));
       const run = requireValue(
         await app.controlPlane.updateRunStatus(id, input, request.authContext),
         "control plane returned no run"

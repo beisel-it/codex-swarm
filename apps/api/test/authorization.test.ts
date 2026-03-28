@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { canActorPerformAction, getActorRoles } from "../src/lib/authorization.js";
+import { canActorPerformAction, getActorRoles, resolveRunStatusAction } from "../src/lib/authorization.js";
 
 describe("authorization", () => {
   it("normalizes primary and secondary actor roles", () => {
@@ -22,5 +22,11 @@ describe("authorization", () => {
       role: "member",
       roles: ["member"]
     }, "admin.read")).toBe(false);
+  });
+
+  it("maps run status transitions to governed actions", () => {
+    expect(resolveRunStatusAction("completed")).toBe("run.review");
+    expect(resolveRunStatusAction("in_progress")).toBe("run.retry");
+    expect(resolveRunStatusAction("cancelled")).toBe("run.stop");
   });
 });
