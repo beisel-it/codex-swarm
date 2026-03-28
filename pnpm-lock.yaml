@@ -20,6 +20,9 @@ importers:
       '@codex-swarm/orchestration':
         specifier: workspace:*
         version: link:../../packages/orchestration
+      '@codex-swarm/worker':
+        specifier: workspace:*
+        version: link:../worker
       '@openai/agents':
         specifier: ^0.8.1
         version: 0.8.1(ws@8.20.0)(zod@4.3.6)

@@ -35,7 +35,8 @@ const controlPlane = {
   listValidations: vi.fn(),
   createValidation: vi.fn(),
   listArtifacts: vi.fn(),
-  createArtifact: vi.fn()
+  createArtifact: vi.fn(),
+  runCleanupJob: vi.fn()
 };
 
 const observability = {
@@ -240,6 +241,8 @@ class FakeVerticalSliceControlPlane {
         sandbox: input.session.sandbox,
         approvalPolicy: input.session.approvalPolicy,
         includePlanTool: input.session.includePlanTool,
+        state: "active",
+        staleReason: null,
         metadata: input.session.metadata,
         createdAt: new Date(),
         updatedAt: new Date()
@@ -886,6 +889,57 @@ describe("buildApp", () => {
       })
     ]);
     expect(observability.listEvents).toHaveBeenCalledWith(ids.run, 25);
+
+    await app.close();
+  });
+
+  it("runs the stale session cleanup job", async () => {
+    controlPlane.runCleanupJob.mockResolvedValueOnce({
+      scannedSessions: 2,
+      resumed: 0,
+      retried: 1,
+      markedStale: 1,
+      archived: 0,
+      items: [
+        {
+          sessionId: ids.session,
+          runId: ids.run,
+          agentId: ids.agent,
+          worktreePath: ".swarm/worktrees/codex-swarm/run-001/worker-001",
+          action: "mark_stale",
+          reason: "missing_worktree"
+        }
+      ],
+      completedAt: new Date("2026-03-28T12:30:00.000Z")
+    });
+
+    const app = await buildApp({
+      controlPlane: controlPlane as unknown as ControlPlaneService
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/v1/cleanup-jobs/run",
+      headers: {
+        authorization: "Bearer codex-swarm-dev-token"
+      },
+      payload: {
+        runId: ids.run,
+        staleAfterMinutes: 20,
+        existingWorktreePaths: []
+      }
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      scannedSessions: 2,
+      markedStale: 1
+    });
+    expect(controlPlane.runCleanupJob).toHaveBeenCalledWith({
+      runId: ids.run,
+      staleAfterMinutes: 20,
+      existingWorktreePaths: []
+    });
 
     await app.close();
   });

@@ -14,6 +14,7 @@
   "dependencies": {
     "@codex-swarm/contracts": "workspace:*",
     "@codex-swarm/orchestration": "workspace:*",
+    "@codex-swarm/worker": "workspace:*",
     "@openai/agents": "^0.8.1",
     "drizzle-orm": "^0.44.5",
     "fastify": "^5.6.1",

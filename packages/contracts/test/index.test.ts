@@ -4,6 +4,7 @@ import {
   approvalCreateSchema,
   approvalResolveSchema,
   agentCreateSchema,
+  cleanupJobRunSchema,
   repositoryCreateSchema,
   runBranchPublishSchema,
   runCreateSchema,
@@ -149,5 +150,14 @@ describe("runPullRequestHandoffSchema", () => {
     });
 
     expect(handoff.status).toBe("draft");
+  });
+});
+
+describe("cleanupJobRunSchema", () => {
+  it("defaults stale cleanup parameters", () => {
+    const cleanup = cleanupJobRunSchema.parse({});
+
+    expect(cleanup.staleAfterMinutes).toBe(15);
+    expect(cleanup.existingWorktreePaths).toEqual([]);
   });
 });

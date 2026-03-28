@@ -8,6 +8,7 @@ import { dependenciesPlugin } from "./plugins/dependencies.js";
 import { agentRoutes } from "./routes/agents.js";
 import { approvalRoutes } from "./routes/approvals.js";
 import { artifactRoutes } from "./routes/artifacts.js";
+import { cleanupJobRoutes } from "./routes/cleanup-jobs.js";
 import { eventRoutes } from "./routes/events.js";
 import { healthRoutes } from "./routes/health.js";
 import { ObservabilityService } from "./lib/observability.js";
@@ -122,6 +123,7 @@ export async function buildApp(options: BuildAppOptions = {}) {
   await app.register(approvalRoutes, { prefix: "/api/v1" });
   await app.register(validationRoutes, { prefix: "/api/v1" });
   await app.register(artifactRoutes, { prefix: "/api/v1" });
+  await app.register(cleanupJobRoutes, { prefix: "/api/v1" });
   await app.register(eventRoutes, { prefix: "/api/v1" });
   await app.register(metricsRoutes, { prefix: "/api/v1" });
 

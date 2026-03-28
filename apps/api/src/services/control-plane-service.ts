@@ -2,6 +2,8 @@ import { and, asc, eq, inArray } from "drizzle-orm";
 import {
   type Artifact,
   type ArtifactCreateInput,
+  type CleanupJobReport,
+  type CleanupJobRunInput,
   type Run,
   type Agent,
   type AgentCreateInput,
@@ -9,10 +11,8 @@ import {
   type ApprovalResolveInput,
   type Repository,
   type RepositoryCreateInput,
-  type RunBranchPublishInput,
   type RunCreateInput,
   type RunDetail,
-  type RunPullRequestHandoffInput,
   type RunStatusUpdateInput,
   type Session,
   type Task,
@@ -22,6 +22,7 @@ import {
   type ValidationHistoryEntry
 } from "@codex-swarm/contracts";
 import { resolveInitialTaskStatus } from "@codex-swarm/orchestration";
+import { buildSessionRecoveryPlan } from "@codex-swarm/worker";
 
 import type { AppDb } from "../db/client.js";
 import {
@@ -163,7 +164,7 @@ export class ControlPlaneService {
         ...agent,
         status: agent.status as Agent["status"]
       })),
-      sessions: runSessions.map(({ session }): Session => session)
+      sessions: runSessions.map(({ session }): Session => this.mapSession(session))
     };
   }
 
@@ -386,6 +387,8 @@ export class ControlPlaneService {
       }).returning();
 
       if (input.session && createdAgent) {
+        const sessionState: Session["state"] = "active";
+
         await tx.insert(sessions).values({
           id: crypto.randomUUID(),
           agentId: createdAgent.id,
@@ -394,6 +397,8 @@ export class ControlPlaneService {
           sandbox: input.session.sandbox,
           approvalPolicy: input.session.approvalPolicy,
           includePlanTool: input.session.includePlanTool,
+          state: sessionState,
+          staleReason: null,
           metadata: input.session.metadata,
           createdAt: now,
           updatedAt: now
@@ -588,6 +593,117 @@ export class ControlPlaneService {
     return this.db.select().from(artifacts).where(eq(artifacts.runId, runId)).orderBy(asc(artifacts.createdAt));
   }
 
+  async runCleanupJob(input: CleanupJobRunInput): Promise<CleanupJobReport> {
+    const now = this.clock.now();
+    const query = this.db
+      .select({
+        sessionId: sessions.id,
+        runId: agents.runId,
+        agentId: agents.id,
+        worktreePath: agents.worktreePath,
+        state: sessions.state,
+        threadId: sessions.threadId,
+        lastHeartbeatAt: agents.lastHeartbeatAt
+      })
+      .from(sessions)
+      .innerJoin(agents, eq(sessions.agentId, agents.id));
+
+    const rows = input.runId
+      ? await query.where(eq(agents.runId, input.runId))
+      : await query;
+
+    const candidates = rows.map((row) => ({
+      sessionId: row.sessionId,
+      runId: row.runId,
+      agentId: row.agentId,
+      worktreePath: row.worktreePath ?? `untracked/${row.agentId}`,
+      state: row.state as "pending" | "active" | "stopped" | "failed" | "stale" | "archived",
+      threadId: row.threadId,
+      lastHeartbeatAt: row.lastHeartbeatAt
+    }));
+
+    const recoveryPlan = buildSessionRecoveryPlan(candidates, {
+      now,
+      staleAfterMs: input.staleAfterMinutes * 60 * 1000,
+      existingWorktreePaths: input.existingWorktreePaths
+    });
+    const rowBySessionId = new Map(rows.map((row) => [row.sessionId, row] as const));
+
+    for (const item of recoveryPlan) {
+      const row = rowBySessionId.get(item.sessionId);
+
+      if (!row) {
+        continue;
+      }
+
+      if (item.action === "resume") {
+        await this.db.update(sessions).set({
+          state: "active",
+          staleReason: null,
+          updatedAt: now
+        }).where(eq(sessions.id, item.sessionId));
+        continue;
+      }
+
+      if (item.action === "retry") {
+        await this.db.update(sessions).set({
+          state: "pending",
+          staleReason: item.reason,
+          updatedAt: now
+        }).where(eq(sessions.id, item.sessionId));
+        await this.db.update(agents).set({
+          status: "idle",
+          updatedAt: now
+        }).where(eq(agents.id, row.agentId));
+        continue;
+      }
+
+      if (item.action === "mark_stale") {
+        await this.db.update(sessions).set({
+          state: "stale",
+          staleReason: item.reason,
+          updatedAt: now
+        }).where(eq(sessions.id, item.sessionId));
+        await this.db.update(agents).set({
+          status: "failed",
+          updatedAt: now
+        }).where(eq(agents.id, row.agentId));
+        continue;
+      }
+
+      await this.db.update(sessions).set({
+        state: "archived",
+        staleReason: null,
+        updatedAt: now
+      }).where(eq(sessions.id, item.sessionId));
+      await this.db.update(agents).set({
+        status: "stopped",
+        updatedAt: now
+      }).where(eq(agents.id, row.agentId));
+    }
+
+    return {
+      scannedSessions: recoveryPlan.length,
+      resumed: recoveryPlan.filter((item) => item.action === "resume").length,
+      retried: recoveryPlan.filter((item) => item.action === "retry").length,
+      markedStale: recoveryPlan.filter((item) => item.action === "mark_stale").length,
+      archived: recoveryPlan.filter((item) => item.action === "archive").length,
+      items: recoveryPlan.map((item) => {
+        const row = expectPersistedRecord(rowBySessionId.get(item.sessionId), "cleanup session row");
+
+        return {
+          sessionId: item.sessionId,
+          runId: row.runId,
+          agentId: row.agentId,
+          worktreePath: row.worktreePath ?? `untracked/${item.sessionId}`,
+          action: item.action,
+          reason: item.reason
+        };
+      }),
+      completedAt: now
+    };
+  }
+
   private async resolveValidationArtifactIds(
     runId: string,
     taskId: string | null,
@@ -721,6 +837,13 @@ export class ControlPlaneService {
       ...repository,
       provider: repository.provider as Repository["provider"],
       trustLevel: repository.trustLevel as Repository["trustLevel"]
+    };
+  }
+
+  private mapSession(session: typeof sessions.$inferSelect): Session {
+    return {
+      ...session,
+      state: session.state as Session["state"]
     };
   }
 

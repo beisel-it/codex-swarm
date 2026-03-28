@@ -81,6 +81,8 @@ export const sessions = pgTable("sessions", {
   sandbox: text("sandbox").notNull(),
   approvalPolicy: text("approval_policy").notNull(),
   includePlanTool: boolean("include_plan_tool").notNull().default(false),
+  state: text("state").notNull().default("active"),
+  staleReason: text("stale_reason"),
   metadata: jsonb("metadata").$type<Record<string, unknown>>().notNull().default({}),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()

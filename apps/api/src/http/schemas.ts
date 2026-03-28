@@ -4,6 +4,7 @@ import {
   approvalCreateSchema as contractApprovalCreateSchema,
   approvalResolveSchema as contractApprovalResolveSchema,
   artifactCreateSchema as contractArtifactCreateSchema,
+  cleanupJobRunSchema,
   approvalsListQuerySchema,
   eventsListQuerySchema,
   idParamSchema,
@@ -45,6 +46,7 @@ export const artifactCreateSchema = contractArtifactCreateSchema;
 export {
   agentCreateSchema,
   approvalsListQuerySchema,
+  cleanupJobRunSchema,
   eventsListQuerySchema,
   idParamSchema,
   repositoryCreateSchema,

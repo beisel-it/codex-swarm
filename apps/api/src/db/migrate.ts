@@ -73,6 +73,8 @@ const statements = [
     sandbox text not null,
     approval_policy text not null,
     include_plan_tool boolean not null default false,
+    state text not null default 'active',
+    stale_reason text,
     metadata jsonb not null default '{}'::jsonb,
     created_at timestamptz not null default now(),
     updated_at timestamptz not null default now()
@@ -152,6 +154,8 @@ async function main() {
   await db.execute(sql.raw("alter table approvals add column if not exists resolver text"));
   await db.execute(sql.raw("alter table approvals add column if not exists resolved_at timestamptz"));
   await db.execute(sql.raw("alter table validations add column if not exists artifact_ids jsonb not null default '[]'::jsonb"));
+  await db.execute(sql.raw("alter table sessions add column if not exists state text not null default 'active'"));
+  await db.execute(sql.raw("alter table sessions add column if not exists stale_reason text"));
   await db.execute(sql.raw("alter table repositories add column if not exists provider text not null default 'other'"));
   await db.execute(sql.raw("alter table repositories add column if not exists trust_level text not null default 'trusted'"));
   await db.execute(sql.raw("alter table runs add column if not exists budget_tokens integer"));

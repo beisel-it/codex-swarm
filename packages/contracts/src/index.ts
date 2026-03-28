@@ -12,6 +12,7 @@ export const repositoryProviders = ["github", "gitlab", "local", "other"] as con
 export const repositoryTrustLevels = ["trusted", "sandboxed", "restricted"] as const;
 export const pullRequestStatuses = ["draft", "open", "merged", "closed"] as const;
 export const handoffStatuses = ["pending", "branch_published", "pr_open", "manual_handoff", "merged", "closed"] as const;
+export const workerSessionStates = ["pending", "active", "stopped", "failed", "stale", "archived"] as const;
 
 export const repositoryCreateSchema = z.object({
   name: z.string().min(1),
@@ -135,6 +136,8 @@ export const sessionSchema = z.object({
   sandbox: z.string().min(1),
   approvalPolicy: z.string().min(1),
   includePlanTool: z.boolean().default(false),
+  state: z.enum(workerSessionStates),
+  staleReason: z.string().min(1).nullable(),
   metadata: z.record(z.string(), z.unknown()).default({}),
   createdAt: z.date(),
   updatedAt: z.date()
@@ -291,6 +294,31 @@ export const runPullRequestHandoffSchema = z.object({
   status: z.enum(pullRequestStatuses).default("draft")
 });
 
+export const cleanupJobRunSchema = z.object({
+  runId: z.uuid().optional(),
+  staleAfterMinutes: z.number().int().positive().default(15),
+  existingWorktreePaths: z.array(z.string().min(1)).default([])
+});
+
+export const cleanupJobItemSchema = z.object({
+  sessionId: z.uuid(),
+  runId: z.uuid(),
+  agentId: z.uuid(),
+  worktreePath: z.string().min(1),
+  action: z.enum(["resume", "retry", "mark_stale", "archive"]),
+  reason: z.enum(["resume_session", "retry_pending_session", "missing_thread", "missing_worktree", "heartbeat_timeout", "terminal_state"])
+});
+
+export const cleanupJobReportSchema = z.object({
+  scannedSessions: z.number().int().nonnegative(),
+  resumed: z.number().int().nonnegative(),
+  retried: z.number().int().nonnegative(),
+  markedStale: z.number().int().nonnegative(),
+  archived: z.number().int().nonnegative(),
+  items: z.array(cleanupJobItemSchema),
+  completedAt: z.date()
+});
+
 export const runDetailSchema = runSchema.extend({
   tasks: z.array(taskSchema),
   agents: z.array(agentSchema),
@@ -321,6 +349,9 @@ export type ValidationCreateInput = z.infer<typeof validationCreateSchema>;
 export type ValidationsListQuery = z.infer<typeof validationsListQuerySchema>;
 export type RunBranchPublishInput = z.infer<typeof runBranchPublishSchema>;
 export type RunPullRequestHandoffInput = z.infer<typeof runPullRequestHandoffSchema>;
+export type CleanupJobRunInput = z.infer<typeof cleanupJobRunSchema>;
+export type CleanupJobItem = z.infer<typeof cleanupJobItemSchema>;
+export type CleanupJobReport = z.infer<typeof cleanupJobReportSchema>;
 export type EventsListQuery = z.infer<typeof eventsListQuerySchema>;
 export type ControlPlaneEvent = z.infer<typeof controlPlaneEventSchema>;
 export type ControlPlaneMetrics = z.infer<typeof controlPlaneMetricsSchema>;
