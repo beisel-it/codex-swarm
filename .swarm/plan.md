@@ -18,13 +18,23 @@ M2 implementation is complete:
 
 ### M3
 
-M3 refinement and execution are now active:
+M3 implementation is complete:
 
-- `ebaf1339` Refine Phase 3 roadmap into executable M3 delivery plan
-- `de54a793` Deliver M3 Git provider onboarding, branch publish, and PR handoff
-- `82c94ee4` Deliver M3 curated role packs, skills, and repo templates
-- `07c85e9d` Deliver M3 governance-lite: budgets, concurrency caps, approval profiles, audit export
-- `a6b55c18` Deliver M3 quality hardening: load tests, retry semantics, cleanup jobs
+- repo onboarding and PR handoff
+- board PR/reflection surfaces
+- productivity packs, role packs, and repo templates
+- governance-lite controls
+- quality hardening and cleanup verification
+
+### M4
+
+M4 refinement and execution are now active:
+
+- `cd4c26d8` Refine Phase 4 roadmap into executable M4 delivery plan
+- distributed worker fleet and queueing
+- sticky placement and failure recovery across nodes
+- node health and utilization visibility
+- multi-node verification
 
 ## Dependency Order
 
