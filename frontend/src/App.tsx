@@ -95,12 +95,10 @@ type Approval = {
   kind: string
   status: ApprovalStatus
   requestedBy: string
-  reviewer: string | null
-  notes: string | null
-  requestedPayload?: Record<string, unknown> | null
-  resolutionPayload?: Record<string, unknown> | null
-  resolver?: string | null
-  resolvedAt?: string | null
+  requestedPayload: Record<string, unknown>
+  resolutionPayload: Record<string, unknown>
+  resolver: string | null
+  resolvedAt: string | null
   createdAt: string
   updatedAt: string
 }
@@ -167,6 +165,7 @@ type SwarmData = {
 
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? '').replace(/\/$/, '')
 const API_TOKEN = import.meta.env.VITE_API_TOKEN ?? 'codex-swarm-dev-token'
+const APPROVAL_RESOLVER = import.meta.env.VITE_APPROVAL_RESOLVER ?? 'frontend-dev'
 const REFRESH_MS = 15_000
 
 const mockData: SwarmData = {
@@ -389,8 +388,13 @@ const mockData: SwarmData = {
       kind: 'plan',
       status: 'pending',
       requestedBy: 'tech-lead',
-      reviewer: 'principal-eng',
-      notes: 'Need explicit reviewer approval before the beta handoff opens.',
+      requestedPayload: {
+        summary: 'Need explicit reviewer approval before the beta handoff opens.',
+        target: 'beta handoff',
+      },
+      resolutionPayload: {},
+      resolver: null,
+      resolvedAt: null,
       createdAt: '2026-03-28T19:40:00.000Z',
       updatedAt: '2026-03-28T19:40:00.000Z',
     },
@@ -401,8 +405,14 @@ const mockData: SwarmData = {
       kind: 'policy_exception',
       status: 'rejected',
       requestedBy: 'backend-dev',
-      reviewer: 'security',
-      notes: 'Network smoke tests remain disallowed until the bootstrap path is stable.',
+      requestedPayload: {
+        summary: 'Request temporary network access for runtime smoke tests.',
+      },
+      resolutionPayload: {
+        feedback: 'Network smoke tests remain disallowed until the bootstrap path is stable.',
+      },
+      resolver: 'security',
+      resolvedAt: '2026-03-28T20:03:00.000Z',
       createdAt: '2026-03-28T18:35:00.000Z',
       updatedAt: '2026-03-28T20:03:00.000Z',
     },
@@ -556,9 +566,19 @@ async function updateApprovalDecision(
     method: 'PATCH',
     body: JSON.stringify({
       status,
-      notes: notes.trim() || undefined,
+      resolver: APPROVAL_RESOLVER,
+      feedback: notes.trim() || undefined,
+      resolutionPayload: notes.trim()
+        ? {
+            feedback: notes.trim(),
+          }
+        : {},
     }),
   })
+}
+
+async function loadApprovalDetail(approvalId: string): Promise<Approval> {
+  return requestJson<Approval>(`/api/v1/approvals/${encodeURIComponent(approvalId)}`)
 }
 
 async function loadSwarmData(): Promise<SwarmData> {
@@ -671,7 +691,10 @@ function deriveActivity(
       id: `approval-${approval.id}`,
       kind: 'approval',
       title: `${approval.kind} ${approval.status}`,
-      detail: approval.notes ?? `Requested by ${approval.requestedBy}`,
+      detail:
+        approval.status === 'pending'
+          ? `Requested by ${approval.requestedBy}`
+          : String(approval.resolutionPayload?.feedback ?? `Resolved by ${approval.resolver ?? 'unknown reviewer'}`),
       timestamp: approval.updatedAt,
       tone: (approval.status === 'approved' ? 'success' : approval.status === 'rejected' ? 'danger' : 'warning') as ActivityItem['tone'],
     })),
@@ -711,6 +734,7 @@ function App() {
   const [selectedRunId, setSelectedRunId] = useState(mockData.runs[0]?.id ?? '')
   const [selectedView, setSelectedView] = useState<ViewMode>('board')
   const [selectedApprovalId, setSelectedApprovalId] = useState<string>('')
+  const [selectedApprovalDetail, setSelectedApprovalDetail] = useState<Approval | null>(null)
   const [reviewNotes, setReviewNotes] = useState('')
   const [taskQuery, setTaskQuery] = useState('')
   const [loading, setLoading] = useState(true)
@@ -791,8 +815,43 @@ function App() {
 
   useEffect(() => {
     setSelectedApprovalId(selectedApproval?.id ?? '')
-    setReviewNotes(selectedApproval?.notes ?? '')
-  }, [selectedApproval?.id, selectedApproval?.notes])
+  }, [selectedApproval?.id])
+
+  useEffect(() => {
+    let active = true
+
+    async function hydrateApprovalDetail() {
+      if (!selectedApprovalId) {
+        setSelectedApprovalDetail(null)
+        setReviewNotes('')
+        return
+      }
+
+      try {
+        const detail = await loadApprovalDetail(selectedApprovalId)
+        if (!active) {
+          return
+        }
+
+        setSelectedApprovalDetail(detail)
+        setReviewNotes(String(detail.resolutionPayload?.feedback ?? ''))
+      } catch {
+        if (!active) {
+          return
+        }
+
+        const fallback = runApprovals.find((approval) => approval.id === selectedApprovalId) ?? null
+        setSelectedApprovalDetail(fallback)
+        setReviewNotes(String(fallback?.resolutionPayload?.feedback ?? ''))
+      }
+    }
+
+    void hydrateApprovalDetail()
+
+    return () => {
+      active = false
+    }
+  }, [selectedApprovalId, runApprovals])
 
   const blockedTasks = runTasks.filter((task) => task.status === 'blocked')
   const pendingApprovals = runApprovals.filter((approval) => approval.status === 'pending')
@@ -815,6 +874,7 @@ function App() {
           approval.id === updatedApproval.id ? updatedApproval : approval,
         ),
       }))
+      setSelectedApprovalDetail(updatedApproval)
     } finally {
       setActionPending(false)
     }
@@ -1205,10 +1265,14 @@ function App() {
                               {approval.status}
                             </span>
                           </div>
-                          <p>{approval.notes ?? 'No reviewer notes yet.'}</p>
+                          <p>
+                            {approval.status === 'pending'
+                              ? String(approval.requestedPayload?.summary ?? 'Awaiting a reviewer decision.')
+                              : String(approval.resolutionPayload?.feedback ?? 'No resolution feedback returned.')}
+                          </p>
                           <div className="approval-meta">
                             <span>{approval.requestedBy}</span>
-                            <span>{approval.reviewer ?? 'Reviewer unassigned'}</span>
+                            <span>{approval.resolver ?? 'Reviewer unassigned'}</span>
                           </div>
                         </button>
                       ))}
@@ -1219,28 +1283,28 @@ function App() {
 
                     <div className="review-editor">
                       <p className="panel-kicker">Decision workspace</p>
-                      <h3>{selectedApproval?.kind ?? 'Select an approval'}</h3>
+                      <h3>{selectedApprovalDetail?.kind ?? selectedApproval?.kind ?? 'Select an approval'}</h3>
                       <p>
-                        {selectedApproval
-                          ? selectedApproval.notes ?? 'No request summary attached yet.'
+                        {selectedApprovalDetail
+                          ? String(selectedApprovalDetail.requestedPayload?.summary ?? 'No request summary attached yet.')
                           : 'Choose an approval request to inspect its context and record a reviewer decision.'}
                       </p>
                       <div className="contract-surface">
                         <div className="contract-card">
                           <span className="panel-kicker">Requested context</span>
-                          <strong>{selectedApproval?.requestedBy ?? 'No requester selected'}</strong>
-                          <p>{selectedApproval?.notes ?? 'No textual request summary attached yet.'}</p>
-                          <pre>{formatPayload(selectedApproval?.requestedPayload)}</pre>
+                          <strong>{selectedApprovalDetail?.requestedBy ?? selectedApproval?.requestedBy ?? 'No requester selected'}</strong>
+                          <p>{String(selectedApprovalDetail?.requestedPayload?.summary ?? 'No textual request summary attached yet.')}</p>
+                          <pre>{formatPayload(selectedApprovalDetail?.requestedPayload)}</pre>
                         </div>
                         <div className="contract-card">
                           <span className="panel-kicker">Resolution</span>
-                          <strong>{selectedApproval?.resolver ?? selectedApproval?.reviewer ?? 'Unresolved'}</strong>
+                          <strong>{selectedApprovalDetail?.resolver ?? 'Unresolved'}</strong>
                           <p>
-                            {selectedApproval?.resolvedAt
-                              ? `Resolved ${formatDate(selectedApproval.resolvedAt)}`
+                            {selectedApprovalDetail?.resolvedAt
+                              ? `Resolved ${formatDate(selectedApprovalDetail.resolvedAt)}`
                               : 'No explicit resolver metadata returned yet.'}
                           </p>
-                          <pre>{formatPayload(selectedApproval?.resolutionPayload)}</pre>
+                          <pre>{formatPayload(selectedApprovalDetail?.resolutionPayload)}</pre>
                         </div>
                       </div>
                       <label className="notes-field">
