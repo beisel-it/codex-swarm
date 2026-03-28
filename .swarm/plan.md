@@ -28,13 +28,23 @@ M3 implementation is complete:
 
 ### M4
 
-M4 refinement and execution are now active:
+M4 implementation is complete:
 
-- `cd4c26d8` Refine Phase 4 roadmap into executable M4 delivery plan
-- distributed worker fleet and queueing
+- distributed worker fleet model
+- Redis-backed dispatch and remote bootstrap
 - sticky placement and failure recovery across nodes
 - node health and utilization visibility
 - multi-node verification
+
+### M5
+
+M5 refinement and execution are now active:
+
+- `6980a1bb` Refine Phase 5 roadmap into executable M5 delivery plan
+- identity, workspace isolation, and RBAC
+- policy packs, approval delegation, and stricter repo defaults
+- audit export, retention, and admin reporting
+- governance UI and multi-user verification
 
 ## Dependency Order
 
