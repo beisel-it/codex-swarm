@@ -1,0 +1,15 @@
+[workspace]
+plan = ".swarm/plan.md"
+prompt = ".swarm/prompt.md"
+runbook = ".swarm/runbook.md"
+status = ".swarm/status.md"
+
+[agents]
+directory = ".codex/agents"
+default = "leader"
+
+[skills]
+directory = ".agents/skills"
+
+[profiles]
+directory = "templates/repo-profiles"
