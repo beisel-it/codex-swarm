@@ -2322,4 +2322,254 @@ describe("buildApp", () => {
 
     await app.close();
   });
+
+  it("preserves distributed run visibility across two-node retry recovery", async () => {
+    const verticalSlice = new FakeVerticalSliceControlPlane();
+    const app = await buildApp({
+      config: {
+        NODE_ENV: "test",
+        PORT: 3000,
+        HOST: "127.0.0.1",
+        DATABASE_URL: "postgres://unused/test",
+        DEV_AUTH_TOKEN: "test-token",
+        OPENAI_TRACING_DISABLED: true
+      },
+      controlPlane: verticalSlice as unknown as ControlPlaneService
+    });
+
+    const headers = {
+      authorization: "Bearer test-token"
+    };
+
+    const runResponse = await app.inject({
+      method: "POST",
+      url: "/api/v1/runs",
+      headers,
+      payload: {
+        repositoryId: ids.repository,
+        goal: "Verify multi-node continuity and retry recovery",
+        concurrencyCap: 2,
+        metadata: {}
+      }
+    });
+
+    expect(runResponse.statusCode).toBe(201);
+
+    const firstAgentResponse = await app.inject({
+      method: "POST",
+      url: "/api/v1/agents",
+      headers,
+      payload: {
+        runId: ids.run,
+        name: "worker-1",
+        role: "backend-developer",
+        status: "idle",
+        session: {
+          threadId: "thread-node-a",
+          cwd: "/tmp/codex-swarm/run-1/worker-1",
+          sandbox: "workspace-write",
+          approvalPolicy: "on-request",
+          includePlanTool: false,
+          workerNodeId: ids.workerNode,
+          placementConstraintLabels: ["remote"],
+          metadata: {
+            lane: "node-a"
+          }
+        }
+      }
+    });
+
+    expect(firstAgentResponse.statusCode).toBe(201);
+
+    const secondAgentResponse = await app.inject({
+      method: "POST",
+      url: "/api/v1/agents",
+      headers,
+      payload: {
+        runId: ids.run,
+        name: "worker-2",
+        role: "frontend-developer",
+        status: "idle",
+        session: {
+          threadId: "thread-node-b",
+          cwd: "/tmp/codex-swarm/run-1/worker-2",
+          sandbox: "workspace-write",
+          approvalPolicy: "on-request",
+          includePlanTool: false,
+          workerNodeId: ids.workerNodeB,
+          placementConstraintLabels: ["remote"],
+          metadata: {
+            lane: "node-b"
+          }
+        }
+      }
+    });
+
+    expect(secondAgentResponse.statusCode).toBe(201);
+
+    const initialRunDetailResponse = await app.inject({
+      method: "GET",
+      url: `/api/v1/runs/${ids.run}`,
+      headers
+    });
+
+    const initialWorkerNodeListResponse = await app.inject({
+      method: "GET",
+      url: "/api/v1/worker-nodes",
+      headers
+    });
+
+    expect(initialRunDetailResponse.statusCode).toBe(200);
+    expect(initialRunDetailResponse.json()).toMatchObject({
+      id: ids.run,
+      sessions: [
+        {
+          threadId: "thread-node-a",
+          workerNodeId: ids.workerNode,
+          stickyNodeId: ids.workerNode
+        },
+        {
+          threadId: "thread-node-b",
+          workerNodeId: ids.workerNodeB,
+          stickyNodeId: ids.workerNodeB
+        }
+      ]
+    });
+    expect(initialWorkerNodeListResponse.statusCode).toBe(200);
+    expect(initialWorkerNodeListResponse.json()).toMatchObject([
+      { id: ids.workerNode, name: "node-a", status: "online", drainState: "active" },
+      { id: ids.workerNodeB, name: "node-b", status: "online", drainState: "active" }
+    ]);
+
+    const dispatchCreateResponse = await app.inject({
+      method: "POST",
+      url: "/api/v1/worker-dispatch-assignments",
+      headers,
+      payload: {
+        runId: ids.run,
+        taskId: ids.taskA,
+        agentId: ids.agent,
+        sessionId: ids.session,
+        repositoryId: ids.repository,
+        repositoryName: "codex-swarm",
+        stickyNodeId: ids.workerNode,
+        requiredCapabilities: ["remote"],
+        worktreePath: "/tmp/codex-swarm/run-1/worker-1",
+        prompt: "Retry the stranded node-a worker",
+        profile: "default",
+        sandbox: "workspace-write",
+        approvalPolicy: "on-request"
+      }
+    });
+
+    expect(dispatchCreateResponse.statusCode).toBe(201);
+
+    const initialClaimResponse = await app.inject({
+      method: "POST",
+      url: `/api/v1/worker-nodes/${ids.workerNode}/claim-dispatch`,
+      headers
+    });
+
+    expect(initialClaimResponse.statusCode).toBe(200);
+    expect(initialClaimResponse.json()).toMatchObject({
+      claimedByNodeId: ids.workerNode,
+      stickyNodeId: ids.workerNode
+    });
+
+    const reconcileResponse = await app.inject({
+      method: "POST",
+      url: `/api/v1/worker-nodes/${ids.workerNode}/reconcile`,
+      headers,
+      payload: {
+        reason: "heartbeat expired"
+      }
+    });
+
+    expect(reconcileResponse.statusCode).toBe(200);
+    expect(reconcileResponse.json()).toMatchObject({
+      nodeId: ids.workerNode,
+      retriedAssignments: 1,
+      failedAssignments: 0,
+      staleSessions: 1
+    });
+
+    const postReconcileRunDetailResponse = await app.inject({
+      method: "GET",
+      url: `/api/v1/runs/${ids.run}`,
+      headers
+    });
+
+    const postReconcileWorkerNodeListResponse = await app.inject({
+      method: "GET",
+      url: "/api/v1/worker-nodes",
+      headers
+    });
+
+    expect(postReconcileRunDetailResponse.statusCode).toBe(200);
+    expect(postReconcileRunDetailResponse.json()).toMatchObject({
+      sessions: [
+        {
+          threadId: "thread-node-a",
+          workerNodeId: null,
+          stickyNodeId: null,
+          state: "pending",
+          staleReason: "node_lost:heartbeat expired"
+        },
+        {
+          threadId: "thread-node-b",
+          workerNodeId: ids.workerNodeB,
+          stickyNodeId: ids.workerNodeB,
+          state: "active"
+        }
+      ]
+    });
+    expect(postReconcileWorkerNodeListResponse.statusCode).toBe(200);
+    expect(postReconcileWorkerNodeListResponse.json()).toMatchObject([
+      { id: ids.workerNode, status: "offline", drainState: "drained", eligibleForScheduling: false },
+      { id: ids.workerNodeB, status: "online", drainState: "active", eligibleForScheduling: true }
+    ]);
+
+    const retryClaimResponse = await app.inject({
+      method: "POST",
+      url: `/api/v1/worker-nodes/${ids.workerNodeB}/claim-dispatch`,
+      headers
+    });
+
+    expect(retryClaimResponse.statusCode).toBe(200);
+    expect(retryClaimResponse.json()).toMatchObject({
+      claimedByNodeId: ids.workerNodeB,
+      stickyNodeId: ids.workerNodeB,
+      preferredNodeId: ids.workerNodeB,
+      state: "claimed",
+      attempt: 1
+    });
+
+    const recoveredRunDetailResponse = await app.inject({
+      method: "GET",
+      url: `/api/v1/runs/${ids.run}`,
+      headers
+    });
+
+    expect(recoveredRunDetailResponse.statusCode).toBe(200);
+    expect(recoveredRunDetailResponse.json()).toMatchObject({
+      sessions: [
+        {
+          threadId: "thread-node-a",
+          workerNodeId: ids.workerNodeB,
+          stickyNodeId: ids.workerNodeB,
+          state: "active",
+          staleReason: null
+        },
+        {
+          threadId: "thread-node-b",
+          workerNodeId: ids.workerNodeB,
+          stickyNodeId: ids.workerNodeB,
+          state: "active",
+          staleReason: null
+        }
+      ]
+    });
+
+    await app.close();
+  });
 });
