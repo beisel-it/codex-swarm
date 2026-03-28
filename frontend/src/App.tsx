@@ -5,6 +5,9 @@ type RepositoryProvider = 'github' | 'gitlab' | 'local' | 'other'
 type RepositoryTrustLevel = 'trusted' | 'sandboxed' | 'restricted'
 type PullRequestStatus = 'draft' | 'open' | 'merged' | 'closed'
 type HandoffStatus = 'pending' | 'branch_published' | 'pr_open' | 'manual_handoff' | 'merged' | 'closed'
+type WorkerNodeStatus = 'online' | 'degraded' | 'offline'
+type WorkerNodeDrainState = 'active' | 'draining' | 'drained'
+type WorkerSessionState = 'pending' | 'active' | 'stopped' | 'failed' | 'stale' | 'archived'
 
 type RunStatus =
   | 'pending'
@@ -103,9 +106,28 @@ type Session = {
   sandbox: string
   approvalPolicy: string
   includePlanTool: boolean
+  workerNodeId: string | null
+  stickyNodeId: string | null
+  placementConstraintLabels: string[]
+  state: WorkerSessionState
+  staleReason: string | null
   metadata: Record<string, unknown>
   createdAt: string
   updatedAt: string
+}
+
+type WorkerNode = {
+  id: string
+  name: string
+  endpoint: string | null
+  capabilityLabels: string[]
+  status: WorkerNodeStatus
+  drainState: WorkerNodeDrainState
+  lastHeartbeatAt: string | null
+  metadata: Record<string, unknown>
+  eligibleForScheduling: boolean
+  createdAt?: string
+  updatedAt?: string
 }
 
 type Approval = {
@@ -176,6 +198,7 @@ type SwarmData = {
   tasks: Task[]
   agents: Agent[]
   sessions: Session[]
+  workerNodes: WorkerNode[]
   approvals: Approval[]
   validations: Validation[]
   artifacts: Artifact[]
@@ -218,7 +241,7 @@ const mockData: SwarmData = {
     {
       id: 'run-alpha',
       repositoryId: 'repo-codex-swarm',
-      goal: 'Finish provider-backed PR handoff so a real repository run can exit with a visible branch publish and open PR.',
+      goal: 'Schedule the live provider handoff run across multiple worker nodes while preserving sticky placement and fleet visibility.',
       status: 'in_progress',
       branchName: 'runs/m3-provider-handoff',
       planArtifactPath: '.swarm/plan.md',
@@ -241,7 +264,7 @@ const mockData: SwarmData = {
     {
       id: 'run-beta',
       repositoryId: 'repo-runbooks',
-      goal: 'Complete GitLab repo onboarding and publish a branch before the documentation handoff opens.',
+      goal: 'Drain the degraded docs node safely while keeping reviewer sessions visible and recoverable.',
       status: 'awaiting_approval',
       branchName: 'runs/m3-runbook-onboarding',
       planArtifactPath: '.swarm/review.md',
@@ -296,15 +319,15 @@ const mockData: SwarmData = {
     {
       id: 'task-ui',
       runId: 'run-alpha',
-      title: 'Deliver M3 board support for repo onboarding and PR reflection',
-      description: 'Expose provider-linked repo onboarding, branch publish state, and PR status across the browser board and run detail surfaces.',
+      title: 'Deliver M4 fleet visibility: node health, placement, and drain indicators',
+      description: 'Expose worker-node health, utilization hints, placement, and drain-aware scheduling indicators across the board and run detail surfaces.',
       role: 'frontend',
       status: 'in_progress',
       priority: 5,
       ownerAgentId: 'agent-frontend',
       parentTaskId: 'task-plan',
       dependencyIds: ['task-plan'],
-      acceptanceCriteria: ['Repo onboarding state visible', 'Publish and PR status reflected', 'Provider links shown in run detail'],
+      acceptanceCriteria: ['Node health and utilization visible', 'Session placement and sticky assignment shown', 'Drain and degraded states reflected in board surfaces'],
       createdAt: '2026-03-28T09:10:00.000Z',
       updatedAt: '2026-03-28T21:19:00.000Z',
     },
@@ -383,7 +406,7 @@ const mockData: SwarmData = {
       name: 'frontend-dev',
       role: 'frontend',
       status: 'busy',
-      branchName: 'feature/m3-provider-ui',
+      branchName: 'feature/m4-fleet-visibility',
       worktreePath: '/worktrees/run-alpha/frontend',
       currentTaskId: 'task-ui',
       lastHeartbeatAt: '2026-03-28T21:09:00.000Z',
@@ -409,6 +432,11 @@ const mockData: SwarmData = {
       sandbox: 'workspace-write',
       approvalPolicy: 'never',
       includePlanTool: true,
+      workerNodeId: 'node-primary',
+      stickyNodeId: 'node-primary',
+      placementConstraintLabels: ['linux', 'node'],
+      state: 'active',
+      staleReason: null,
       metadata: { profile: 'leader' },
       createdAt: '2026-03-28T08:16:00.000Z',
       updatedAt: '2026-03-28T21:08:00.000Z',
@@ -421,6 +449,11 @@ const mockData: SwarmData = {
       sandbox: 'workspace-write',
       approvalPolicy: 'never',
       includePlanTool: false,
+      workerNodeId: 'node-remote-a',
+      stickyNodeId: 'node-remote-a',
+      placementConstraintLabels: ['remote', 'linux'],
+      state: 'active',
+      staleReason: null,
       metadata: { profile: 'backend' },
       createdAt: '2026-03-28T09:03:00.000Z',
       updatedAt: '2026-03-28T21:07:00.000Z',
@@ -433,9 +466,72 @@ const mockData: SwarmData = {
       sandbox: 'workspace-write',
       approvalPolicy: 'never',
       includePlanTool: false,
+      workerNodeId: 'node-remote-b',
+      stickyNodeId: 'node-remote-b',
+      placementConstraintLabels: ['remote', 'browser'],
+      state: 'stale',
+      staleReason: 'node degraded during reconnect',
       metadata: { profile: 'reviewer' },
       createdAt: '2026-03-28T18:00:00.000Z',
       updatedAt: '2026-03-28T20:15:00.000Z',
+    },
+    {
+      id: 'session-frontend',
+      agentId: 'agent-frontend',
+      threadId: 'thread-alpha-frontend',
+      cwd: '/worktrees/run-alpha/frontend',
+      sandbox: 'workspace-write',
+      approvalPolicy: 'never',
+      includePlanTool: false,
+      workerNodeId: 'node-remote-a',
+      stickyNodeId: 'node-remote-a',
+      placementConstraintLabels: ['remote', 'node', 'browser'],
+      state: 'active',
+      staleReason: null,
+      metadata: { profile: 'frontend' },
+      createdAt: '2026-03-28T09:09:00.000Z',
+      updatedAt: '2026-03-28T21:09:00.000Z',
+    },
+  ],
+  workerNodes: [
+    {
+      id: 'node-primary',
+      name: 'node-primary',
+      endpoint: 'tcp://node-primary.internal:7777',
+      capabilityLabels: ['linux', 'node', 'local-ssd'],
+      status: 'online',
+      drainState: 'active',
+      lastHeartbeatAt: '2026-03-28T21:11:00.000Z',
+      metadata: { cpuPercent: 41, memoryPercent: 58, queueDepth: 2, sessionCount: 1 },
+      eligibleForScheduling: true,
+      createdAt: '2026-03-28T07:50:00.000Z',
+      updatedAt: '2026-03-28T21:11:00.000Z',
+    },
+    {
+      id: 'node-remote-a',
+      name: 'node-remote-a',
+      endpoint: 'tcp://node-remote-a.internal:7777',
+      capabilityLabels: ['linux', 'node', 'remote', 'browser'],
+      status: 'online',
+      drainState: 'active',
+      lastHeartbeatAt: '2026-03-28T21:10:00.000Z',
+      metadata: { cpuPercent: 73, memoryPercent: 67, queueDepth: 4, sessionCount: 2 },
+      eligibleForScheduling: true,
+      createdAt: '2026-03-28T07:55:00.000Z',
+      updatedAt: '2026-03-28T21:10:00.000Z',
+    },
+    {
+      id: 'node-remote-b',
+      name: 'node-remote-b',
+      endpoint: 'tcp://node-remote-b.internal:7777',
+      capabilityLabels: ['linux', 'node', 'remote', 'browser'],
+      status: 'degraded',
+      drainState: 'draining',
+      lastHeartbeatAt: '2026-03-28T20:14:00.000Z',
+      metadata: { cpuPercent: 92, memoryPercent: 84, queueDepth: 6, sessionCount: 1, drainReason: 'maintenance' },
+      eligibleForScheduling: false,
+      createdAt: '2026-03-28T08:10:00.000Z',
+      updatedAt: '2026-03-28T20:16:00.000Z',
     },
   ],
   approvals: [
@@ -625,6 +721,27 @@ const pullRequestTone: Record<PullRequestStatus, ActivityItem['tone']> = {
   closed: 'muted',
 }
 
+const workerNodeStatusTone: Record<WorkerNodeStatus, ActivityItem['tone']> = {
+  online: 'success',
+  degraded: 'warning',
+  offline: 'danger',
+}
+
+const workerNodeDrainTone: Record<WorkerNodeDrainState, ActivityItem['tone']> = {
+  active: 'success',
+  draining: 'warning',
+  drained: 'muted',
+}
+
+const workerSessionTone: Record<WorkerSessionState, ActivityItem['tone']> = {
+  pending: 'warning',
+  active: 'success',
+  stopped: 'muted',
+  failed: 'danger',
+  stale: 'warning',
+  archived: 'muted',
+}
+
 function buildApiUrl(path: string) {
   return API_BASE_URL ? `${API_BASE_URL}${path}` : path
 }
@@ -674,6 +791,7 @@ async function loadSwarmData(): Promise<SwarmData> {
   try {
     const repositories = await requestJson<Repository[]>('/api/v1/repositories')
     const runs = await requestJson<Run[]>('/api/v1/runs')
+    const workerNodes = await requestJson<WorkerNode[]>('/api/v1/worker-nodes').catch(() => [])
 
     if (repositories.length === 0 || runs.length === 0) {
       return mockData
@@ -723,6 +841,7 @@ async function loadSwarmData(): Promise<SwarmData> {
       tasks: details.flatMap((detail) => detail.tasks),
       agents: details.flatMap((detail) => detail.agents),
       sessions: details.flatMap((detail) => detail.sessions),
+      workerNodes,
       approvals: approvalsPerRun.flat(),
       validations: validationsPerRun.flat(),
       artifacts: artifactsPerRun.flat(),
@@ -803,8 +922,29 @@ function formatRelativeHeartbeat(input?: string | null) {
   return `Heartbeat ${deltaMinutes} minutes ago`
 }
 
+function formatPercentage(input: unknown) {
+  return typeof input === 'number' && Number.isFinite(input) ? `${Math.round(input)}%` : 'n/a'
+}
+
+function nodeUtilizationSummary(workerNode: WorkerNode, assignedSessions: number) {
+  const cpu = formatPercentage(workerNode.metadata?.cpuPercent)
+  const memory = formatPercentage(workerNode.metadata?.memoryPercent)
+  const queueDepth =
+    typeof workerNode.metadata?.queueDepth === 'number' ? String(workerNode.metadata.queueDepth) : 'n/a'
+
+  return `CPU ${cpu} · MEM ${memory} · queue ${queueDepth} · sessions ${assignedSessions}`
+}
+
+function describePlacement(session: Session, workerNode: WorkerNode | null, stickyNode: WorkerNode | null) {
+  const nodeLabel = workerNode?.name ?? session.workerNodeId ?? 'unplaced'
+  const stickyLabel = stickyNode?.name ?? session.stickyNodeId ?? 'none'
+  const constraints = session.placementConstraintLabels.length > 0 ? session.placementConstraintLabels.join(', ') : 'none'
+  return `Placed on ${nodeLabel} · sticky ${stickyLabel} · labels ${constraints}`
+}
+
 function deriveActivity(
   run: Run | null,
+  workerNodes: WorkerNode[],
   approvals: Approval[],
   validations: Validation[],
   artifacts: Artifact[],
@@ -835,6 +975,16 @@ function deriveActivity(
           } satisfies ActivityItem,
         ]
       : []),
+    ...workerNodes.map((workerNode) => ({
+      id: `worker-node-${workerNode.id}`,
+      kind: 'worker node',
+      title: `${workerNode.name} ${formatLabel(workerNode.status)}`,
+      detail: workerNode.drainState === 'active'
+        ? String(workerNode.metadata?.drainReason ?? 'Accepting new assignments')
+        : String(workerNode.metadata?.drainReason ?? `Drain state ${formatLabel(workerNode.drainState)}`),
+      timestamp: workerNode.lastHeartbeatAt ?? workerNode.updatedAt ?? new Date().toISOString(),
+      tone: workerNode.status === 'offline' ? 'danger' : workerNodeDrainTone[workerNode.drainState],
+    })),
     ...approvals.map((approval) => ({
       id: `approval-${approval.id}`,
       kind: 'approval',
@@ -951,11 +1101,16 @@ function App() {
   const runSessions = data.sessions.filter((session) =>
     runAgents.some((agent) => agent.id === session.agentId),
   )
+  const runWorkerNodes = data.workerNodes.filter((workerNode) =>
+    runSessions.some(
+      (session) => session.workerNodeId === workerNode.id || session.stickyNodeId === workerNode.id,
+    ),
+  )
   const runApprovals = data.approvals.filter((approval) => approval.runId === selectedRun?.id)
   const runValidations = data.validations.filter((validation) => validation.runId === selectedRun?.id)
   const runArtifacts = data.artifacts.filter((artifact) => artifact.runId === selectedRun?.id)
   const runMessages = data.messages.filter((message) => message.runId === selectedRun?.id)
-  const activity = deriveActivity(selectedRun, runApprovals, runValidations, runArtifacts, runMessages)
+  const activity = deriveActivity(selectedRun, runWorkerNodes, runApprovals, runValidations, runArtifacts, runMessages)
   const selectedApproval =
     runApprovals.find((approval) => approval.id === selectedApprovalId) ??
     runApprovals.find((approval) => approval.status === 'pending') ??
@@ -1002,10 +1157,8 @@ function App() {
   }, [selectedApprovalId, runApprovals])
 
   const blockedTasks = runTasks.filter((task) => task.status === 'blocked')
-  const pendingApprovals = runApprovals.filter((approval) => approval.status === 'pending')
-  const failedValidations = runValidations.filter((validation) => validation.status === 'failed')
-  const staleAgents = runAgents.filter((agent) => agent.status === 'paused' || agent.status === 'failed')
-  const publishedRuns = data.runs.filter((run) => run.publishedBranch).length
+  const degradedNodes = data.workerNodes.filter((workerNode) => workerNode.status === 'degraded' || workerNode.status === 'offline')
+  const drainingNodes = data.workerNodes.filter((workerNode) => workerNode.drainState !== 'active')
   const openPullRequests = data.runs.filter((run) => run.pullRequestStatus === 'open' || run.pullRequestStatus === 'draft').length
 
   async function handleApprovalAction(status: ApprovalStatus) {
@@ -1036,18 +1189,18 @@ function App() {
 
       <header className="hero-panel">
         <div className="hero-copy">
-          <p className="eyebrow">Codex Swarm M3 Board</p>
-          <h1>Repository onboarding, branch publish, and PR status in one board.</h1>
+          <p className="eyebrow">Codex Swarm M4 Board</p>
+          <h1>Fleet health, placement, and drain-aware execution in one board.</h1>
           <p className="lede">
-            Phase 3 connects the board to real repository workflow: provider-linked onboarding,
-            published branch state, PR handoff visibility, and status reflection without leaving
-            the run detail surfaces that operators already use.
+            Phase 4 extends the board into distributed execution: worker-node health, utilization
+            hints, sticky placement, and drain or degraded indicators now sit beside the existing
+            run, provider, and review surfaces.
           </p>
         </div>
 
         <div className="hero-metrics">
           <MetricCard label="Active runs" value={String(data.runs.filter((run) => run.status === 'in_progress' || run.status === 'awaiting_approval').length)} hint="Runs needing operator attention" />
-          <MetricCard label="Published branches" value={String(publishedRuns)} hint="Runs with provider handoff started" />
+          <MetricCard label="Fleet alerts" value={String(degradedNodes.length + drainingNodes.length)} hint="Nodes that are degraded, offline, or draining" />
           <MetricCard label="Open PRs" value={String(openPullRequests)} hint="Draft or open pull requests reflected from the API" />
         </div>
       </header>
@@ -1109,8 +1262,8 @@ function App() {
 
           <div className="run-summary-grid">
             <MiniStat label="Blocked tasks" value={String(blockedTasks.length)} />
-            <MiniStat label="PR gates" value={String(pendingApprovals.length)} />
-            <MiniStat label="Repo alerts" value={String((selectedRepository?.localPath ? 0 : 1) + staleAgents.length + failedValidations.length)} />
+            <MiniStat label="Placement issues" value={String(runSessions.filter((session) => session.state === 'stale' || session.state === 'failed').length)} />
+            <MiniStat label="Fleet alerts" value={String(runWorkerNodes.filter((node) => node.status !== 'online' || node.drainState !== 'active').length)} />
           </div>
         </aside>
 
@@ -1154,6 +1307,51 @@ function App() {
 
             {selectedView === 'board' ? (
               <>
+                <section className="panel panel-fleet">
+                  <div className="panel-header">
+                    <div>
+                      <p className="panel-kicker">Fleet visibility</p>
+                      <h2>Node health, utilization, and drain state</h2>
+                    </div>
+                  </div>
+
+                  <div className="fleet-grid">
+                    {data.workerNodes.map((workerNode) => {
+                      const assignedSessions = data.sessions.filter(
+                        (session) => session.workerNodeId === workerNode.id,
+                      ).length
+
+                      return (
+                        <article key={workerNode.id} className="fleet-card">
+                          <div className="dag-card-header">
+                            <strong>{workerNode.name}</strong>
+                            <span className={`tone-chip tone-${workerNodeStatusTone[workerNode.status]}`}>
+                              {workerNode.status}
+                            </span>
+                          </div>
+                          <p>{workerNode.endpoint ?? 'No endpoint recorded'}</p>
+                          <div className="inline-meta">
+                            <span className={`tone-chip tone-${workerNodeDrainTone[workerNode.drainState]}`}>
+                              {formatLabel(workerNode.drainState)}
+                            </span>
+                            <span className={`tone-chip tone-${workerNode.eligibleForScheduling ? 'success' : 'warning'}`}>
+                              {workerNode.eligibleForScheduling ? 'schedulable' : 'held'}
+                            </span>
+                          </div>
+                          <p>{nodeUtilizationSummary(workerNode, assignedSessions)}</p>
+                          <div className="dependency-strip">
+                            {workerNode.capabilityLabels.map((label) => (
+                              <span key={label} className="dependency-chip">
+                                {label}
+                              </span>
+                            ))}
+                          </div>
+                        </article>
+                      )
+                    })}
+                  </div>
+                </section>
+
                 <section className="panel panel-provider">
                   <div className="panel-header">
                     <div>
@@ -1308,7 +1506,7 @@ function App() {
                   <div className="panel-header">
                     <div>
                       <p className="panel-kicker">Agent lanes</p>
-                      <h2>Worker ownership and session state</h2>
+                      <h2>Worker ownership, placement, and session state</h2>
                     </div>
                   </div>
 
@@ -1316,6 +1514,7 @@ function App() {
                     {runAgents.map((agent) => {
                       const agentTask = runTasks.find((task) => task.id === agent.currentTaskId)
                       const session = runSessions.find((item) => item.agentId === agent.id)
+                      const workerNode = data.workerNodes.find((item) => item.id === session?.workerNodeId) ?? null
 
                       return (
                         <article key={agent.id} className="agent-card">
@@ -1343,10 +1542,30 @@ function App() {
                               <dd>{session?.threadId ?? 'No Codex session recorded'}</dd>
                             </div>
                             <div>
+                              <dt>Placement</dt>
+                              <dd>{workerNode?.name ?? session?.workerNodeId ?? 'Not placed'}</dd>
+                            </div>
+                            <div>
+                              <dt>Session state</dt>
+                              <dd>{session ? formatLabel(session.state) : 'Unknown'}</dd>
+                            </div>
+                            <div>
                               <dt>Heartbeat</dt>
                               <dd>{formatRelativeHeartbeat(agent.lastHeartbeatAt)}</dd>
                             </div>
                           </dl>
+                          {session ? (
+                            <div className="inline-meta">
+                              <span className={`tone-chip tone-${workerSessionTone[session.state]}`}>
+                                {formatLabel(session.state)}
+                              </span>
+                              {workerNode ? (
+                                <span className={`tone-chip tone-${workerNodeDrainTone[workerNode.drainState]}`}>
+                                  {formatLabel(workerNode.drainState)}
+                                </span>
+                              ) : null}
+                            </div>
+                          ) : null}
                         </article>
                       )
                     })}
@@ -1361,7 +1580,7 @@ function App() {
                   <div className="panel-header">
                     <div>
                       <p className="panel-kicker">Run detail</p>
-                      <h2>Lifecycle, onboarding, and handoff</h2>
+                      <h2>Lifecycle, placement, and handoff</h2>
                     </div>
                   </div>
 
@@ -1373,21 +1592,27 @@ function App() {
                     </article>
 
                     <article className="detail-card">
-                      <p className="panel-kicker">Recovery posture</p>
-                      <strong>{failedValidations.length > 0 ? 'Attention required' : staleAgents.length > 0 ? 'Paused workers present' : 'Healthy'}</strong>
+                      <p className="panel-kicker">Fleet posture</p>
+                      <strong>
+                        {runWorkerNodes.some((node) => node.status === 'offline')
+                          ? 'Offline node in path'
+                          : runWorkerNodes.some((node) => node.status === 'degraded' || node.drainState !== 'active')
+                            ? 'Drain or degraded state present'
+                            : 'Healthy'}
+                      </strong>
                       <p>
-                        {failedValidations.length > 0
-                          ? 'At least one validation is failing and may block restart-safe handoff.'
-                          : staleAgents.length > 0
-                            ? 'One or more workers are paused or failed and need intervention.'
-                            : 'No current restart or session reconciliation alerts are visible.'}
+                        {runWorkerNodes.some((node) => node.status === 'offline')
+                          ? 'A placement node is offline and the run may need reassignment or retry.'
+                          : runWorkerNodes.some((node) => node.status === 'degraded' || node.drainState !== 'active')
+                            ? 'A placement node is degraded or draining, so scheduling and recovery need operator attention.'
+                            : 'The nodes attached to this run are healthy and accepting assignments.'}
                       </p>
                     </article>
 
                     <article className="detail-card">
                       <p className="panel-kicker">Session reconciliation</p>
                       <strong>{runSessions.length} sessions tracked</strong>
-                      <p>Each run detail payload is contributing session identity, cwd, sandbox mode, and approval policy.</p>
+                      <p>Each run detail payload is now carrying session state, worker node placement, sticky assignment, and constraint labels.</p>
                     </article>
 
                     <article className="detail-card">
@@ -1444,11 +1669,57 @@ function App() {
                   </div>
                 </section>
 
+                <section className="panel panel-placement">
+                  <div className="panel-header">
+                    <div>
+                      <p className="panel-kicker">Placement surface</p>
+                      <h2>Session placement and node diagnostics</h2>
+                    </div>
+                  </div>
+
+                  <div className="placement-grid">
+                    {runSessions.map((session) => {
+                      const agent = runAgents.find((item) => item.id === session.agentId)
+                      const workerNode = data.workerNodes.find((item) => item.id === session.workerNodeId) ?? null
+                      const stickyNode = data.workerNodes.find((item) => item.id === session.stickyNodeId) ?? null
+
+                      return (
+                        <article key={session.id} className="placement-card">
+                          <div className="dag-card-header">
+                            <strong>{agent?.name ?? session.agentId}</strong>
+                            <span className={`tone-chip tone-${workerSessionTone[session.state]}`}>
+                              {formatLabel(session.state)}
+                            </span>
+                          </div>
+                          <p>{describePlacement(session, workerNode, stickyNode)}</p>
+                          <div className="detail-list">
+                            <span>Thread: {session.threadId}</span>
+                            <span>Current node: {workerNode?.name ?? session.workerNodeId ?? 'Not placed'}</span>
+                            <span>Sticky node: {stickyNode?.name ?? session.stickyNodeId ?? 'None'}</span>
+                            <span>Constraints: {session.placementConstraintLabels.length > 0 ? session.placementConstraintLabels.join(', ') : 'None'}</span>
+                            <span>Stale reason: {session.staleReason ?? 'No stale marker'}</span>
+                          </div>
+                          {workerNode ? (
+                            <div className="inline-meta">
+                              <span className={`tone-chip tone-${workerNodeStatusTone[workerNode.status]}`}>
+                                {workerNode.status}
+                              </span>
+                              <span className={`tone-chip tone-${workerNodeDrainTone[workerNode.drainState]}`}>
+                                {formatLabel(workerNode.drainState)}
+                              </span>
+                            </div>
+                          ) : null}
+                        </article>
+                      )
+                    })}
+                  </div>
+                </section>
+
                 <section className="panel panel-recovery">
                   <div className="panel-header">
                     <div>
                       <p className="panel-kicker">Recovery surface</p>
-                      <h2>Sessions and stale workers</h2>
+                      <h2>Sessions, stale workers, and node impact</h2>
                     </div>
                   </div>
 
@@ -1466,10 +1737,13 @@ function App() {
                           </div>
                           <p>{session.threadId}</p>
                           <div className="recovery-meta">
+                            <span>{session.workerNodeId ?? 'No worker node'}</span>
+                            <span>{formatLabel(session.state)}</span>
                             <span>{session.cwd}</span>
                             <span>{session.sandbox}</span>
                             <span>{session.approvalPolicy}</span>
                           </div>
+                          {session.staleReason ? <p>{session.staleReason}</p> : null}
                         </article>
                       )
                     })}
@@ -1665,7 +1939,7 @@ function App() {
           {errorText
             ? `API fallback active: ${errorText}`
             : data.source === 'api'
-              ? 'Live repositories, run detail, provider handoff, approvals, validations, artifacts, and messages are polling.'
+              ? 'Live repositories, worker nodes, placement, provider handoff, approvals, validations, artifacts, and messages are polling.'
               : 'Using fallback seed data until the API is reachable.'}
         </span>
       </footer>
