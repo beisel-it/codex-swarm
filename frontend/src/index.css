@@ -253,6 +253,7 @@ code {
 }
 
 .panel-overview,
+.panel-provider,
 .panel-board,
 .panel-agents,
 .panel-approvals,
@@ -260,6 +261,7 @@ code {
 .panel-artifacts,
 .panel-dag,
 .panel-detail,
+.panel-provider-detail,
 .panel-recovery,
 .panel-activity,
 .panel-review {
@@ -340,6 +342,7 @@ code {
 }
 
 .run-card-topline,
+.run-card-meta,
 .task-card-topline,
 .agent-card-topline,
 .approval-title,
@@ -420,7 +423,9 @@ code {
 .run-summary-grid,
 .detail-grid,
 .review-grid,
-.contract-surface {
+.contract-surface,
+.provider-grid,
+.provider-detail-grid {
   display: grid;
   gap: 14px;
 }
@@ -438,7 +443,9 @@ code {
 
 .mini-stat span,
 .dag-label,
-.notes-field span {
+.notes-field span,
+.detail-list,
+.inline-meta {
   font-family: var(--mono);
 }
 
@@ -589,8 +596,13 @@ code {
 }
 
 .detail-grid,
-.contract-surface {
+.contract-surface,
+.provider-grid {
   grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.provider-detail-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
 .review-grid {
@@ -605,6 +617,18 @@ code {
 .review-card {
   text-align: left;
   cursor: pointer;
+}
+
+.run-card-meta,
+.inline-meta,
+.detail-list {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.run-card-meta {
+  margin-top: 14px;
 }
 
 .review-card.is-selected {
@@ -634,6 +658,35 @@ code {
 .recovery-card strong {
   display: block;
   margin-bottom: 8px;
+}
+
+.detail-list {
+  margin-top: 14px;
+  flex-direction: column;
+  color: var(--muted);
+}
+
+.inline-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: fit-content;
+  min-height: 36px;
+  padding: 0 14px;
+  border-radius: 999px;
+  background: rgba(18, 23, 35, 0.08);
+  color: var(--text-strong);
+  text-decoration: none;
+  transition:
+    background-color 160ms ease,
+    transform 160ms ease;
+}
+
+.inline-link:hover,
+.inline-link:focus-visible {
+  background: rgba(191, 79, 47, 0.16);
+  transform: translateY(-1px);
+  outline: none;
 }
 
 .contract-card pre {
@@ -774,6 +827,7 @@ code {
   }
 
   .panel-overview,
+  .panel-provider,
   .panel-board,
   .panel-agents,
   .panel-approvals,
@@ -781,6 +835,7 @@ code {
   .panel-artifacts,
   .panel-dag,
   .panel-detail,
+  .panel-provider-detail,
   .panel-recovery,
   .panel-activity,
   .panel-review {
@@ -804,7 +859,9 @@ code {
   .run-summary-grid,
   .detail-grid,
   .review-grid,
-  .contract-surface {
+  .contract-surface,
+  .provider-grid,
+  .provider-detail-grid {
     grid-template-columns: 1fr;
   }
 
@@ -813,7 +870,8 @@ code {
   .approval-meta,
   .approval-title,
   .validation-title,
-  .run-card-topline {
+  .run-card-topline,
+  .run-card-meta {
     flex-direction: column;
   }
 

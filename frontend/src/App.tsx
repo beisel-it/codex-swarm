@@ -1,6 +1,10 @@
 import { startTransition, useDeferredValue, useEffect, useState } from 'react'
 
 type ViewMode = 'board' | 'detail' | 'review'
+type RepositoryProvider = 'github' | 'gitlab' | 'local' | 'other'
+type RepositoryTrustLevel = 'trusted' | 'sandboxed' | 'restricted'
+type PullRequestStatus = 'draft' | 'open' | 'merged' | 'closed'
+type HandoffStatus = 'pending' | 'branch_published' | 'pr_open' | 'manual_handoff' | 'merged' | 'closed'
 
 type RunStatus =
   | 'pending'
@@ -23,13 +27,18 @@ type TaskStatus =
 type AgentStatus = 'provisioning' | 'idle' | 'busy' | 'paused' | 'stopped' | 'failed'
 type ApprovalStatus = 'pending' | 'approved' | 'rejected'
 type ValidationStatus = 'pending' | 'passed' | 'failed'
-type ArtifactKind = 'plan' | 'patch' | 'log' | 'report' | 'diff' | 'screenshot' | 'other'
+type ArtifactKind = 'plan' | 'patch' | 'log' | 'report' | 'diff' | 'screenshot' | 'pr_link' | 'other'
 
 type Repository = {
   id: string
   name: string
   url: string
+  provider: RepositoryProvider
   defaultBranch: string
+  localPath: string | null
+  trustLevel: RepositoryTrustLevel
+  createdAt?: string
+  updatedAt?: string
 }
 
 type Run = {
@@ -38,11 +47,22 @@ type Run = {
   goal: string
   status: RunStatus
   branchName: string | null
-  planArtifactPath?: string | null
-  createdBy?: string
+  planArtifactPath: string | null
+  budgetTokens?: number | null
+  budgetCostUsd?: number | null
+  concurrencyCap?: number
+  policyProfile?: string | null
+  publishedBranch: string | null
+  branchPublishedAt: string | null
+  pullRequestUrl: string | null
+  pullRequestNumber: number | null
+  pullRequestStatus: PullRequestStatus | null
+  handoffStatus: HandoffStatus
+  completedAt?: string | null
+  createdBy: string
   createdAt: string
   updatedAt: string
-  metadata?: Record<string, unknown>
+  metadata: Record<string, unknown>
 }
 
 type Task = {
@@ -174,34 +194,72 @@ const mockData: SwarmData = {
     {
       id: 'repo-codex-swarm',
       name: 'codex-swarm',
-      url: 'github.com/example/codex-swarm',
+      url: 'https://github.com/example/codex-swarm',
+      provider: 'github',
       defaultBranch: 'main',
+      localPath: '/home/florian/codex-swarm',
+      trustLevel: 'trusted',
+      createdAt: '2026-03-20T09:00:00.000Z',
+      updatedAt: '2026-03-28T20:58:00.000Z',
+    },
+    {
+      id: 'repo-runbooks',
+      name: 'swarm-runbooks',
+      url: 'https://gitlab.com/example/swarm-runbooks',
+      provider: 'gitlab',
+      defaultBranch: 'main',
+      localPath: null,
+      trustLevel: 'sandboxed',
+      createdAt: '2026-03-26T11:00:00.000Z',
+      updatedAt: '2026-03-28T18:20:00.000Z',
     },
   ],
   runs: [
     {
       id: 'run-alpha',
       repositoryId: 'repo-codex-swarm',
-      goal: 'Turn the orchestration core into a usable internal product with a live board, approvals, and recovery visibility.',
+      goal: 'Finish provider-backed PR handoff so a real repository run can exit with a visible branch publish and open PR.',
       status: 'in_progress',
-      branchName: 'runs/m2-board-beta',
+      branchName: 'runs/m3-provider-handoff',
       planArtifactPath: '.swarm/plan.md',
+      budgetTokens: 180000,
+      budgetCostUsd: 48,
+      concurrencyCap: 4,
+      policyProfile: 'internal-default',
+      publishedBranch: 'runs/m3-provider-handoff',
+      branchPublishedAt: '2026-03-28T20:48:00.000Z',
+      pullRequestUrl: 'https://github.com/example/codex-swarm/pull/42',
+      pullRequestNumber: 42,
+      pullRequestStatus: 'open',
+      handoffStatus: 'pr_open',
+      completedAt: null,
       createdBy: 'tech-lead',
       createdAt: '2026-03-28T08:15:00.000Z',
-      updatedAt: '2026-03-28T21:02:00.000Z',
-      metadata: { phase: 'M2', concurrency: 4, queueDepth: 3 },
+      updatedAt: '2026-03-28T21:18:00.000Z',
+      metadata: { phase: 'M3', concurrency: 4, queueDepth: 3 },
     },
     {
       id: 'run-beta',
-      repositoryId: 'repo-codex-swarm',
-      goal: 'Hold beta review gates for approvals, validations, and restart-safe handoff.',
+      repositoryId: 'repo-runbooks',
+      goal: 'Complete GitLab repo onboarding and publish a branch before the documentation handoff opens.',
       status: 'awaiting_approval',
-      branchName: 'runs/m2-review-loop',
+      branchName: 'runs/m3-runbook-onboarding',
       planArtifactPath: '.swarm/review.md',
+      budgetTokens: 60000,
+      budgetCostUsd: 18,
+      concurrencyCap: 2,
+      policyProfile: 'sandboxed-docs',
+      publishedBranch: null,
+      branchPublishedAt: null,
+      pullRequestUrl: null,
+      pullRequestNumber: null,
+      pullRequestStatus: null,
+      handoffStatus: 'pending',
+      completedAt: null,
       createdBy: 'tech-lead',
       createdAt: '2026-03-27T14:10:00.000Z',
       updatedAt: '2026-03-28T19:55:00.000Z',
-      metadata: { phase: 'M2', concurrency: 2, queueDepth: 1 },
+      metadata: { phase: 'M3', concurrency: 2, queueDepth: 1 },
     },
   ],
   tasks: [
@@ -238,17 +296,17 @@ const mockData: SwarmData = {
     {
       id: 'task-ui',
       runId: 'run-alpha',
-      title: 'Deliver M2 board UI: active runs, task DAG, agent lanes, review surfaces',
-      description: 'Build the Phase 2 browser UI around active runs, dependency-aware tasks, approvals, validations, and recovery panes.',
+      title: 'Deliver M3 board support for repo onboarding and PR reflection',
+      description: 'Expose provider-linked repo onboarding, branch publish state, and PR status across the browser board and run detail surfaces.',
       role: 'frontend',
       status: 'in_progress',
       priority: 5,
       ownerAgentId: 'agent-frontend',
       parentTaskId: 'task-plan',
       dependencyIds: ['task-plan'],
-      acceptanceCriteria: ['Board surface split into board/detail/review', 'Approvals patch flow works', 'Recovery state is visible'],
+      acceptanceCriteria: ['Repo onboarding state visible', 'Publish and PR status reflected', 'Provider links shown in run detail'],
       createdAt: '2026-03-28T09:10:00.000Z',
-      updatedAt: '2026-03-28T21:05:00.000Z',
+      updatedAt: '2026-03-28T21:19:00.000Z',
     },
     {
       id: 'task-approval',
@@ -325,7 +383,7 @@ const mockData: SwarmData = {
       name: 'frontend-dev',
       role: 'frontend',
       status: 'busy',
-      branchName: 'feature/m2-board-ui',
+      branchName: 'feature/m3-provider-ui',
       worktreePath: '/worktrees/run-alpha/frontend',
       currentTaskId: 'task-ui',
       lastHeartbeatAt: '2026-03-28T21:09:00.000Z',
@@ -467,9 +525,18 @@ const mockData: SwarmData = {
       runId: 'run-alpha',
       taskId: 'task-ui',
       kind: 'report',
-      path: 'artifacts/ui/m2-board-preview.html',
+      path: 'artifacts/ui/m3-provider-preview.html',
       contentType: 'text/html',
       createdAt: '2026-03-28T21:01:00.000Z',
+    },
+    {
+      id: 'artifact-pr-link',
+      runId: 'run-alpha',
+      taskId: 'task-ui',
+      kind: 'pr_link',
+      path: 'https://github.com/example/codex-swarm/pull/42',
+      contentType: 'text/uri-list',
+      createdAt: '2026-03-28T21:18:00.000Z',
     },
     {
       id: 'artifact-log',
@@ -534,6 +601,28 @@ const validationStatusTone: Record<ValidationStatus, string> = {
   pending: 'warning',
   passed: 'success',
   failed: 'danger',
+}
+
+const repositoryTrustTone: Record<RepositoryTrustLevel, ActivityItem['tone']> = {
+  trusted: 'success',
+  sandboxed: 'warning',
+  restricted: 'danger',
+}
+
+const handoffTone: Record<HandoffStatus, ActivityItem['tone']> = {
+  pending: 'warning',
+  branch_published: 'active',
+  pr_open: 'success',
+  manual_handoff: 'warning',
+  merged: 'success',
+  closed: 'muted',
+}
+
+const pullRequestTone: Record<PullRequestStatus, ActivityItem['tone']> = {
+  draft: 'warning',
+  open: 'active',
+  merged: 'success',
+  closed: 'muted',
 }
 
 function buildApiUrl(path: string) {
@@ -654,12 +743,46 @@ function formatDate(input: string) {
   }).format(new Date(input))
 }
 
+function formatLabel(input: string) {
+  return input.replace(/_/g, ' ')
+}
+
 function formatPayload(payload?: Record<string, unknown> | null) {
   if (!payload || Object.keys(payload).length === 0) {
     return 'No structured payload recorded yet.'
   }
 
   return JSON.stringify(payload, null, 2)
+}
+
+function describeRepositoryOnboarding(repository: Repository | null) {
+  if (!repository) {
+    return 'No repository linked to this run yet.'
+  }
+
+  if (repository.provider === 'local') {
+    return repository.localPath
+      ? 'Local checkout is connected and ready for worktrees.'
+      : 'Local repository tracked without a checkout path.'
+  }
+
+  if (repository.localPath) {
+    return `${repository.provider} provider linked with a local checkout ready for run execution.`
+  }
+
+  return `${repository.provider} provider linked, but a local checkout path has not been recorded yet.`
+}
+
+function describeHandoff(run: Run) {
+  if (run.pullRequestUrl) {
+    return `PR #${run.pullRequestNumber ?? 'pending'} is ${formatLabel(run.pullRequestStatus ?? 'open')}.`
+  }
+
+  if (run.publishedBranch) {
+    return `Branch ${run.publishedBranch} was published and is waiting for PR handoff.`
+  }
+
+  return 'No branch publish or PR handoff has been recorded yet.'
 }
 
 function formatRelativeHeartbeat(input?: string | null) {
@@ -681,12 +804,37 @@ function formatRelativeHeartbeat(input?: string | null) {
 }
 
 function deriveActivity(
+  run: Run | null,
   approvals: Approval[],
   validations: Validation[],
   artifacts: Artifact[],
   messages: Message[],
 ): ActivityItem[] {
   const activity = [
+    ...(run?.publishedBranch
+      ? [
+          {
+            id: `run-branch-${run.id}`,
+            kind: 'publish',
+            title: `Branch ${run.publishedBranch} published`,
+            detail: run.branchPublishedAt ? `Published ${formatDate(run.branchPublishedAt)}` : 'Provider handoff is recorded.',
+            timestamp: run.branchPublishedAt ?? run.updatedAt,
+            tone: handoffTone[run.handoffStatus],
+          } satisfies ActivityItem,
+        ]
+      : []),
+    ...(run?.pullRequestUrl
+      ? [
+          {
+            id: `run-pr-${run.id}`,
+            kind: 'pull request',
+            title: `PR #${run.pullRequestNumber ?? 'pending'} ${formatLabel(run.pullRequestStatus ?? 'open')}`,
+            detail: run.pullRequestUrl,
+            timestamp: run.updatedAt,
+            tone: pullRequestTone[run.pullRequestStatus ?? 'open'],
+          } satisfies ActivityItem,
+        ]
+      : []),
     ...approvals.map((approval) => ({
       id: `approval-${approval.id}`,
       kind: 'approval',
@@ -788,7 +936,7 @@ function App() {
 
   const selectedRepository = data.repositories.find(
     (repository) => repository.id === selectedRun?.repositoryId,
-  )
+  ) ?? null
 
   const runTasks = data.tasks.filter((task) => task.runId === selectedRun?.id)
   const visibleTasks = runTasks.filter((task) => {
@@ -807,7 +955,7 @@ function App() {
   const runValidations = data.validations.filter((validation) => validation.runId === selectedRun?.id)
   const runArtifacts = data.artifacts.filter((artifact) => artifact.runId === selectedRun?.id)
   const runMessages = data.messages.filter((message) => message.runId === selectedRun?.id)
-  const activity = deriveActivity(runApprovals, runValidations, runArtifacts, runMessages)
+  const activity = deriveActivity(selectedRun, runApprovals, runValidations, runArtifacts, runMessages)
   const selectedApproval =
     runApprovals.find((approval) => approval.id === selectedApprovalId) ??
     runApprovals.find((approval) => approval.status === 'pending') ??
@@ -857,6 +1005,8 @@ function App() {
   const pendingApprovals = runApprovals.filter((approval) => approval.status === 'pending')
   const failedValidations = runValidations.filter((validation) => validation.status === 'failed')
   const staleAgents = runAgents.filter((agent) => agent.status === 'paused' || agent.status === 'failed')
+  const publishedRuns = data.runs.filter((run) => run.publishedBranch).length
+  const openPullRequests = data.runs.filter((run) => run.pullRequestStatus === 'open' || run.pullRequestStatus === 'draft').length
 
   async function handleApprovalAction(status: ApprovalStatus) {
     if (!selectedApproval) {
@@ -886,19 +1036,19 @@ function App() {
 
       <header className="hero-panel">
         <div className="hero-copy">
-          <p className="eyebrow">Codex Swarm M2 Board</p>
-          <h1>Active runs, reviewer decisions, and recovery signals in one board.</h1>
+          <p className="eyebrow">Codex Swarm M3 Board</p>
+          <h1>Repository onboarding, branch publish, and PR status in one board.</h1>
           <p className="lede">
-            Phase 2 shifts this from a shell into an internal product: polling board data,
-            approval decisions in-browser, task dependency context, agent/session recovery state,
-            and a review workspace built on the backend contracts that exist today.
+            Phase 3 connects the board to real repository workflow: provider-linked onboarding,
+            published branch state, PR handoff visibility, and status reflection without leaving
+            the run detail surfaces that operators already use.
           </p>
         </div>
 
         <div className="hero-metrics">
           <MetricCard label="Active runs" value={String(data.runs.filter((run) => run.status === 'in_progress' || run.status === 'awaiting_approval').length)} hint="Runs needing operator attention" />
-          <MetricCard label="Pending approvals" value={String(data.approvals.filter((approval) => approval.status === 'pending').length)} hint="Plan, patch, and policy gates" />
-          <MetricCard label="Failed validations" value={String(data.validations.filter((validation) => validation.status === 'failed').length)} hint="Checks blocking merge or recovery" />
+          <MetricCard label="Published branches" value={String(publishedRuns)} hint="Runs with provider handoff started" />
+          <MetricCard label="Open PRs" value={String(openPullRequests)} hint="Draft or open pull requests reflected from the API" />
         </div>
       </header>
 
@@ -937,20 +1087,30 @@ function App() {
               >
                 <div className="run-card-topline">
                   <span className={`tone-chip tone-${runStatusTone[run.status]}`}>
-                    {run.status.replace('_', ' ')}
+                    {formatLabel(run.status)}
                   </span>
                   <span className="run-timestamp">{formatDate(run.updatedAt)}</span>
                 </div>
                 <h3>{run.goal}</h3>
-                <p>{run.branchName ?? 'Branch not assigned yet'}</p>
+                <p>
+                  {run.pullRequestUrl
+                    ? `PR #${run.pullRequestNumber ?? 'pending'} · ${formatLabel(run.pullRequestStatus ?? 'open')}`
+                    : run.publishedBranch ?? run.branchName ?? 'Branch not assigned yet'}
+                </p>
+                <div className="run-card-meta">
+                  <span className="role-chip">
+                    {data.repositories.find((repository) => repository.id === run.repositoryId)?.provider ?? 'other'}
+                  </span>
+                  <span className={`tone-chip tone-${handoffTone[run.handoffStatus]}`}>{formatLabel(run.handoffStatus)}</span>
+                </div>
               </button>
             ))}
           </div>
 
           <div className="run-summary-grid">
             <MiniStat label="Blocked tasks" value={String(blockedTasks.length)} />
-            <MiniStat label="Approvals" value={String(pendingApprovals.length)} />
-            <MiniStat label="Recovery alerts" value={String(staleAgents.length + failedValidations.length)} />
+            <MiniStat label="PR gates" value={String(pendingApprovals.length)} />
+            <MiniStat label="Repo alerts" value={String((selectedRepository?.localPath ? 0 : 1) + staleAgents.length + failedValidations.length)} />
           </div>
         </aside>
 
@@ -963,13 +1123,15 @@ function App() {
                   <h2>{selectedRepository?.name ?? 'Unlinked repository'}</h2>
                 </div>
                 <span className={`tone-chip tone-${runStatusTone[selectedRun.status]}`}>
-                  {selectedRun.status.replace('_', ' ')}
+                  {formatLabel(selectedRun.status)}
                 </span>
               </div>
 
               <div className="overview-grid">
                 <InfoCard label="Goal" value={selectedRun.goal} />
                 <InfoCard label="Branch" value={selectedRun.branchName ?? 'Pending branch assignment'} />
+                <InfoCard label="Published branch" value={selectedRun.publishedBranch ?? 'Not published yet'} />
+                <InfoCard label="PR status" value={selectedRun.pullRequestStatus ? `${formatLabel(selectedRun.pullRequestStatus)}${selectedRun.pullRequestNumber ? ` · #${selectedRun.pullRequestNumber}` : ''}` : 'PR handoff not started'} />
                 <InfoCard label="Repository" value={selectedRepository?.url ?? 'No URL available'} />
                 <InfoCard label="Plan artifact" value={selectedRun.planArtifactPath ?? 'Not published yet'} />
               </div>
@@ -980,8 +1142,8 @@ function App() {
                   <strong>{String(selectedRun.metadata?.phase ?? 'Unspecified')}</strong>
                 </div>
                 <div>
-                  <p className="signal-label">Queue depth</p>
-                  <strong>{String(selectedRun.metadata?.queueDepth ?? 0)} items</strong>
+                  <p className="signal-label">Handoff</p>
+                  <strong>{formatLabel(selectedRun.handoffStatus)}</strong>
                 </div>
                 <div>
                   <p className="signal-label">Hydration</p>
@@ -992,6 +1154,52 @@ function App() {
 
             {selectedView === 'board' ? (
               <>
+                <section className="panel panel-provider">
+                  <div className="panel-header">
+                    <div>
+                      <p className="panel-kicker">Repository onboarding</p>
+                      <h2>Provider and handoff readiness</h2>
+                    </div>
+                  </div>
+
+                  <div className="provider-grid">
+                    <article className="detail-card">
+                      <p className="panel-kicker">Provider link</p>
+                      <strong>{selectedRepository ? `${selectedRepository.provider} · ${selectedRepository.name}` : 'Repository missing'}</strong>
+                      <p>{describeRepositoryOnboarding(selectedRepository)}</p>
+                      <div className="inline-meta">
+                        <span className={`tone-chip tone-${selectedRepository ? repositoryTrustTone[selectedRepository.trustLevel] : 'warning'}`}>
+                          {selectedRepository?.trustLevel ?? 'untracked'}
+                        </span>
+                        <span className="role-chip">{selectedRepository?.defaultBranch ?? 'main'}</span>
+                      </div>
+                    </article>
+
+                    <article className="detail-card">
+                      <p className="panel-kicker">Branch publish</p>
+                      <strong>{selectedRun.publishedBranch ?? 'Waiting for publish'}</strong>
+                      <p>{describeHandoff(selectedRun)}</p>
+                      <div className="inline-meta">
+                        <span className={`tone-chip tone-${handoffTone[selectedRun.handoffStatus]}`}>
+                          {formatLabel(selectedRun.handoffStatus)}
+                        </span>
+                        <span>{selectedRun.branchPublishedAt ? formatDate(selectedRun.branchPublishedAt) : 'Not published'}</span>
+                      </div>
+                    </article>
+
+                    <article className="detail-card">
+                      <p className="panel-kicker">Pull request</p>
+                      <strong>{selectedRun.pullRequestUrl ? `#${selectedRun.pullRequestNumber ?? 'pending'}` : 'No PR yet'}</strong>
+                      <p>{selectedRun.pullRequestUrl ? 'Provider handoff is live and linked below.' : 'The board is waiting for the provider to create or attach a pull request.'}</p>
+                      {selectedRun.pullRequestUrl ? (
+                        <a className="inline-link" href={selectedRun.pullRequestUrl} target="_blank" rel="noreferrer">
+                          Open pull request
+                        </a>
+                      ) : null}
+                    </article>
+                  </div>
+                </section>
+
                 <section className="panel panel-board">
                   <div className="panel-header">
                     <div>
@@ -1017,7 +1225,7 @@ function App() {
                       return (
                         <section key={status} className="task-column">
                           <div className="task-column-header">
-                            <h3>{status.replace('_', ' ')}</h3>
+                            <h3>{formatLabel(status)}</h3>
                             <span>{laneTasks.length}</span>
                           </div>
 
@@ -1068,12 +1276,12 @@ function App() {
                   <div className="dag-list">
                     {runTasks.map((task) => (
                       <article key={task.id} className="dag-card">
-                        <div className="dag-card-header">
-                          <strong>{task.title}</strong>
-                          <span className={`tone-chip tone-${runStatusToneForTask(task.status)}`}>
-                            {task.status.replace('_', ' ')}
-                          </span>
-                        </div>
+                          <div className="dag-card-header">
+                            <strong>{task.title}</strong>
+                            <span className={`tone-chip tone-${runStatusToneForTask(task.status)}`}>
+                              {formatLabel(task.status)}
+                            </span>
+                          </div>
                         <p>{task.description}</p>
                         <div className="dag-meta">
                           <span>{task.role}</span>
@@ -1153,11 +1361,17 @@ function App() {
                   <div className="panel-header">
                     <div>
                       <p className="panel-kicker">Run detail</p>
-                      <h2>Recovery and lifecycle</h2>
+                      <h2>Lifecycle, onboarding, and handoff</h2>
                     </div>
                   </div>
 
                   <div className="detail-grid">
+                    <article className="detail-card">
+                      <p className="panel-kicker">Repository</p>
+                      <strong>{selectedRepository ? `${selectedRepository.provider} / ${selectedRepository.name}` : 'Repository missing'}</strong>
+                      <p>{describeRepositoryOnboarding(selectedRepository)}</p>
+                    </article>
+
                     <article className="detail-card">
                       <p className="panel-kicker">Recovery posture</p>
                       <strong>{failedValidations.length > 0 ? 'Attention required' : staleAgents.length > 0 ? 'Paused workers present' : 'Healthy'}</strong>
@@ -1177,9 +1391,55 @@ function App() {
                     </article>
 
                     <article className="detail-card">
-                      <p className="panel-kicker">Operator notes</p>
-                      <strong>{blockedTasks.length} blocked tasks</strong>
-                      <p>Blocked tasks are visible with dependency chips so the unblock path is reviewable in the browser.</p>
+                      <p className="panel-kicker">PR handoff</p>
+                      <strong>{selectedRun.pullRequestUrl ? `PR #${selectedRun.pullRequestNumber ?? 'pending'} ${formatLabel(selectedRun.pullRequestStatus ?? 'open')}` : formatLabel(selectedRun.handoffStatus)}</strong>
+                      <p>{describeHandoff(selectedRun)}</p>
+                    </article>
+                  </div>
+                </section>
+
+                <section className="panel panel-provider-detail">
+                  <div className="panel-header">
+                    <div>
+                      <p className="panel-kicker">Provider detail</p>
+                      <h2>Onboarding and PR reflection</h2>
+                    </div>
+                  </div>
+
+                  <div className="provider-detail-grid">
+                    <article className="detail-card">
+                      <p className="panel-kicker">Onboarding state</p>
+                      <strong>{selectedRepository ? `${selectedRepository.provider} / ${selectedRepository.trustLevel}` : 'Unlinked'}</strong>
+                      <div className="detail-list">
+                        <span>Remote: {selectedRepository?.url ?? 'Not recorded'}</span>
+                        <span>Default branch: {selectedRepository?.defaultBranch ?? 'main'}</span>
+                        <span>Checkout: {selectedRepository?.localPath ?? 'Missing local path'}</span>
+                      </div>
+                    </article>
+
+                    <article className="detail-card">
+                      <p className="panel-kicker">Publish state</p>
+                      <strong>{selectedRun.publishedBranch ?? 'Pending publish'}</strong>
+                      <div className="detail-list">
+                        <span>Requested branch: {selectedRun.branchName ?? 'Not assigned'}</span>
+                        <span>Published branch: {selectedRun.publishedBranch ?? 'Not published'}</span>
+                        <span>Published at: {selectedRun.branchPublishedAt ? formatDate(selectedRun.branchPublishedAt) : 'Awaiting provider publish'}</span>
+                      </div>
+                    </article>
+
+                    <article className="detail-card">
+                      <p className="panel-kicker">Pull request reflection</p>
+                      <strong>{selectedRun.pullRequestStatus ? formatLabel(selectedRun.pullRequestStatus) : 'Not linked'}</strong>
+                      <div className="detail-list">
+                        <span>Handoff state: {formatLabel(selectedRun.handoffStatus)}</span>
+                        <span>PR number: {selectedRun.pullRequestNumber ? `#${selectedRun.pullRequestNumber}` : 'Pending'}</span>
+                        <span>PR link: {selectedRun.pullRequestUrl ?? 'No provider URL yet'}</span>
+                      </div>
+                      {selectedRun.pullRequestUrl ? (
+                        <a className="inline-link" href={selectedRun.pullRequestUrl} target="_blank" rel="noreferrer">
+                          Open provider link
+                        </a>
+                      ) : null}
                     </article>
                   </div>
                 </section>
@@ -1378,7 +1638,13 @@ function App() {
                     {runArtifacts.map((artifact) => (
                       <article key={artifact.id} className="artifact-card">
                         <span className="role-chip">{artifact.kind}</span>
-                        <strong>{artifact.path}</strong>
+                        {artifact.kind === 'pr_link' ? (
+                          <a className="inline-link" href={artifact.path} target="_blank" rel="noreferrer">
+                            Open pull request artifact
+                          </a>
+                        ) : (
+                          <strong>{artifact.path}</strong>
+                        )}
                         <p>{artifact.contentType}</p>
                       </article>
                     ))}
@@ -1399,7 +1665,7 @@ function App() {
           {errorText
             ? `API fallback active: ${errorText}`
             : data.source === 'api'
-              ? 'Live approvals, run detail, validations, artifacts, and messages are polling.'
+              ? 'Live repositories, run detail, provider handoff, approvals, validations, artifacts, and messages are polling.'
               : 'Using fallback seed data until the API is reachable.'}
         </span>
       </footer>
