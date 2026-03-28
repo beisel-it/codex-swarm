@@ -574,3 +574,25 @@ Evidence:
 Residual risks:
 
 - This verdict covers run-scoped audit export and approval provenance. It does not imply organization-wide external archival or compliance-system delivery beyond the exported payload the repo currently defines.
+
+## Task `35e882a9`
+
+Roadmap entry:
+
+- Phase 5 deliverable: `Team and repo policy management`
+
+Verdict:
+
+- parity
+
+Evidence:
+
+- Repository policy profiles are first-class persisted data via `approvalProfile` on repositories in `apps/api/src/db/schema.ts`.
+- `ControlPlaneService.createRepository` applies team-policy inheritance and trust-level-sensitive escalation through `resolveRepositoryApprovalProfile(...)`, so repository policy can vary by team default or explicit override without code changes in `apps/api/src/services/control-plane-service.ts`.
+- Policy-focused tests verify team-profile inheritance, restricted-repo elevation, and sensitive-default run behavior in `apps/api/test/control-plane-service.policy.test.ts`.
+- Governance tests verify that repository policy defaults flow into run behavior and secret-access differentiation for standard versus sensitive repositories in `apps/api/test/control-plane-service.governance.test.ts`.
+- The admin frontend exposes active repository profiles and their repo/run counts in the governance panel, while the docs describe policy profile state and sensitive-default review as supported admin workflows in `frontend/src/App.tsx` and `docs/admin-guide.md`.
+
+Residual risks:
+
+- The current repo shows policy management through API-backed inheritance, governance reporting, and admin visibility. It does not yet expose a richer policy-editor workflow beyond the modeled profiles and repository onboarding fields.
