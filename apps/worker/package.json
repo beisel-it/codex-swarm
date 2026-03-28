@@ -14,6 +14,9 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run"
   },
+  "dependencies": {
+    "@codex-swarm/contracts": "workspace:*"
+  },
   "devDependencies": {
     "@types/node": "^24.5.2",
     "tsx": "^4.20.6",

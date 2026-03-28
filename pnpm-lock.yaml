@@ -59,6 +59,10 @@ importers:
         version: 3.2.4(@types/node@24.12.0)(lightningcss@1.32.0)(tsx@4.21.0)
 
   apps/worker:
+    dependencies:
+      '@codex-swarm/contracts':
+        specifier: workspace:*
+        version: link:../../packages/contracts
     devDependencies:
       '@types/node':
         specifier: ^24.5.2

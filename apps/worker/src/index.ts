@@ -5,15 +5,39 @@ import {
   buildSessionRecoveryPlan,
   createWorktreePath
 } from "./runtime.js";
+import {
+  buildRedisDispatchQueueKeys,
+  buildRemoteWorkerBootstrap,
+  buildWorkerDrainStatus,
+  canNodeAcceptDispatch,
+  createDispatchLease,
+  deserializeDispatchAssignment,
+  deserializeDispatchLease,
+  evaluateWorkerRuntimeDependencies,
+  RedisDispatchQueue,
+  serializeDispatchAssignment,
+  serializeDispatchLease
+} from "./dispatch.js";
 import { SessionRegistry } from "./session-registry.js";
 
 export {
   buildCodexServerCommand,
   buildCodexSessionReplyRequest,
   buildCodexSessionStartRequest,
+  buildRedisDispatchQueueKeys,
+  buildRemoteWorkerBootstrap,
   buildSessionRecoveryPlan,
+  buildWorkerDrainStatus,
+  canNodeAcceptDispatch,
+  createDispatchLease,
   createWorktreePath,
-  SessionRegistry
+  deserializeDispatchAssignment,
+  deserializeDispatchLease,
+  evaluateWorkerRuntimeDependencies,
+  RedisDispatchQueue,
+  SessionRegistry,
+  serializeDispatchAssignment,
+  serializeDispatchLease
 };
 
 if (process.argv[1] && import.meta.url.endsWith(process.argv[1])) {
