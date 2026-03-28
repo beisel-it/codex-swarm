@@ -26,6 +26,7 @@ const controlPlane = {
   createAgent: vi.fn(),
   listMessages: vi.fn(),
   createMessage: vi.fn(),
+  listApprovals: vi.fn(),
   createApproval: vi.fn(),
   updateApproval: vi.fn(),
   listValidations: vi.fn(),
@@ -205,6 +206,37 @@ class FakeVerticalSliceControlPlane {
     throw new Error("not implemented");
   }
 
+  async listApprovals(runId?: string) {
+    const approvals = [
+      {
+        id: "77777777-7777-4777-8777-777777777777",
+        runId: ids.run,
+        taskId: ids.taskA,
+        kind: "plan",
+        status: "pending",
+        requestedBy: "tech-lead",
+        reviewer: null,
+        notes: null,
+        createdAt: new Date(),
+        updatedAt: new Date()
+      },
+      {
+        id: "88888888-8888-4888-8888-888888888888",
+        runId: "99999999-9999-4999-8999-999999999999",
+        taskId: null,
+        kind: "merge",
+        status: "approved",
+        requestedBy: "tech-lead",
+        reviewer: "reviewer",
+        notes: "ok",
+        createdAt: new Date(),
+        updatedAt: new Date()
+      }
+    ];
+
+    return runId ? approvals.filter((approval) => approval.runId === runId) : approvals;
+  }
+
   async createApproval() {
     throw new Error("not implemented");
   }
@@ -304,6 +336,40 @@ describe("buildApp", () => {
       }
     ]);
     expect(controlPlane.listRuns).toHaveBeenCalledWith(undefined);
+
+    await app.close();
+  });
+
+  it("lists approvals and forwards the optional runId filter", async () => {
+    controlPlane.listApprovals.mockResolvedValueOnce([
+      {
+        id: "77777777-7777-4777-8777-777777777777",
+        runId: ids.run,
+        status: "pending"
+      }
+    ]);
+
+    const app = await buildApp({
+      controlPlane: controlPlane as unknown as ControlPlaneService
+    });
+
+    const response = await app.inject({
+      method: "GET",
+      url: `/api/v1/approvals?runId=${ids.run}`,
+      headers: {
+        authorization: "Bearer codex-swarm-dev-token"
+      }
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual([
+      {
+        id: "77777777-7777-4777-8777-777777777777",
+        runId: ids.run,
+        status: "pending"
+      }
+    ]);
+    expect(controlPlane.listApprovals).toHaveBeenCalledWith(ids.run);
 
     await app.close();
   });
@@ -481,6 +547,38 @@ describe("buildApp", () => {
         { id: ids.session, threadId: "thread-123", agentId: ids.agent }
       ]
     });
+
+    await app.close();
+  });
+
+  it("supports approval cards from persisted approval rows", async () => {
+    const app = await buildApp({
+      config: {
+        NODE_ENV: "test",
+        PORT: 3000,
+        HOST: "127.0.0.1",
+        DATABASE_URL: "postgres://unused/test",
+        DEV_AUTH_TOKEN: "test-token"
+      },
+      controlPlane: new FakeVerticalSliceControlPlane() as unknown as ControlPlaneService
+    });
+
+    const response = await app.inject({
+      method: "GET",
+      url: `/api/v1/approvals?runId=${ids.run}`,
+      headers: {
+        authorization: "Bearer test-token"
+      }
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual([
+      expect.objectContaining({
+        runId: ids.run,
+        kind: "plan",
+        status: "pending"
+      })
+    ]);
 
     await app.close();
   });

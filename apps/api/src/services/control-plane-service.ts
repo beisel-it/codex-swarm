@@ -330,6 +330,15 @@ export class ControlPlaneService {
     return approval;
   }
 
+  async listApprovals(runId?: string) {
+    if (runId) {
+      await this.assertRunExists(runId);
+      return this.db.select().from(approvals).where(eq(approvals.runId, runId)).orderBy(asc(approvals.createdAt));
+    }
+
+    return this.db.select().from(approvals).orderBy(asc(approvals.createdAt));
+  }
+
   async updateApproval(approvalId: string, input: ApprovalUpdate) {
     const now = this.clock.now();
 

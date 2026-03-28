@@ -1,6 +1,7 @@
 import { z } from "zod";
 import {
   agentCreateSchema,
+  approvalsListQuerySchema,
   idParamSchema,
   repositoryCreateSchema,
   runCreateSchema,
@@ -73,6 +74,7 @@ export const artifactCreateSchema = z.object({
 });
 export {
   agentCreateSchema,
+  approvalsListQuerySchema,
   idParamSchema,
   repositoryCreateSchema,
   runCreateSchema,

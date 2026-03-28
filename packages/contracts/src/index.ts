@@ -116,6 +116,23 @@ export const sessionSchema = z.object({
   updatedAt: z.date()
 });
 
+export const approvalSchema = z.object({
+  id: z.uuid(),
+  runId: z.uuid(),
+  taskId: z.uuid().nullable(),
+  kind: z.string().min(1),
+  status: z.enum(approvalStatuses),
+  requestedBy: z.string().min(1),
+  reviewer: z.string().min(1).nullable(),
+  notes: z.string().min(1).nullable(),
+  createdAt: z.date(),
+  updatedAt: z.date()
+});
+
+export const approvalsListQuerySchema = z.object({
+  runId: z.uuid().optional()
+});
+
 export const runDetailSchema = runSchema.extend({
   tasks: z.array(taskSchema),
   agents: z.array(agentSchema),
@@ -133,4 +150,6 @@ export type Run = z.infer<typeof runSchema>;
 export type Task = z.infer<typeof taskSchema>;
 export type Agent = z.infer<typeof agentSchema>;
 export type Session = z.infer<typeof sessionSchema>;
+export type Approval = z.infer<typeof approvalSchema>;
 export type RunDetail = z.infer<typeof runDetailSchema>;
+export type ApprovalsListQuery = z.infer<typeof approvalsListQuerySchema>;
