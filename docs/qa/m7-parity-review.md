@@ -639,3 +639,29 @@ Evidence:
 Residual risks:
 
 - The review surface is approval-centric rather than a dedicated “completed task” page, but it satisfies the roadmap criterion by letting reviewers inspect task-linked approval context and act in the browser.
+
+## Task `5af474e4`
+
+Roadmap entry:
+
+- Phase 3 quality item: `Cleanup jobs for stale worktrees and sessions`
+
+Verdict:
+
+- gap
+
+Evidence:
+
+- The repo does implement a cleanup route at `POST /api/v1/cleanup-jobs/run` and a control-plane handler `runCleanupJob(...)` in `apps/api/src/routes/cleanup-jobs.ts` and `apps/api/src/services/control-plane-service.ts`.
+- That implementation builds a recovery plan from persisted session state plus a caller-supplied `existingWorktreePaths` list and then updates session/agent state to `resume`, `retry`, `mark_stale`, or `archive` in `apps/api/src/services/control-plane-service.ts`.
+- Unit coverage verifies those state transitions in `apps/api/test/control-plane-service.cleanup.test.ts`, and route coverage verifies the cleanup-job API surface in `apps/api/test/app.test.ts`.
+- The worker recovery logic likewise only classifies sessions based on whether a worktree path appears in the provided snapshot; it does not create, remove, or scrub filesystem worktrees in `apps/worker/src/runtime.ts`.
+- I found no implementation under `apps/` or `packages/` that actually deletes stale worktree directories or performs filesystem cleanup. The job handles stale sessions and worktree-missing detection, but not real worktree cleanup.
+
+Residual risks:
+
+- Operators can reconcile stale session state, but stale worktree directories may still accumulate because the repo does not currently provide an actual worktree-deletion path.
+
+Backlog follow-up:
+
+- Add real stale-worktree cleanup behavior with filesystem-level acceptance evidence, or intentionally narrow the roadmap item to session-state reconciliation plus missing-worktree detection.
