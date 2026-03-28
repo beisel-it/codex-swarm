@@ -52,6 +52,21 @@ importers:
         specifier: ^3.2.4
         version: 3.2.4(@types/node@24.12.0)(lightningcss@1.32.0)(tsx@4.21.0)
 
+  apps/worker:
+    devDependencies:
+      '@types/node':
+        specifier: ^24.5.2
+        version: 24.12.0
+      tsx:
+        specifier: ^4.20.6
+        version: 4.21.0
+      typescript:
+        specifier: ^5.9.2
+        version: 5.9.3
+      vitest:
+        specifier: ^3.2.4
+        version: 3.2.4(@types/node@24.12.0)(lightningcss@1.32.0)(tsx@4.21.0)
+
   frontend:
     dependencies:
       react:
