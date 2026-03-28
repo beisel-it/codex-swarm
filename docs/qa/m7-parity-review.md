@@ -300,3 +300,48 @@ Evidence:
 Residual risks:
 
 - The repo supports a concrete multi-user governance model at the workspace/team and role boundary level, but it still relies on the current bounded auth implementation rather than production SSO/OIDC federation.
+
+## Task `c2b2c810`
+
+Roadmap entry:
+
+- Phase 0 scope: `Finalize PRD and roadmap`
+
+Verdict:
+
+- parity
+
+Evidence:
+
+- The product requirements are checked in as `PRD.md` with scope, goals, non-goals, architecture intent, and success metrics.
+- The delivery sequence is checked in as `ROADMAP.md` with milestone map, phase-by-phase plan, deliverables, exit criteria, and deferred scope.
+- The architecture freeze document in `docs/architecture/m0-m1-architecture.md` explicitly translates the PRD and roadmap into the adopted TypeScript-first implementation plan for M0/M1.
+
+Residual risks:
+
+- The documents remain marked `Draft v0.1`, so this verdict covers the presence of a finalized-in-repo planning baseline rather than a formal external signoff workflow.
+
+## Task `4336b2fc`
+
+Roadmap entry:
+
+- Phase 0 deliverable: `docs/architecture/ with system context and sequence diagrams`
+
+Verdict:
+
+- gap
+
+Evidence:
+
+- `ROADMAP.md` explicitly places the system-context and sequence-diagram deliverable under `docs/architecture/`.
+- The current `docs/architecture/` directory contains planning and parity-review documents such as `m0-m1-architecture.md`, `m3-delivery-plan.md`, `m4-delivery-plan.md`, `m5-delivery-plan.md`, `m6-delivery-plan.md`, and M7 review notes, but no file in that directory contains system-context or sequence-diagram artifacts.
+- A repo search shows the only actual diagram matches are the mermaid flowchart and sequence diagram embedded in `PRD.md`, not under `docs/architecture/`.
+- `docs/architecture/m0-m1-architecture.md` provides architecture prose and boundaries, but no system-context or sequence-diagram sections.
+
+Residual risks:
+
+- The architecture narrative exists, but the roadmap’s explicit deliverable location and diagram artifacts are not satisfied inside `docs/architecture/`.
+
+Backlog follow-up:
+
+- Add a checked-in architecture document under `docs/architecture/` that carries the required system-context and sequence diagrams, or formally supersede the roadmap wording to point at the authoritative file location.
