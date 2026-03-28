@@ -1,0 +1,9 @@
+node_modules
+.pnpm-store
+.swarm
+.next
+.vercel
+dist
+build
+coverage
+.env

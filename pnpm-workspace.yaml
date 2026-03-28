@@ -1,0 +1,6 @@
+packages:
+  - frontend
+  - apps/*
+  - packages/*
+  - services/*
+  - tooling/*

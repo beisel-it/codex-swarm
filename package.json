@@ -1,0 +1,18 @@
+{
+  "name": "codex-swarm-workspace",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@10.28.0",
+  "engines": {
+    "node": ">=22.0.0",
+    "pnpm": ">=10.28.0"
+  },
+  "scripts": {
+    "dev:api": "pnpm --dir apps/api dev",
+    "dev:frontend": "pnpm --dir frontend dev",
+    "ci:lint": "node ./scripts/ci/run-stage.mjs lint",
+    "ci:typecheck": "node ./scripts/ci/run-stage.mjs typecheck",
+    "ci:test": "node ./scripts/ci/run-stage.mjs test",
+    "ci:build": "node ./scripts/ci/run-stage.mjs build"
+  }
+}

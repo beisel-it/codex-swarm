@@ -1,0 +1,82 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Repository {
+  id            String   @id @default(uuid())
+  name          String
+  url           String
+  defaultBranch String
+  localPath     String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  runs          Run[]
+}
+
+model Run {
+  id               String   @id @default(uuid())
+  repositoryId     String
+  goal             String
+  status           String
+  branchName       String?
+  planArtifactPath String?
+  metadata         Json
+  createdBy        String
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  repository       Repository @relation(fields: [repositoryId], references: [id])
+  tasks            Task[]
+  agents           Agent[]
+}
+
+model Task {
+  id                 String   @id @default(uuid())
+  runId              String
+  parentTaskId       String?
+  title              String
+  description        String
+  role               String
+  status             String
+  priority           Int      @default(3)
+  ownerAgentId       String?
+  dependencyIds      Json
+  acceptanceCriteria Json
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+  run                Run      @relation(fields: [runId], references: [id])
+}
+
+model Agent {
+  id              String   @id @default(uuid())
+  runId           String
+  name            String
+  role            String
+  status          String
+  worktreePath    String?
+  branchName      String?
+  currentTaskId   String?
+  lastHeartbeatAt DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  run             Run      @relation(fields: [runId], references: [id])
+  sessions        Session[]
+}
+
+model Session {
+  id              String   @id @default(uuid())
+  agentId         String
+  threadId        String
+  cwd             String
+  sandbox         String
+  approvalPolicy  String
+  includePlanTool Boolean  @default(false)
+  metadata        Json
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  agent           Agent    @relation(fields: [agentId], references: [id])
+}
