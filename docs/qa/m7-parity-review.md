@@ -164,3 +164,24 @@ Residual risks:
 Backlog follow-up:
 
 - Add a real worktree provisioner and an acceptance test or smoke path that proves workers execute in separate checked-out worktrees.
+
+## Task `06429514`
+
+Roadmap entry:
+
+- Phase 2 deliverable: `Validation history`
+
+Verdict:
+
+- parity
+
+Evidence:
+
+- The API exposes validation-history reads and writes via `GET /api/v1/validations` and `POST /api/v1/validations` in `apps/api/src/routes/validations.ts`.
+- Integration coverage verifies that validation-history entries can be listed with artifact-backed report metadata and created with explicit artifact references in `apps/api/test/app.test.ts`.
+- The frontend loads validation data from `/api/v1/validations?runId=...` and renders a dedicated `Validation history` panel in `frontend/src/App.tsx`.
+- User-facing docs describe recent validations in the review flow, and the shipped screenshot set includes the review console surface in `docs/user-guide.md` and `docs/assets/screenshots/user-review-console.png`.
+
+Residual risks:
+
+- The frontend panel currently shows command and summary details but not the full linked artifact metadata inline; that deeper evidence remains available through the API and review surfaces.
