@@ -13,6 +13,7 @@ const statements = [
     id text primary key,
     workspace_id text not null references workspaces(id),
     name text not null,
+    policy_profile text not null default 'standard',
     created_at timestamptz not null default now(),
     updated_at timestamptz not null default now()
   )`,
@@ -163,6 +164,10 @@ const statements = [
     requested_payload jsonb not null default '{}'::jsonb,
     resolution_payload jsonb not null default '{}'::jsonb,
     requested_by text not null,
+    delegate_actor_id text,
+    delegated_by text,
+    delegated_at timestamptz,
+    delegation_reason text,
     resolver text,
     resolved_at timestamptz,
     created_at timestamptz not null default now(),
@@ -222,8 +227,8 @@ async function main() {
     on conflict (id) do nothing
   `));
   await db.execute(sql.raw(`
-    insert into teams (id, workspace_id, name)
-    values ('default-team', 'default-workspace', 'Default Team')
+    insert into teams (id, workspace_id, name, policy_profile)
+    values ('default-team', 'default-workspace', 'Default Team', 'standard')
     on conflict (id) do nothing
   `));
 
@@ -233,6 +238,10 @@ async function main() {
   await db.execute(sql.raw("alter table approvals add column if not exists team_id text not null default 'default-team'"));
   await db.execute(sql.raw("alter table approvals add column if not exists resolver text"));
   await db.execute(sql.raw("alter table approvals add column if not exists resolved_at timestamptz"));
+  await db.execute(sql.raw("alter table approvals add column if not exists delegate_actor_id text"));
+  await db.execute(sql.raw("alter table approvals add column if not exists delegated_by text"));
+  await db.execute(sql.raw("alter table approvals add column if not exists delegated_at timestamptz"));
+  await db.execute(sql.raw("alter table approvals add column if not exists delegation_reason text"));
   await db.execute(sql.raw("alter table validations add column if not exists artifact_ids jsonb not null default '[]'::jsonb"));
   await db.execute(sql.raw("alter table worker_dispatch_assignments add column if not exists claimed_at timestamptz"));
   await db.execute(sql.raw("alter table worker_dispatch_assignments add column if not exists completed_at timestamptz"));
@@ -247,6 +256,7 @@ async function main() {
   await db.execute(sql.raw("alter table repositories add column if not exists team_id text not null default 'default-team'"));
   await db.execute(sql.raw("alter table repositories add column if not exists trust_level text not null default 'trusted'"));
   await db.execute(sql.raw("alter table repositories add column if not exists approval_profile text not null default 'standard'"));
+  await db.execute(sql.raw("alter table teams add column if not exists policy_profile text not null default 'standard'"));
   await db.execute(sql.raw("alter table runs add column if not exists budget_tokens integer"));
   await db.execute(sql.raw("alter table runs add column if not exists budget_cost_usd_cents integer"));
   await db.execute(sql.raw("alter table runs add column if not exists workspace_id text not null default 'default-workspace'"));

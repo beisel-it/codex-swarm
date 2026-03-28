@@ -27,7 +27,7 @@ export const repositoryCreateSchema = z.object({
   defaultBranch: z.string().min(1).default("main"),
   localPath: z.string().min(1).optional(),
   trustLevel: z.enum(repositoryTrustLevels).default("trusted"),
-  approvalProfile: z.string().min(1).default("standard")
+  approvalProfile: z.string().min(1).optional()
 });
 
 export const workspaceSchema = z.object({
@@ -41,6 +41,7 @@ export const teamSchema = z.object({
   id: z.string().min(1),
   workspaceId: z.string().min(1),
   name: z.string().min(1),
+  policyProfile: z.string().min(1).default("standard"),
   createdAt: z.date(),
   updatedAt: z.date()
 });
@@ -148,6 +149,7 @@ export const repositorySchema = repositoryCreateSchema.extend({
   provider: z.enum(repositoryProviders),
   localPath: z.string().min(1).nullable(),
   trustLevel: z.enum(repositoryTrustLevels),
+  approvalProfile: z.string().min(1),
   createdAt: z.date(),
   updatedAt: z.date()
 });
@@ -236,6 +238,12 @@ export const approvalSchema = z.object({
   requestedPayload: z.record(z.string(), z.unknown()),
   resolutionPayload: z.record(z.string(), z.unknown()),
   requestedBy: z.string().min(1),
+  delegation: z.object({
+    delegateActorId: z.string().min(1),
+    delegatedBy: z.string().min(1),
+    delegatedAt: z.date(),
+    reason: z.string().min(1).nullable().default(null)
+  }).nullable().default(null),
   resolver: z.string().min(1).nullable(),
   resolvedAt: z.date().nullable(),
   createdAt: z.date(),
@@ -438,7 +446,11 @@ export const approvalCreateSchema = z.object({
   taskId: z.uuid().optional(),
   kind: z.enum(approvalKinds),
   requestedBy: z.string().min(1),
-  requestedPayload: z.record(z.string(), z.unknown()).default({})
+  requestedPayload: z.record(z.string(), z.unknown()).default({}),
+  delegation: z.object({
+    delegateActorId: z.string().min(1),
+    reason: z.string().min(1).optional()
+  }).optional()
 });
 
 export const approvalResolveSchema = z.object({
@@ -627,8 +639,15 @@ export const approvalAuditEntrySchema = z.object({
   resolvedAt: z.date().nullable(),
   requestedBy: z.string().min(1),
   requestedByActor: actorIdentitySchema.nullable().default(null),
+  delegation: z.object({
+    delegateActorId: z.string().min(1),
+    delegatedBy: z.string().min(1),
+    delegatedAt: z.date(),
+    reason: z.string().min(1).nullable().default(null)
+  }).nullable().default(null),
   resolver: z.string().min(1).nullable(),
   resolverActor: actorIdentitySchema.nullable().default(null),
+  resolvedByDelegate: z.boolean().default(false),
   policyProfile: z.string().min(1).nullable(),
   requestedPayload: z.record(z.string(), z.unknown()).default({}),
   resolutionPayload: z.record(z.string(), z.unknown()).default({})

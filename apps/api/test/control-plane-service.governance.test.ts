@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { ActorIdentity } from "@codex-swarm/contracts";
 
-import { artifacts, controlPlaneEvents, repositories, runs } from "../src/db/schema.js";
+import { approvals, artifacts, controlPlaneEvents, repositories, runs } from "../src/db/schema.js";
 import { ControlPlaneService } from "../src/services/control-plane-service.js";
 
 function extractTargetId(condition: { queryChunks: Array<{ value?: string[] } | { value?: string }> }) {
@@ -64,6 +64,21 @@ class FakeGovernanceDb {
     };
   }
 
+  insert(table: unknown) {
+    return {
+      values: (values: Record<string, unknown>) => ({
+        returning: async () => {
+          const store = this.storeForInsert(table);
+          const record = {
+            ...values
+          };
+          store.push(record);
+          return [record];
+        }
+      })
+    };
+  }
+
   private rowsFor(table: unknown) {
     if (table === repositories) {
       return this.repositoryStore;
@@ -98,6 +113,14 @@ class FakeGovernanceDb {
     }
 
     throw new Error("unexpected update table");
+  }
+
+  private storeForInsert(table: unknown) {
+    if (table === approvals) {
+      return this.approvalStore;
+    }
+
+    throw new Error("unexpected insert table");
   }
 }
 
@@ -247,6 +270,10 @@ describe("ControlPlaneService governance state", () => {
             feedback: "approved under change window"
           },
           requestedBy: "backend-dev",
+          delegateActorId: "security-admin",
+          delegatedBy: "tech-lead",
+          delegatedAt: new Date("2026-03-28T08:45:00.000Z"),
+          delegationReason: "after-hours deployment coverage",
           resolver: "security-admin",
           resolvedAt: new Date("2026-03-28T09:30:00.000Z"),
           createdAt: new Date("2026-03-28T09:00:00.000Z"),
@@ -367,10 +394,17 @@ describe("ControlPlaneService governance state", () => {
         requestedByActor: expect.objectContaining({
           actorId: "backend-dev"
         }),
+        delegation: {
+          delegateActorId: "security-admin",
+          delegatedBy: "tech-lead",
+          delegatedAt: new Date("2026-03-28T08:45:00.000Z"),
+          reason: "after-hours deployment coverage"
+        },
         resolver: "security-admin",
         resolverActor: expect.objectContaining({
           actorId: "security-admin"
         }),
+        resolvedByDelegate: true,
         policyProfile: "restricted"
       })
     ]);
@@ -400,11 +434,108 @@ describe("ControlPlaneService governance state", () => {
     });
   });
 
+  it("persists delegated approval provenance on create", async () => {
+    const now = new Date("2026-03-28T12:30:00.000Z");
+    const db = new FakeGovernanceDb(
+      [],
+      [
+        {
+          id: "33333333-3333-4333-8333-333333333333",
+          repositoryId: "11111111-1111-4111-8111-111111111111",
+          workspaceId: access.workspaceId,
+          teamId: access.teamId,
+          goal: "Delegated approval",
+          status: "awaiting_approval",
+          branchName: null,
+          planArtifactPath: null,
+          budgetTokens: null,
+          budgetCostUsd: null,
+          concurrencyCap: 1,
+          policyProfile: "restricted",
+          publishedBranch: null,
+          branchPublishedAt: null,
+          pullRequestUrl: null,
+          pullRequestNumber: null,
+          pullRequestStatus: null,
+          handoffStatus: "pending",
+          completedAt: null,
+          metadata: {},
+          createdBy: "backend-dev",
+          createdAt: now,
+          updatedAt: now
+        }
+      ],
+      [],
+      [],
+      []
+    );
+    const service = new ControlPlaneService(
+      db as never,
+      { now: () => now }
+    );
+
+    const approval = await service.createApproval({
+      runId: "33333333-3333-4333-8333-333333333333",
+      kind: "plan",
+      requestedBy: "backend-dev",
+      requestedPayload: {
+        summary: "Need reviewer coverage"
+      },
+      delegation: {
+        delegateActorId: "reviewer-2",
+        reason: "primary reviewer is offline"
+      }
+    }, access);
+
+    expect(approval.delegation).toEqual({
+      delegateActorId: "reviewer-2",
+      delegatedBy: "backend-dev",
+      delegatedAt: now,
+      reason: "primary reviewer is offline"
+    });
+    expect(db.approvalStore).toEqual([
+      expect.objectContaining({
+        runId: "33333333-3333-4333-8333-333333333333",
+        requestedBy: "backend-dev",
+        delegateActorId: "reviewer-2",
+        delegatedBy: "backend-dev",
+        delegatedAt: now,
+        delegationReason: "primary reviewer is offline"
+      })
+    ]);
+  });
+
   it("exports audit provenance from persisted approval and event history", async () => {
     const now = new Date("2026-03-28T13:00:00.000Z");
     const db = new FakeGovernanceDb(
       [],
-      [],
+      [
+        {
+          id: "33333333-3333-4333-8333-333333333333",
+          repositoryId: "11111111-1111-4111-8111-111111111111",
+          workspaceId: access.workspaceId,
+          teamId: access.teamId,
+          goal: "Audit export",
+          status: "awaiting_approval",
+          branchName: null,
+          planArtifactPath: null,
+          budgetTokens: null,
+          budgetCostUsd: null,
+          concurrencyCap: 1,
+          policyProfile: "restricted",
+          publishedBranch: null,
+          branchPublishedAt: null,
+          pullRequestUrl: null,
+          pullRequestNumber: null,
+          pullRequestStatus: null,
+          handoffStatus: "pending",
+          completedAt: null,
+          metadata: {},
+          createdBy: "backend-dev",
+          createdAt: new Date("2026-03-28T08:00:00.000Z"),
+          updatedAt: new Date("2026-03-28T09:30:00.000Z")
+        }
+      ],
       [],
       [],
       [
@@ -541,6 +672,12 @@ describe("ControlPlaneService governance state", () => {
           feedback: "approved"
         },
         requestedBy: "backend-dev",
+        delegation: {
+          delegateActorId: "security-admin",
+          delegatedBy: "tech-lead",
+          delegatedAt: new Date("2026-03-28T08:45:00.000Z"),
+          reason: "after-hours deployment coverage"
+        },
         resolver: "security-admin",
         resolvedAt: new Date("2026-03-28T09:30:00.000Z"),
         createdAt: new Date("2026-03-28T09:00:00.000Z"),
@@ -626,9 +763,16 @@ describe("ControlPlaneService governance state", () => {
         requestedByActor: expect.objectContaining({
           actorId: "backend-dev"
         }),
+        delegation: {
+          delegateActorId: "security-admin",
+          delegatedBy: "tech-lead",
+          delegatedAt: new Date("2026-03-28T08:45:00.000Z"),
+          reason: "after-hours deployment coverage"
+        },
         resolverActor: expect.objectContaining({
           actorId: "security-admin"
         }),
+        resolvedByDelegate: true,
         policyProfile: "restricted"
       })
     ]);

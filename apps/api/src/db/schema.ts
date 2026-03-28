@@ -163,6 +163,10 @@ export const approvals = pgTable("approvals", {
   requestedPayload: jsonb("requested_payload").$type<Record<string, unknown>>().notNull().default({}),
   resolutionPayload: jsonb("resolution_payload").$type<Record<string, unknown>>().notNull().default({}),
   requestedBy: text("requested_by").notNull(),
+  delegateActorId: text("delegate_actor_id"),
+  delegatedBy: text("delegated_by"),
+  delegatedAt: timestamp("delegated_at", { withTimezone: true }),
+  delegationReason: text("delegation_reason"),
   resolver: text("resolver"),
   resolvedAt: timestamp("resolved_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -221,6 +225,7 @@ export const teams = pgTable("teams", {
   id: text("id").primaryKey(),
   workspaceId: text("workspace_id").notNull().references(() => workspaces.id),
   name: text("name").notNull(),
+  policyProfile: text("policy_profile").notNull().default("standard"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
 });

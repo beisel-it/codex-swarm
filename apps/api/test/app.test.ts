@@ -683,6 +683,7 @@ class FakeVerticalSliceControlPlane {
 
   async createApproval(input: any, access?: any) {
     const run = await this.getRun(input.runId, access);
+    const now = new Date();
     return {
       id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
       runId: input.runId,
@@ -694,10 +695,18 @@ class FakeVerticalSliceControlPlane {
       requestedPayload: input.requestedPayload,
       resolutionPayload: {},
       requestedBy: input.requestedBy,
+      delegation: input.delegation
+        ? {
+            delegateActorId: input.delegation.delegateActorId,
+            delegatedBy: input.requestedBy,
+            delegatedAt: now,
+            reason: input.delegation.reason ?? null
+          }
+        : null,
       resolver: null,
       resolvedAt: null,
-      createdAt: new Date(),
-      updatedAt: new Date()
+      createdAt: now,
+      updatedAt: now
     };
   }
 
@@ -1104,7 +1113,6 @@ describe("buildApp", () => {
       url: "https://github.com/example/codex-swarm",
       provider: "github",
       defaultBranch: "main",
-      approvalProfile: "standard",
       trustLevel: "trusted"
     }, expect.objectContaining({
       workspaceId: defaultBoundary.workspaceId,
@@ -2201,6 +2209,92 @@ describe("buildApp", () => {
       kind: "plan",
       status: "pending"
     });
+
+    await app.close();
+  });
+
+  it("creates approvals with delegated reviewer provenance", async () => {
+    controlPlane.createApproval.mockResolvedValueOnce({
+      id: "77777777-7777-4777-8777-777777777777",
+      runId: ids.run,
+      workspaceId: defaultBoundary.workspaceId,
+      teamId: defaultBoundary.teamId,
+      taskId: ids.taskA,
+      kind: "plan",
+      status: "pending",
+      requestedPayload: {
+        summary: "Review the execution plan"
+      },
+      resolutionPayload: {},
+      requestedBy: "dev-user",
+      delegation: {
+        delegateActorId: "reviewer-2",
+        delegatedBy: "dev-user",
+        delegatedAt: new Date("2026-03-28T12:00:00.000Z"),
+        reason: "covering primary reviewer"
+      },
+      resolver: null,
+      resolvedAt: null,
+      createdAt: new Date("2026-03-28T12:00:00.000Z"),
+      updatedAt: new Date("2026-03-28T12:00:00.000Z")
+    });
+
+    const app = await buildApp({
+      controlPlane: controlPlane as unknown as ControlPlaneService
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/v1/approvals",
+      headers: {
+        authorization: "Bearer codex-swarm-dev-token"
+      },
+      payload: {
+        runId: ids.run,
+        taskId: ids.taskA,
+        kind: "plan",
+        requestedBy: "ignored-client-value",
+        requestedPayload: {
+          summary: "Review the execution plan"
+        },
+        delegation: {
+          delegateActorId: "reviewer-2",
+          reason: "covering primary reviewer"
+        }
+      }
+    });
+
+    expect(response.statusCode).toBe(201);
+    expect(response.json()).toMatchObject({
+      runId: ids.run,
+      taskId: ids.taskA,
+      kind: "plan",
+      requestedBy: "dev-user",
+      delegation: {
+        delegateActorId: "reviewer-2",
+        delegatedBy: "dev-user",
+        reason: "covering primary reviewer"
+      }
+    });
+    expect(controlPlane.createApproval).toHaveBeenCalledWith(
+      {
+        runId: ids.run,
+        taskId: ids.taskA,
+        kind: "plan",
+        requestedBy: "dev-user",
+        requestedPayload: {
+          summary: "Review the execution plan"
+        },
+        delegation: {
+          delegateActorId: "reviewer-2",
+          reason: "covering primary reviewer"
+        }
+      },
+      expect.objectContaining({
+        workspaceId: defaultBoundary.workspaceId,
+        teamId: defaultBoundary.teamId
+      })
+    );
 
     await app.close();
   });

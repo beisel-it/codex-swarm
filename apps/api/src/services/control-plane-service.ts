@@ -93,7 +93,17 @@ type WorkerNodeDrainUpdate = WorkerNodeDrainUpdateInput;
 type WorkerDispatchCreate = WorkerDispatchCreateInput;
 type WorkerDispatchComplete = WorkerDispatchCompleteInput;
 type WorkerNodeReconcile = WorkerNodeReconcileInput;
-type AccessBoundary = Pick<ActorIdentity, "workspaceId" | "workspaceName" | "teamId" | "teamName">;
+type AccessBoundary = Pick<ActorIdentity, "workspaceId" | "workspaceName" | "teamId" | "teamName"> & {
+  policyProfile?: ActorIdentity["policyProfile"];
+};
+type OwnershipBoundary = {
+  workspaceId: string;
+  workspaceName: string | null;
+  teamId: string;
+  teamName: string | null;
+  policyProfile: string | null;
+};
+type TeamRecord = typeof teams.$inferSelect;
 
 function assertAccessBoundary(access: AccessBoundary | undefined): asserts access is AccessBoundary & {
   workspaceId: string;
@@ -104,19 +114,15 @@ function assertAccessBoundary(access: AccessBoundary | undefined): asserts acces
   }
 }
 
-function requireAccessBoundary(access: AccessBoundary | undefined): {
-  workspaceId: string;
-  workspaceName: string | null;
-  teamId: string;
-  teamName: string | null;
-} {
+function requireAccessBoundary(access: AccessBoundary | undefined): OwnershipBoundary {
   assertAccessBoundary(access);
 
   return {
     workspaceId: access.workspaceId!,
     workspaceName: access.workspaceName ?? null,
     teamId: access.teamId!,
-    teamName: access.teamName ?? null
+    teamName: access.teamName ?? null,
+    policyProfile: access.policyProfile ?? null
   };
 }
 
@@ -227,6 +233,44 @@ function expectPersistedRecord<T>(record: T | undefined, entity: string): T {
   return record;
 }
 
+function mapApprovalRecord(record: typeof approvals.$inferSelect): Approval {
+  return {
+    ...record,
+    kind: record.kind as Approval["kind"],
+    status: record.status as Approval["status"],
+    delegation: record.delegateActorId
+      ? {
+          delegateActorId: record.delegateActorId,
+          delegatedBy: record.delegatedBy ?? record.requestedBy,
+          delegatedAt: record.delegatedAt ?? record.createdAt,
+          reason: record.delegationReason ?? null
+        }
+      : null
+  };
+}
+
+function resolveRepositoryApprovalProfile(
+  input: Pick<RepositoryCreate, "approvalProfile" | "trustLevel">,
+  teamPolicyProfile: string
+) {
+  if (input.approvalProfile) {
+    return input.approvalProfile;
+  }
+
+  if (input.trustLevel !== "trusted" && teamPolicyProfile === "standard") {
+    return "sensitive";
+  }
+
+  return teamPolicyProfile;
+}
+
+function requiresSensitiveDefaults(
+  repository: { trustLevel: string; approvalProfile: string },
+  policyProfile: string
+) {
+  return repository.trustLevel !== "trusted" || policyProfile !== "standard";
+}
+
 export class ControlPlaneService {
   constructor(
     private readonly db: AppDb,
@@ -297,9 +341,10 @@ export class ControlPlaneService {
 
   async createRepository(input: RepositoryCreate, access?: AccessBoundary) {
     const boundary = requireAccessBoundary(access);
-    await this.ensureOwnershipBoundary(boundary);
+    const team = await this.ensureOwnershipBoundary(boundary);
     const id = crypto.randomUUID();
     const now = this.clock.now();
+    const approvalProfile = resolveRepositoryApprovalProfile(input, team.policyProfile);
 
     const [repository] = await this.db.insert(repositories).values({
       id,
@@ -311,7 +356,7 @@ export class ControlPlaneService {
       defaultBranch: input.defaultBranch,
       localPath: input.localPath ?? null,
       trustLevel: input.trustLevel,
-      approvalProfile: input.approvalProfile,
+      approvalProfile,
       createdAt: now,
       updatedAt: now
     }).returning();
@@ -372,6 +417,10 @@ export class ControlPlaneService {
 
     const id = crypto.randomUUID();
     const now = this.clock.now();
+    const policyProfile = input.policyProfile ?? repository.approvalProfile;
+    const concurrencyCap = requiresSensitiveDefaults(repository, policyProfile)
+      ? 1
+      : input.concurrencyCap;
 
     const [run] = await this.db.insert(runs).values({
       id,
@@ -384,8 +433,8 @@ export class ControlPlaneService {
       planArtifactPath: input.planArtifactPath ?? null,
       budgetTokens: input.budgetTokens ?? null,
       budgetCostUsd: dollarsToCents(input.budgetCostUsd),
-      concurrencyCap: input.concurrencyCap,
-      policyProfile: input.policyProfile ?? repository.approvalProfile,
+      concurrencyCap,
+      policyProfile,
       publishedBranch: null,
       branchPublishedAt: null,
       pullRequestUrl: null,
@@ -726,6 +775,14 @@ export class ControlPlaneService {
     }
 
     const now = this.clock.now();
+    const delegation = input.delegation
+      ? {
+          delegateActorId: input.delegation.delegateActorId,
+          delegatedBy: input.requestedBy,
+          delegatedAt: now,
+          delegationReason: input.delegation.reason ?? null
+        }
+      : null;
     const [approval] = await this.db.insert(approvals).values({
       id: crypto.randomUUID(),
       runId: input.runId,
@@ -737,13 +794,17 @@ export class ControlPlaneService {
       requestedPayload: input.requestedPayload,
       resolutionPayload: {},
       requestedBy: input.requestedBy,
+      delegateActorId: delegation?.delegateActorId ?? null,
+      delegatedBy: delegation?.delegatedBy ?? null,
+      delegatedAt: delegation?.delegatedAt ?? null,
+      delegationReason: delegation?.delegationReason ?? null,
       resolver: null,
       resolvedAt: null,
       createdAt: now,
       updatedAt: now
     }).returning();
 
-    return expectPersistedRecord(approval, "approval");
+    return mapApprovalRecord(expectPersistedRecord(approval, "approval"));
   }
 
   async listApprovals(runId?: string, access?: AccessBoundary) {
@@ -755,22 +816,14 @@ export class ControlPlaneService {
         eq(approvals.workspaceId, boundary.workspaceId),
         eq(approvals.teamId, boundary.teamId)
       )).orderBy(asc(approvals.createdAt));
-      return rows.map((approval): Approval => ({
-        ...approval,
-        kind: approval.kind as Approval["kind"],
-        status: approval.status as Approval["status"]
-      }));
+      return rows.map((approval) => mapApprovalRecord(approval));
     }
 
     const rows = await this.db.select().from(approvals).where(and(
       eq(approvals.workspaceId, boundary.workspaceId),
       eq(approvals.teamId, boundary.teamId)
     )).orderBy(asc(approvals.createdAt));
-    return rows.map((approval): Approval => ({
-      ...approval,
-      kind: approval.kind as Approval["kind"],
-      status: approval.status as Approval["status"]
-    }));
+    return rows.map((approval) => mapApprovalRecord(approval));
   }
 
   async getApproval(approvalId: string, access?: AccessBoundary) {
@@ -782,7 +835,7 @@ export class ControlPlaneService {
 
     this.assertBoundaryMatch(access, approval.workspaceId, approval.teamId, "approval", approvalId);
 
-    return expectPersistedRecord(approval, "approval");
+    return mapApprovalRecord(expectPersistedRecord(approval, "approval"));
   }
 
   async resolveApproval(approvalId: string, input: ApprovalResolve, access?: AccessBoundary) {
@@ -804,7 +857,7 @@ export class ControlPlaneService {
       throw new HttpError(404, `approval ${approvalId} not found`);
     }
 
-    return expectPersistedRecord(approval, "approval");
+    return mapApprovalRecord(expectPersistedRecord(approval, "approval"));
   }
 
   async createValidation(input: ValidationCreate, access?: AccessBoundary) {
@@ -1189,11 +1242,7 @@ export class ControlPlaneService {
     const repositoriesById = new Map(repositoryRows.map((repository) => [repository.id, this.mapRepository(repository)] as const));
     const runsById = new Map(runRows.map((run) => [run.id, this.mapRun(run)] as const));
     const approvalHistory = approvalRows
-      .map((approval): Approval => ({
-        ...approval,
-        kind: approval.kind as Approval["kind"],
-        status: approval.status as Approval["status"]
-      }))
+      .map((approval) => mapApprovalRecord(approval))
       .sort((left, right) => right.createdAt.getTime() - left.createdAt.getTime())
       .slice(0, input.limit ?? 50)
       .map((approval) => {
@@ -1495,8 +1544,9 @@ export class ControlPlaneService {
     return artifact ? [artifact.id] : [];
   }
 
-  private async ensureOwnershipBoundary(access: AccessBoundary) {
+  private async ensureOwnershipBoundary(access: OwnershipBoundary): Promise<TeamRecord> {
     const now = this.clock.now();
+    const seededPolicyProfile = access.policyProfile ?? "standard";
 
     await this.db.execute(sql`
       insert into workspaces (id, name, created_at, updated_at)
@@ -1505,10 +1555,31 @@ export class ControlPlaneService {
     `);
 
     await this.db.execute(sql`
-      insert into teams (id, workspace_id, name, created_at, updated_at)
-      values (${access.teamId}, ${access.workspaceId}, ${access.teamName ?? access.teamId}, ${now}, ${now})
+      insert into teams (id, workspace_id, name, policy_profile, created_at, updated_at)
+      values (${access.teamId}, ${access.workspaceId}, ${access.teamName ?? access.teamId}, ${seededPolicyProfile}, ${now}, ${now})
       on conflict (id) do nothing
     `);
+
+    const [team] = await this.db.select().from(teams).where(eq(teams.id, access.teamId));
+
+    if (!team) {
+      throw new HttpError(500, `team ${access.teamId} persistence failed`);
+    }
+
+    if (
+      access.policyProfile
+      && access.policyProfile !== team.policyProfile
+      && team.policyProfile === "standard"
+    ) {
+      const [updatedTeam] = await this.db.update(teams).set({
+        policyProfile: access.policyProfile,
+        updatedAt: now
+      }).where(eq(teams.id, access.teamId)).returning();
+
+      return expectPersistedRecord(updatedTeam, "team");
+    }
+
+    return team;
   }
 
   private assertBoundaryMatch(
@@ -1703,8 +1774,10 @@ export class ControlPlaneService {
       resolvedAt: approval.resolvedAt,
       requestedBy: approval.requestedBy,
       requestedByActor: createdEvent?.actor ?? null,
+      delegation: approval.delegation,
       resolver: approval.resolver,
       resolverActor: resolvedEvent?.actor ?? null,
+      resolvedByDelegate: approval.delegation?.delegateActorId === approval.resolver,
       policyProfile: run?.policyProfile ?? repository?.approvalProfile ?? null,
       requestedPayload: approval.requestedPayload,
       resolutionPayload: approval.resolutionPayload

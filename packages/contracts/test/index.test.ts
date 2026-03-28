@@ -166,6 +166,23 @@ describe("approvalCreateSchema", () => {
 
     expect(approval.requestedPayload).toEqual({});
   });
+
+  it("accepts delegated approval targeting metadata", () => {
+    const approval = approvalCreateSchema.parse({
+      runId: "550e8400-e29b-41d4-a716-446655440000",
+      kind: "plan",
+      requestedBy: "tech-lead",
+      delegation: {
+        delegateActorId: "reviewer-2",
+        reason: "coverage for on-call reviewer"
+      }
+    });
+
+    expect(approval.delegation).toEqual({
+      delegateActorId: "reviewer-2",
+      reason: "coverage for on-call reviewer"
+    });
+  });
 });
 
 describe("approvalResolveSchema", () => {
@@ -193,7 +210,7 @@ describe("validationCreateSchema", () => {
 });
 
 describe("repositoryCreateSchema", () => {
-  it("defaults trust level for onboarded repositories", () => {
+  it("defaults trust level while leaving policy selection open for inheritance", () => {
     const repository = repositoryCreateSchema.parse({
       name: "codex-swarm",
       url: "https://github.com/example/codex-swarm",
@@ -201,7 +218,7 @@ describe("repositoryCreateSchema", () => {
     });
 
     expect(repository.trustLevel).toBe("trusted");
-    expect(repository.approvalProfile).toBe("standard");
+    expect(repository.approvalProfile).toBeUndefined();
   });
 });
 
