@@ -484,3 +484,28 @@ Residual risks:
 Backlog follow-up:
 
 - Add real budget-cap enforcement semantics with acceptance coverage, or intentionally narrow the roadmap exit criterion to the currently implemented concurrency enforcement plus budget reporting model.
+
+## Task `37fc936e`
+
+Roadmap entry:
+
+- Phase 4 deliverable: `Leader on one node, workers on multiple nodes`
+
+Verdict:
+
+- gap
+
+Evidence:
+
+- The distributed control-plane model persists `workerNodeId`, `stickyNodeId`, placement constraints, and dispatch assignments for sessions and workers in `apps/api/src/db/schema.ts` and `apps/api/src/services/control-plane-service.ts`.
+- The strongest distributed regression, `preserves distributed run visibility across two-node retry recovery`, proves two worker sessions placed on separate nodes and then recovered onto a surviving node in `apps/api/test/app.test.ts`.
+- The worker dispatch runtime and reference deployment docs describe remote worker-node execution, drain handling, and multi-node fleet topology in `apps/worker/src/dispatch.ts` and `docs/reference-deployments.md`.
+- I found no live route, service flow, or acceptance test that creates or places a distinct leader session on one node while worker sessions execute on other nodes. A repo-wide search only surfaced planning references and the role-pack prompt in `.codex/agents/leader.toml`, not executable leader-placement behavior.
+
+Residual risks:
+
+- Reviewers can support multi-node worker placement and recovery, but not the narrower roadmap deliverable that explicitly names a leader-on-one-node plus workers-on-multiple-nodes execution shape.
+
+Backlog follow-up:
+
+- Add executable leader-placement behavior and acceptance coverage for a split leader/worker topology, or intentionally supersede the roadmap wording to the currently implemented multi-node worker-dispatch model.
