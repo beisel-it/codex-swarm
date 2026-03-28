@@ -118,6 +118,8 @@ export class ControlPlaneService {
     return {
       ...run,
       status: run.status as Run["status"],
+      handoffStatus: run.handoffStatus as Run["handoffStatus"],
+      pullRequestStatus: run.pullRequestStatus as Run["pullRequestStatus"],
       tasks: runTasks.map((task): Task => ({
         ...task,
         status: task.status as Task["status"]

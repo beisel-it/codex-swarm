@@ -160,4 +160,92 @@ describe("worker runtime helpers", () => {
       }
     ]);
   });
+
+  it("marks active sessions without thread ids as stale instead of retrying them", () => {
+    expect(buildSessionRecoveryPlan([
+      {
+        sessionId: "session-active-missing-thread",
+        runId: "run-001",
+        agentId: "agent-006",
+        worktreePath: ".swarm/worktrees/codex-swarm/run-001/agent-006",
+        state: "active",
+        threadId: null,
+        lastHeartbeatAt: null
+      }
+    ], {
+      existingWorktreePaths: [
+        ".swarm/worktrees/codex-swarm/run-001/agent-006"
+      ]
+    })).toEqual([
+      {
+        sessionId: "session-active-missing-thread",
+        action: "mark_stale",
+        reason: "missing_thread"
+      }
+    ]);
+  });
+
+  it("produces stable action counts for large recovery batches", () => {
+    const sessions = Array.from({ length: 240 }, (_, index) => {
+      const worktreePath = `.swarm/worktrees/codex-swarm/run-001/agent-${index}`;
+
+      if (index < 60) {
+        return {
+          sessionId: `resume-${index}`,
+          runId: "run-001",
+          agentId: `agent-${index}`,
+          worktreePath,
+          state: "active" as const,
+          threadId: `thread-${index}`,
+          lastHeartbeatAt: new Date("2026-03-28T12:14:00.000Z")
+        };
+      }
+
+      if (index < 120) {
+        return {
+          sessionId: `retry-${index}`,
+          runId: "run-001",
+          agentId: `agent-${index}`,
+          worktreePath,
+          state: "pending" as const,
+          threadId: null,
+          lastHeartbeatAt: null
+        };
+      }
+
+      if (index < 180) {
+        return {
+          sessionId: `stale-${index}`,
+          runId: "run-001",
+          agentId: `agent-${index}`,
+          worktreePath,
+          state: "active" as const,
+          threadId: `thread-${index}`,
+          lastHeartbeatAt: new Date("2026-03-28T11:00:00.000Z")
+        };
+      }
+
+      return {
+        sessionId: `archive-${index}`,
+        runId: "run-001",
+        agentId: `agent-${index}`,
+        worktreePath,
+        state: "failed" as const,
+        threadId: `thread-${index}`,
+        lastHeartbeatAt: new Date("2026-03-28T12:14:00.000Z")
+      };
+    });
+
+    const plan = buildSessionRecoveryPlan(sessions, {
+      now: new Date("2026-03-28T12:15:00.000Z"),
+      staleAfterMs: 10 * 60 * 1000,
+      existingWorktreePaths: sessions.map((session) => session.worktreePath)
+    });
+
+    expect(plan).toHaveLength(240);
+    expect(plan.filter((item) => item.action === "resume")).toHaveLength(60);
+    expect(plan.filter((item) => item.action === "retry")).toHaveLength(60);
+    expect(plan.filter((item) => item.action === "mark_stale")).toHaveLength(60);
+    expect(plan.filter((item) => item.action === "archive")).toHaveLength(60);
+  });
 });

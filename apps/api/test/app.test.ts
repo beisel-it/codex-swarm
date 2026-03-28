@@ -36,6 +36,16 @@ const controlPlane = {
   createArtifact: vi.fn()
 };
 
+const observability = {
+  beginRequest: vi.fn(),
+  getMetrics: vi.fn(),
+  listEvents: vi.fn(),
+  recordRecoverableDatabaseFallback: vi.fn(),
+  recordRequestFailure: vi.fn(),
+  recordTimelineEvent: vi.fn(),
+  withTrace: vi.fn(async (_name: string, fn: () => Promise<unknown>) => fn())
+};
+
 class FakeVerticalSliceControlPlane {
   private readonly repositories = [
     {
@@ -383,6 +393,29 @@ class FakeVerticalSliceControlPlane {
 describe("buildApp", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    observability.getMetrics.mockResolvedValue({
+      queueDepth: {
+        runsPending: 0,
+        tasksPending: 0,
+        tasksBlocked: 0,
+        approvalsPending: 0,
+        busyAgents: 0
+      },
+      retries: {
+        recoverableDatabaseFallbacks: 0,
+        taskUnblocks: 0
+      },
+      failures: {
+        runsFailed: 0,
+        tasksFailed: 0,
+        agentsFailed: 0,
+        validationsFailed: 0,
+        requestFailures: 0
+      },
+      eventsRecorded: 0,
+      recordedAt: new Date("2026-03-28T12:00:00.000Z")
+    });
+    observability.listEvents.mockResolvedValue([]);
   });
 
   afterEach(async () => {
@@ -604,6 +637,111 @@ describe("buildApp", () => {
       },
       eventsRecorded: 0
     });
+
+    await app.close();
+  });
+
+  it("delegates event timeline queries to an injected observability backend", async () => {
+    observability.listEvents.mockResolvedValueOnce([
+      {
+        id: "99999999-9999-4999-8999-999999999999",
+        runId: ids.run,
+        taskId: ids.taskA,
+        agentId: ids.agent,
+        traceId: "trace-123",
+        eventType: "task.unblocked",
+        entityType: "task",
+        entityId: ids.taskB,
+        status: "pending",
+        summary: "Dependency completed and task unblocked",
+        metadata: {
+          source: "qa-test"
+        },
+        createdAt: "2026-03-28T12:05:00.000Z"
+      }
+    ]);
+
+    const app = await buildApp({
+      controlPlane: controlPlane as unknown as ControlPlaneService,
+      observability: observability as any
+    });
+
+    const response = await app.inject({
+      method: "GET",
+      url: `/api/v1/events?runId=${ids.run}&limit=25`,
+      headers: {
+        authorization: "Bearer codex-swarm-dev-token"
+      }
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual([
+      expect.objectContaining({
+        eventType: "task.unblocked",
+        entityId: ids.taskB
+      })
+    ]);
+    expect(observability.listEvents).toHaveBeenCalledWith(ids.run, 25);
+
+    await app.close();
+  });
+
+  it("delegates metrics reads to an injected observability backend", async () => {
+    observability.getMetrics.mockResolvedValueOnce({
+      queueDepth: {
+        runsPending: 2,
+        tasksPending: 7,
+        tasksBlocked: 3,
+        approvalsPending: 1,
+        busyAgents: 4
+      },
+      retries: {
+        recoverableDatabaseFallbacks: 2,
+        taskUnblocks: 5
+      },
+      failures: {
+        runsFailed: 1,
+        tasksFailed: 2,
+        agentsFailed: 1,
+        validationsFailed: 1,
+        requestFailures: 3
+      },
+      eventsRecorded: 18,
+      recordedAt: new Date("2026-03-28T12:15:00.000Z")
+    });
+
+    const app = await buildApp({
+      controlPlane: controlPlane as unknown as ControlPlaneService,
+      observability: observability as any
+    });
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/api/v1/metrics",
+      headers: {
+        authorization: "Bearer codex-swarm-dev-token"
+      }
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      queueDepth: {
+        runsPending: 2,
+        tasksPending: 7,
+        tasksBlocked: 3,
+        approvalsPending: 1,
+        busyAgents: 4
+      },
+      retries: {
+        recoverableDatabaseFallbacks: 2,
+        taskUnblocks: 5
+      },
+      failures: {
+        requestFailures: 3
+      },
+      eventsRecorded: 18
+    });
+    expect(observability.getMetrics).toHaveBeenCalledTimes(1);
 
     await app.close();
   });
