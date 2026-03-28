@@ -9,7 +9,8 @@ const ids = {
   taskA: "33333333-3333-4333-8333-333333333333",
   taskB: "44444444-4444-4444-8444-444444444444",
   agent: "55555555-5555-4555-8555-555555555555",
-  session: "66666666-6666-4666-8666-666666666666"
+  session: "66666666-6666-4666-8666-666666666666",
+  workerNode: "77777777-7777-4777-8777-777777777777"
 } as const;
 
 const controlPlane = {
@@ -27,6 +28,10 @@ const controlPlane = {
   updateTaskStatus: vi.fn(),
   listAgents: vi.fn(),
   createAgent: vi.fn(),
+  listWorkerNodes: vi.fn(),
+  registerWorkerNode: vi.fn(),
+  recordWorkerNodeHeartbeat: vi.fn(),
+  updateWorkerNodeDrainState: vi.fn(),
   listMessages: vi.fn(),
   createMessage: vi.fn(),
   listApprovals: vi.fn(),
@@ -67,6 +72,21 @@ class FakeVerticalSliceControlPlane {
   ];
 
   private readonly runs = new Map<string, any>();
+  private readonly workerNodes = [
+    {
+      id: ids.workerNode,
+      name: "node-a",
+      endpoint: "tcp://node-a.internal:7777",
+      capabilityLabels: ["linux", "node", "remote"],
+      status: "online",
+      drainState: "active",
+      lastHeartbeatAt: new Date("2026-03-28T11:50:00.000Z"),
+      metadata: {},
+      eligibleForScheduling: true,
+      createdAt: new Date("2026-03-28T00:00:00.000Z"),
+      updatedAt: new Date("2026-03-28T11:50:00.000Z")
+    }
+  ];
 
   async listRepositories() {
     return this.repositories;
@@ -222,6 +242,61 @@ class FakeVerticalSliceControlPlane {
     return runId ? agents.filter((agent) => agent.runId === runId) : agents;
   }
 
+  async listWorkerNodes() {
+    return this.workerNodes;
+  }
+
+  async registerWorkerNode(input: any) {
+    const workerNode = {
+      id: input.id ?? ids.workerNode,
+      name: input.name,
+      endpoint: input.endpoint ?? null,
+      capabilityLabels: input.capabilityLabels ?? [],
+      status: input.status ?? "online",
+      drainState: input.drainState ?? "active",
+      lastHeartbeatAt: new Date(),
+      metadata: input.metadata ?? {},
+      eligibleForScheduling: (input.status ?? "online") === "online" && (input.drainState ?? "active") === "active",
+      createdAt: new Date(),
+      updatedAt: new Date()
+    };
+
+    this.workerNodes.splice(0, this.workerNodes.length, workerNode);
+    return workerNode;
+  }
+
+  async recordWorkerNodeHeartbeat(nodeId: string, input: any) {
+    const workerNode = this.workerNodes.find((candidate) => candidate.id === nodeId);
+
+    if (!workerNode) {
+      throw new HttpError(404, `worker node ${nodeId} not found`);
+    }
+
+    workerNode.status = input.status;
+    workerNode.capabilityLabels = input.capabilityLabels ?? [];
+    workerNode.metadata = input.metadata ?? {};
+    workerNode.lastHeartbeatAt = new Date();
+    workerNode.updatedAt = new Date();
+    workerNode.eligibleForScheduling = workerNode.status === "online" && workerNode.drainState === "active";
+
+    return workerNode;
+  }
+
+  async updateWorkerNodeDrainState(nodeId: string, input: any) {
+    const workerNode = this.workerNodes.find((candidate) => candidate.id === nodeId);
+
+    if (!workerNode) {
+      throw new HttpError(404, `worker node ${nodeId} not found`);
+    }
+
+    workerNode.drainState = input.drainState;
+    workerNode.metadata = input.reason ? { drainReason: input.reason } : workerNode.metadata;
+    workerNode.updatedAt = new Date();
+    workerNode.eligibleForScheduling = workerNode.status === "online" && workerNode.drainState === "active";
+
+    return workerNode;
+  }
+
   async createAgent(input: any) {
     const run = await this.getRun(input.runId);
     const activeAgents = run.agents.filter((candidate: any) =>
@@ -232,6 +307,25 @@ class FakeVerticalSliceControlPlane {
 
     if (activeAgents.length >= run.concurrencyCap) {
       throw new HttpError(409, `run concurrency cap of ${run.concurrencyCap} active agents reached`);
+    }
+
+    if (input.session?.workerNodeId) {
+      const workerNode = this.workerNodes.find((candidate) => candidate.id === input.session.workerNodeId);
+
+      if (!workerNode) {
+        throw new HttpError(404, `worker node ${input.session.workerNodeId} not found`);
+      }
+
+      if (!workerNode.eligibleForScheduling) {
+        throw new HttpError(409, `worker node ${workerNode.id} is not eligible for scheduling`);
+      }
+
+      const missingLabels = (input.session.placementConstraintLabels ?? []).filter((label: string) =>
+        !workerNode.capabilityLabels.includes(label));
+
+      if (missingLabels.length > 0) {
+        throw new HttpError(409, `worker node ${workerNode.id} is missing required capability labels: ${missingLabels.join(", ")}`);
+      }
     }
 
     const agent = {
@@ -259,6 +353,9 @@ class FakeVerticalSliceControlPlane {
         sandbox: input.session.sandbox,
         approvalPolicy: input.session.approvalPolicy,
         includePlanTool: input.session.includePlanTool,
+        workerNodeId: input.session.workerNodeId ?? null,
+        stickyNodeId: input.session.workerNodeId ?? null,
+        placementConstraintLabels: input.session.placementConstraintLabels ?? [],
         state: "active",
         staleReason: null,
         metadata: input.session.metadata,
@@ -464,6 +561,9 @@ class FakeVerticalSliceControlPlane {
       tasks: run.tasks,
       agents: run.agents,
       sessions: run.sessions,
+      workerNodes: this.workerNodes.filter((workerNode) =>
+        run.sessions.some((session: any) =>
+          session.workerNodeId === workerNode.id || session.stickyNodeId === workerNode.id)),
       approvals: await this.listApprovals(runId),
       validations: await this.listValidations(),
       artifacts: await this.listArtifacts(),
@@ -802,6 +902,239 @@ describe("buildApp", () => {
     await app.close();
   });
 
+  it("registers and lists worker nodes for fleet visibility", async () => {
+    controlPlane.registerWorkerNode.mockResolvedValueOnce({
+      id: ids.workerNode,
+      name: "node-a",
+      endpoint: "tcp://node-a.internal:7777",
+      capabilityLabels: ["linux", "node", "remote"],
+      status: "online",
+      drainState: "active",
+      lastHeartbeatAt: "2026-03-28T12:00:00.000Z",
+      metadata: {},
+      eligibleForScheduling: true,
+      createdAt: "2026-03-28T12:00:00.000Z",
+      updatedAt: "2026-03-28T12:00:00.000Z"
+    });
+    controlPlane.listWorkerNodes.mockResolvedValueOnce([
+      {
+        id: ids.workerNode,
+        name: "node-a",
+        endpoint: "tcp://node-a.internal:7777",
+        capabilityLabels: ["linux", "node", "remote"],
+        status: "online",
+        drainState: "active",
+        lastHeartbeatAt: "2026-03-28T12:00:00.000Z",
+        metadata: {},
+        eligibleForScheduling: true,
+        createdAt: "2026-03-28T12:00:00.000Z",
+        updatedAt: "2026-03-28T12:00:00.000Z"
+      }
+    ]);
+
+    const app = await buildApp({
+      controlPlane: controlPlane as unknown as ControlPlaneService
+    });
+
+    const createResponse = await app.inject({
+      method: "POST",
+      url: "/api/v1/worker-nodes",
+      headers: {
+        authorization: "Bearer codex-swarm-dev-token"
+      },
+      payload: {
+        name: "node-a",
+        endpoint: "tcp://node-a.internal:7777",
+        capabilityLabels: ["linux", "node", "remote"]
+      }
+    });
+
+    expect(createResponse.statusCode).toBe(201);
+    expect(createResponse.json()).toMatchObject({
+      id: ids.workerNode,
+      eligibleForScheduling: true
+    });
+    expect(controlPlane.registerWorkerNode).toHaveBeenCalledWith({
+      name: "node-a",
+      endpoint: "tcp://node-a.internal:7777",
+      capabilityLabels: ["linux", "node", "remote"],
+      status: "online",
+      drainState: "active",
+      metadata: {}
+    });
+
+    const listResponse = await app.inject({
+      method: "GET",
+      url: "/api/v1/worker-nodes",
+      headers: {
+        authorization: "Bearer codex-swarm-dev-token"
+      }
+    });
+
+    expect(listResponse.statusCode).toBe(200);
+    expect(listResponse.json()).toMatchObject([
+      {
+        id: ids.workerNode,
+        drainState: "active"
+      }
+    ]);
+
+    await app.close();
+  });
+
+  it("records worker-node heartbeats and drain transitions", async () => {
+    controlPlane.recordWorkerNodeHeartbeat.mockResolvedValueOnce({
+      id: ids.workerNode,
+      name: "node-a",
+      endpoint: "tcp://node-a.internal:7777",
+      capabilityLabels: ["linux", "node", "remote"],
+      status: "online",
+      drainState: "active",
+      lastHeartbeatAt: "2026-03-28T12:05:00.000Z",
+      metadata: {
+        queueDepth: 3
+      },
+      eligibleForScheduling: true,
+      createdAt: "2026-03-28T12:00:00.000Z",
+      updatedAt: "2026-03-28T12:05:00.000Z"
+    });
+    controlPlane.updateWorkerNodeDrainState.mockResolvedValueOnce({
+      id: ids.workerNode,
+      name: "node-a",
+      endpoint: "tcp://node-a.internal:7777",
+      capabilityLabels: ["linux", "node", "remote"],
+      status: "online",
+      drainState: "draining",
+      lastHeartbeatAt: "2026-03-28T12:05:00.000Z",
+      metadata: {
+        drainReason: "maintenance"
+      },
+      eligibleForScheduling: false,
+      createdAt: "2026-03-28T12:00:00.000Z",
+      updatedAt: "2026-03-28T12:06:00.000Z"
+    });
+
+    const app = await buildApp({
+      controlPlane: controlPlane as unknown as ControlPlaneService
+    });
+
+    const heartbeatResponse = await app.inject({
+      method: "PATCH",
+      url: `/api/v1/worker-nodes/${ids.workerNode}/heartbeat`,
+      headers: {
+        authorization: "Bearer codex-swarm-dev-token"
+      },
+      payload: {
+        capabilityLabels: ["linux", "node", "remote"],
+        metadata: {
+          queueDepth: 3
+        }
+      }
+    });
+
+    expect(heartbeatResponse.statusCode).toBe(200);
+    expect(controlPlane.recordWorkerNodeHeartbeat).toHaveBeenCalledWith(ids.workerNode, {
+      status: "online",
+      capabilityLabels: ["linux", "node", "remote"],
+      metadata: {
+        queueDepth: 3
+      }
+    });
+
+    const drainResponse = await app.inject({
+      method: "PATCH",
+      url: `/api/v1/worker-nodes/${ids.workerNode}/drain`,
+      headers: {
+        authorization: "Bearer codex-swarm-dev-token"
+      },
+      payload: {
+        drainState: "draining",
+        reason: "maintenance"
+      }
+    });
+
+    expect(drainResponse.statusCode).toBe(200);
+    expect(drainResponse.json()).toMatchObject({
+      drainState: "draining",
+      eligibleForScheduling: false
+    });
+    expect(controlPlane.updateWorkerNodeDrainState).toHaveBeenCalledWith(ids.workerNode, {
+      drainState: "draining",
+      reason: "maintenance"
+    });
+
+    await app.close();
+  });
+
+  it("rejects agent placement onto drained worker nodes", async () => {
+    const verticalSlice = new FakeVerticalSliceControlPlane();
+    const app = await buildApp({
+      config: {
+        NODE_ENV: "test",
+        PORT: 3000,
+        HOST: "127.0.0.1",
+        DATABASE_URL: "postgres://unused/test",
+        DEV_AUTH_TOKEN: "test-token",
+        OPENAI_TRACING_DISABLED: true
+      },
+      controlPlane: verticalSlice as unknown as ControlPlaneService
+    });
+
+    const headers = {
+      authorization: "Bearer test-token"
+    };
+
+    await app.inject({
+      method: "POST",
+      url: "/api/v1/runs",
+      headers,
+      payload: {
+        repositoryId: ids.repository,
+        goal: "Test drained placement rejection",
+        metadata: {}
+      }
+    });
+
+    await app.inject({
+      method: "PATCH",
+      url: `/api/v1/worker-nodes/${ids.workerNode}/drain`,
+      headers,
+      payload: {
+        drainState: "draining",
+        reason: "maintenance"
+      }
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/v1/agents",
+      headers,
+      payload: {
+        runId: ids.run,
+        name: "worker-drained",
+        role: "backend-developer",
+        status: "idle",
+        session: {
+          threadId: "thread-drained",
+          cwd: "/tmp/codex-swarm/run-1/worker-drained",
+          sandbox: "workspace-write",
+          approvalPolicy: "on-request",
+          workerNodeId: ids.workerNode,
+          placementConstraintLabels: ["remote"],
+          metadata: {}
+        }
+      }
+    });
+
+    expect(response.statusCode).toBe(409);
+    expect(response.json()).toEqual({
+      error: `worker node ${ids.workerNode} is not eligible for scheduling`,
+      details: null
+    });
+
+    await app.close();
+  });
+
   it("lists approvals and forwards the optional runId filter", async () => {
     controlPlane.listApprovals.mockResolvedValueOnce([
       {
@@ -1042,6 +1375,7 @@ describe("buildApp", () => {
       tasks: [],
       agents: [],
       sessions: [],
+      workerNodes: [],
       approvals: [],
       validations: [],
       artifacts: [],
@@ -1516,6 +1850,8 @@ describe("buildApp", () => {
           sandbox: "workspace-write",
           approvalPolicy: "on-request",
           includePlanTool: true,
+          workerNodeId: ids.workerNode,
+          placementConstraintLabels: ["remote"],
           metadata: {
             source: "app-test"
           }
@@ -1560,7 +1896,14 @@ describe("buildApp", () => {
         { id: ids.agent, currentTaskId: ids.taskB }
       ],
       sessions: [
-        { id: ids.session, threadId: "thread-123", agentId: ids.agent }
+        {
+          id: ids.session,
+          threadId: "thread-123",
+          agentId: ids.agent,
+          workerNodeId: ids.workerNode,
+          stickyNodeId: ids.workerNode,
+          placementConstraintLabels: ["remote"]
+        }
       ]
     });
 

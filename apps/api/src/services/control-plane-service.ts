@@ -22,7 +22,11 @@ import {
   type TaskCreateInput,
   type TaskStatusUpdateInput,
   type ValidationCreateInput,
-  type ValidationHistoryEntry
+  type ValidationHistoryEntry,
+  type WorkerNode,
+  type WorkerNodeDrainUpdateInput,
+  type WorkerNodeHeartbeatInput,
+  type WorkerNodeRegisterInput
 } from "@codex-swarm/contracts";
 import { resolveInitialTaskStatus } from "@codex-swarm/orchestration";
 import { buildSessionRecoveryPlan } from "@codex-swarm/worker";
@@ -38,7 +42,8 @@ import {
   runs,
   sessions,
   tasks,
-  validations
+  validations,
+  workerNodes
 } from "../db/schema.js";
 import type { Clock } from "../lib/clock.js";
 import { HttpError } from "../lib/http-error.js";
@@ -65,6 +70,13 @@ type ArtifactCreate = ArtifactCreateInput;
 type ValidationListQuery = z.infer<typeof validationsListQuerySchema>;
 type RunBranchPublish = z.infer<typeof runBranchPublishSchema>;
 type RunPullRequestHandoff = z.infer<typeof runPullRequestHandoffSchema>;
+type WorkerNodeRegister = WorkerNodeRegisterInput;
+type WorkerNodeHeartbeat = WorkerNodeHeartbeatInput;
+type WorkerNodeDrainUpdate = WorkerNodeDrainUpdateInput;
+
+function isWorkerNodeEligible(workerNode: Pick<WorkerNode, "status" | "drainState">) {
+  return workerNode.status === "online" && workerNode.drainState === "active";
+}
 
 function inferRepositoryProvider(url: string): Repository["provider"] {
   const normalizedUrl = url.toLowerCase();
@@ -109,6 +121,55 @@ export class ControlPlaneService {
   async listRepositories() {
     const rows = await this.db.select().from(repositories).orderBy(asc(repositories.createdAt));
     return rows.map((repository) => this.mapRepository(repository));
+  }
+
+  async listWorkerNodes() {
+    const rows = await this.db.select().from(workerNodes).orderBy(asc(workerNodes.createdAt));
+    return rows.map((workerNode) => this.mapWorkerNode(workerNode));
+  }
+
+  async registerWorkerNode(input: WorkerNodeRegister) {
+    const now = this.clock.now();
+    const [workerNode] = await this.db.insert(workerNodes).values({
+      id: input.id ?? crypto.randomUUID(),
+      name: input.name,
+      endpoint: input.endpoint ?? null,
+      capabilityLabels: input.capabilityLabels,
+      status: input.status,
+      drainState: input.drainState,
+      lastHeartbeatAt: now,
+      metadata: input.metadata,
+      createdAt: now,
+      updatedAt: now
+    }).returning();
+
+    return this.mapWorkerNode(expectPersistedRecord(workerNode, "worker node"));
+  }
+
+  async recordWorkerNodeHeartbeat(nodeId: string, input: WorkerNodeHeartbeat) {
+    await this.assertWorkerNodeExists(nodeId);
+    const now = this.clock.now();
+    const [workerNode] = await this.db.update(workerNodes).set({
+      status: input.status,
+      capabilityLabels: input.capabilityLabels,
+      metadata: input.metadata,
+      lastHeartbeatAt: now,
+      updatedAt: now
+    }).where(eq(workerNodes.id, nodeId)).returning();
+
+    return this.mapWorkerNode(expectPersistedRecord(workerNode, "worker node"));
+  }
+
+  async updateWorkerNodeDrainState(nodeId: string, input: WorkerNodeDrainUpdate) {
+    await this.assertWorkerNodeExists(nodeId);
+    const now = this.clock.now();
+    const [workerNode] = await this.db.update(workerNodes).set({
+      drainState: input.drainState,
+      metadata: input.reason ? { drainReason: input.reason } : undefined,
+      updatedAt: now
+    }).where(eq(workerNodes.id, nodeId)).returning();
+
+    return this.mapWorkerNode(expectPersistedRecord(workerNode, "worker node"));
   }
 
   async createRepository(input: RepositoryCreate) {
@@ -408,6 +469,20 @@ export class ControlPlaneService {
       if (input.session && createdAgent) {
         const sessionState: Session["state"] = "active";
 
+        if (input.session.workerNodeId) {
+          const workerNode = await this.assertWorkerNodeExists(input.session.workerNodeId);
+          const missingLabels = input.session.placementConstraintLabels.filter((label) =>
+            !workerNode.capabilityLabels.includes(label));
+
+          if (!isWorkerNodeEligible(this.mapWorkerNode(workerNode))) {
+            throw new HttpError(409, `worker node ${workerNode.id} is not eligible for scheduling`);
+          }
+
+          if (missingLabels.length > 0) {
+            throw new HttpError(409, `worker node ${workerNode.id} is missing required capability labels: ${missingLabels.join(", ")}`);
+          }
+        }
+
         await tx.insert(sessions).values({
           id: crypto.randomUUID(),
           agentId: createdAgent.id,
@@ -416,6 +491,9 @@ export class ControlPlaneService {
           sandbox: input.session.sandbox,
           approvalPolicy: input.session.approvalPolicy,
           includePlanTool: input.session.includePlanTool,
+          workerNodeId: input.session.workerNodeId ?? null,
+          stickyNodeId: input.session.workerNodeId ?? null,
+          placementConstraintLabels: input.session.placementConstraintLabels,
           state: sessionState,
           staleReason: null,
           metadata: input.session.metadata,
@@ -627,14 +705,15 @@ export class ControlPlaneService {
   }
 
   async exportRunAudit(runId: string): Promise<RunAuditExport> {
-    const [runDetail, approvalsList, validationsList, artifactsList, events] = await Promise.all([
+    const [runDetail, approvalsList, validationsList, artifactsList, events, allWorkerNodes] = await Promise.all([
       this.getRun(runId),
       this.listApprovals(runId),
       this.listValidations(runId),
       this.listArtifacts(runId),
       this.db.select().from(controlPlaneEvents)
         .where(eq(controlPlaneEvents.runId, runId))
-        .orderBy(asc(controlPlaneEvents.createdAt))
+        .orderBy(asc(controlPlaneEvents.createdAt)),
+      this.listWorkerNodes()
     ]);
     const repository = await this.assertRepositoryExists(runDetail.repositoryId);
 
@@ -644,6 +723,9 @@ export class ControlPlaneService {
       tasks: runDetail.tasks,
       agents: runDetail.agents,
       sessions: runDetail.sessions,
+      workerNodes: allWorkerNodes.filter((workerNode) =>
+        runDetail.sessions.some((session) =>
+          session.workerNodeId === workerNode.id || session.stickyNodeId === workerNode.id)),
       approvals: approvalsList,
       validations: validationsList,
       artifacts: artifactsList,
@@ -803,6 +885,16 @@ export class ControlPlaneService {
     return repository;
   }
 
+  private async assertWorkerNodeExists(nodeId: string) {
+    const [workerNode] = await this.db.select().from(workerNodes).where(eq(workerNodes.id, nodeId));
+
+    if (!workerNode) {
+      throw new HttpError(404, `worker node ${nodeId} not found`);
+    }
+
+    return workerNode;
+  }
+
   private async assertRunExists(runId: string) {
     const [run] = await this.db.select().from(runs).where(eq(runs.id, runId));
 
@@ -903,6 +995,19 @@ export class ControlPlaneService {
     return {
       ...session,
       state: session.state as Session["state"]
+    };
+  }
+
+  private mapWorkerNode(workerNode: typeof workerNodes.$inferSelect): WorkerNode {
+    return {
+      ...workerNode,
+      endpoint: workerNode.endpoint ?? null,
+      status: workerNode.status as WorkerNode["status"],
+      drainState: workerNode.drainState as WorkerNode["drainState"],
+      eligibleForScheduling: isWorkerNodeEligible({
+        status: workerNode.status as WorkerNode["status"],
+        drainState: workerNode.drainState as WorkerNode["drainState"]
+      })
     };
   }
 

@@ -74,6 +74,19 @@ export const agents = pgTable("agents", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
 });
 
+export const workerNodes = pgTable("worker_nodes", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  endpoint: text("endpoint"),
+  capabilityLabels: jsonb("capability_labels").$type<string[]>().notNull().default([]),
+  status: text("status").notNull().default("online"),
+  drainState: text("drain_state").notNull().default("active"),
+  lastHeartbeatAt: timestamp("last_heartbeat_at", { withTimezone: true }),
+  metadata: jsonb("metadata").$type<Record<string, unknown>>().notNull().default({}),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
+});
+
 export const sessions = pgTable("sessions", {
   id: text("id").primaryKey(),
   agentId: text("agent_id").notNull().references(() => agents.id),
@@ -82,6 +95,9 @@ export const sessions = pgTable("sessions", {
   sandbox: text("sandbox").notNull(),
   approvalPolicy: text("approval_policy").notNull(),
   includePlanTool: boolean("include_plan_tool").notNull().default(false),
+  workerNodeId: text("worker_node_id").references(() => workerNodes.id),
+  stickyNodeId: text("sticky_node_id").references(() => workerNodes.id),
+  placementConstraintLabels: jsonb("placement_constraint_labels").$type<string[]>().notNull().default([]),
   state: text("state").notNull().default("active"),
   staleReason: text("stale_reason"),
   metadata: jsonb("metadata").$type<Record<string, unknown>>().notNull().default({}),

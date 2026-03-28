@@ -13,6 +13,10 @@ export const repositoryTrustLevels = ["trusted", "sandboxed", "restricted"] as c
 export const pullRequestStatuses = ["draft", "open", "merged", "closed"] as const;
 export const handoffStatuses = ["pending", "branch_published", "pr_open", "manual_handoff", "merged", "closed"] as const;
 export const workerSessionStates = ["pending", "active", "stopped", "failed", "stale", "archived"] as const;
+export const workerNodeStates = ["active", "draining", "drained", "offline"] as const;
+export const workerDispatchStates = ["queued", "claimed", "completed", "retrying", "failed"] as const;
+export const workerNodeStatuses = ["online", "degraded", "offline"] as const;
+export const workerNodeDrainStates = ["active", "draining", "drained"] as const;
 
 export const repositoryCreateSchema = z.object({
   name: z.string().min(1),
@@ -72,8 +76,31 @@ export const agentCreateSchema = z.object({
     sandbox: z.string().min(1),
     approvalPolicy: z.string().min(1),
     includePlanTool: z.boolean().default(false),
+    workerNodeId: z.uuid().optional(),
+    placementConstraintLabels: z.array(z.string().min(1)).default([]),
     metadata: z.record(z.string(), z.unknown()).default({})
   }).optional()
+});
+
+export const workerNodeRegisterSchema = z.object({
+  id: z.uuid().optional(),
+  name: z.string().min(1),
+  endpoint: z.string().min(1).optional(),
+  capabilityLabels: z.array(z.string().min(1)).default([]),
+  status: z.enum(workerNodeStatuses).default("online"),
+  drainState: z.enum(workerNodeDrainStates).default("active"),
+  metadata: z.record(z.string(), z.unknown()).default({})
+});
+
+export const workerNodeHeartbeatSchema = z.object({
+  status: z.enum(workerNodeStatuses).default("online"),
+  capabilityLabels: z.array(z.string().min(1)).default([]),
+  metadata: z.record(z.string(), z.unknown()).default({})
+});
+
+export const workerNodeDrainUpdateSchema = z.object({
+  drainState: z.enum(workerNodeDrainStates),
+  reason: z.string().min(1).optional()
 });
 
 export const idParamSchema = z.object({
@@ -137,11 +164,27 @@ export const sessionSchema = z.object({
   sandbox: z.string().min(1),
   approvalPolicy: z.string().min(1),
   includePlanTool: z.boolean().default(false),
+  workerNodeId: z.uuid().nullable(),
+  stickyNodeId: z.uuid().nullable(),
+  placementConstraintLabels: z.array(z.string().min(1)).default([]),
   state: z.enum(workerSessionStates),
   staleReason: z.string().min(1).nullable(),
   metadata: z.record(z.string(), z.unknown()).default({}),
   createdAt: z.date(),
   updatedAt: z.date()
+});
+
+export const workerNodeSchema = workerNodeRegisterSchema.extend({
+  id: z.uuid(),
+  endpoint: z.string().min(1).nullable(),
+  status: z.enum(workerNodeStatuses),
+  drainState: z.enum(workerNodeDrainStates),
+  lastHeartbeatAt: z.date().nullable(),
+  metadata: z.record(z.string(), z.unknown()).default({}),
+  createdAt: z.date(),
+  updatedAt: z.date()
+}).extend({
+  eligibleForScheduling: z.boolean()
 });
 
 export const approvalSchema = z.object({
@@ -320,6 +363,79 @@ export const cleanupJobReportSchema = z.object({
   completedAt: z.date()
 });
 
+export const workerDispatchAssignmentSchema = z.object({
+  id: z.uuid(),
+  runId: z.uuid(),
+  taskId: z.uuid(),
+  agentId: z.uuid(),
+  sessionId: z.uuid().optional(),
+  repositoryId: z.uuid(),
+  repositoryName: z.string().min(1),
+  queue: z.string().min(1).default("worker-dispatch"),
+  state: z.enum(workerDispatchStates).default("queued"),
+  stickyNodeId: z.string().min(1).nullable().default(null),
+  preferredNodeId: z.string().min(1).nullable().default(null),
+  requiredCapabilities: z.array(z.string().min(1)).default([]),
+  worktreePath: z.string().min(1),
+  branchName: z.string().min(1).nullable().default(null),
+  prompt: z.string().min(1),
+  profile: z.string().min(1),
+  sandbox: z.string().min(1),
+  approvalPolicy: z.string().min(1),
+  includePlanTool: z.boolean().default(false),
+  metadata: z.record(z.string(), z.unknown()).default({}),
+  attempt: z.number().int().nonnegative().default(0),
+  maxAttempts: z.number().int().positive().default(3),
+  leaseTtlSeconds: z.number().int().positive().default(300),
+  createdAt: z.date()
+});
+
+export const workerNodeRuntimeSchema = z.object({
+  nodeId: z.string().min(1),
+  nodeName: z.string().min(1),
+  state: z.enum(workerNodeStates),
+  workspaceRoot: z.string().min(1),
+  codexCommand: z.array(z.string().min(1)).min(1),
+  controlPlaneUrl: z.string().url(),
+  artifactBaseUrl: z.string().url().optional(),
+  postgresUrl: z.string().min(1),
+  redisUrl: z.string().min(1),
+  queueKeyPrefix: z.string().min(1).default("codex-swarm"),
+  capabilities: z.array(z.string().min(1)).default([]),
+  credentialEnvNames: z.array(z.string().min(1)).default([]),
+  heartbeatIntervalSeconds: z.number().int().positive().default(30)
+});
+
+export const workerRuntimeDependencyCheckSchema = z.object({
+  name: z.enum(["control_plane", "postgres", "redis", "artifact_store", "codex_cli", "workspace_root"]),
+  status: z.enum(["ready", "missing", "degraded"]),
+  detail: z.string().min(1)
+});
+
+export const remoteWorkerBootstrapSchema = z.object({
+  runtime: workerNodeRuntimeSchema,
+  dispatch: workerDispatchAssignmentSchema,
+  environment: z.record(z.string(), z.string()),
+  checks: z.array(workerRuntimeDependencyCheckSchema)
+});
+
+export const workerDrainCommandSchema = z.object({
+  nodeId: z.string().min(1),
+  targetState: z.enum(["active", "draining", "drained"]),
+  reason: z.string().min(1),
+  allowActiveAssignments: z.boolean().default(true)
+});
+
+export const workerDrainStatusSchema = z.object({
+  nodeId: z.string().min(1),
+  previousState: z.enum(workerNodeStates),
+  targetState: z.enum(workerNodeStates),
+  shouldAcceptAssignments: z.boolean(),
+  shouldKeepHeartbeats: z.boolean(),
+  requiresRedisPause: z.boolean(),
+  reason: z.string().min(1)
+});
+
 export const runDetailSchema = runSchema.extend({
   tasks: z.array(taskSchema),
   agents: z.array(agentSchema),
@@ -332,6 +448,7 @@ export const runAuditExportSchema = z.object({
   tasks: z.array(taskSchema),
   agents: z.array(agentSchema),
   sessions: z.array(sessionSchema),
+  workerNodes: z.array(workerNodeSchema),
   approvals: z.array(approvalSchema),
   validations: z.array(validationHistoryEntrySchema),
   artifacts: z.array(artifactSchema),
@@ -350,11 +467,15 @@ export type Run = z.infer<typeof runSchema>;
 export type Task = z.infer<typeof taskSchema>;
 export type Agent = z.infer<typeof agentSchema>;
 export type Session = z.infer<typeof sessionSchema>;
+export type WorkerNode = z.infer<typeof workerNodeSchema>;
 export type Approval = z.infer<typeof approvalSchema>;
 export type Artifact = z.infer<typeof artifactSchema>;
 export type RunDetail = z.infer<typeof runDetailSchema>;
 export type RunAuditExport = z.infer<typeof runAuditExportSchema>;
 export type ApprovalsListQuery = z.infer<typeof approvalsListQuerySchema>;
+export type WorkerNodeRegisterInput = z.infer<typeof workerNodeRegisterSchema>;
+export type WorkerNodeHeartbeatInput = z.infer<typeof workerNodeHeartbeatSchema>;
+export type WorkerNodeDrainUpdateInput = z.infer<typeof workerNodeDrainUpdateSchema>;
 export type ApprovalCreateInput = z.infer<typeof approvalCreateSchema>;
 export type ApprovalResolveInput = z.infer<typeof approvalResolveSchema>;
 export type ArtifactCreateInput = z.infer<typeof artifactCreateSchema>;
@@ -370,3 +491,9 @@ export type CleanupJobReport = z.infer<typeof cleanupJobReportSchema>;
 export type EventsListQuery = z.infer<typeof eventsListQuerySchema>;
 export type ControlPlaneEvent = z.infer<typeof controlPlaneEventSchema>;
 export type ControlPlaneMetrics = z.infer<typeof controlPlaneMetricsSchema>;
+export type WorkerDispatchAssignment = z.infer<typeof workerDispatchAssignmentSchema>;
+export type WorkerNodeRuntime = z.infer<typeof workerNodeRuntimeSchema>;
+export type WorkerRuntimeDependencyCheck = z.infer<typeof workerRuntimeDependencyCheckSchema>;
+export type RemoteWorkerBootstrap = z.infer<typeof remoteWorkerBootstrapSchema>;
+export type WorkerDrainCommand = z.infer<typeof workerDrainCommandSchema>;
+export type WorkerDrainStatus = z.infer<typeof workerDrainStatusSchema>;

@@ -66,6 +66,18 @@ const statements = [
     created_at timestamptz not null default now(),
     updated_at timestamptz not null default now()
   )`,
+  `create table if not exists worker_nodes (
+    id text primary key,
+    name text not null,
+    endpoint text,
+    capability_labels jsonb not null default '[]'::jsonb,
+    status text not null default 'online',
+    drain_state text not null default 'active',
+    last_heartbeat_at timestamptz,
+    metadata jsonb not null default '{}'::jsonb,
+    created_at timestamptz not null default now(),
+    updated_at timestamptz not null default now()
+  )`,
   `create table if not exists sessions (
     id text primary key,
     agent_id text not null references agents(id),
@@ -74,6 +86,9 @@ const statements = [
     sandbox text not null,
     approval_policy text not null,
     include_plan_tool boolean not null default false,
+    worker_node_id text references worker_nodes(id),
+    sticky_node_id text references worker_nodes(id),
+    placement_constraint_labels jsonb not null default '[]'::jsonb,
     state text not null default 'active',
     stale_reason text,
     metadata jsonb not null default '{}'::jsonb,
@@ -155,6 +170,9 @@ async function main() {
   await db.execute(sql.raw("alter table approvals add column if not exists resolver text"));
   await db.execute(sql.raw("alter table approvals add column if not exists resolved_at timestamptz"));
   await db.execute(sql.raw("alter table validations add column if not exists artifact_ids jsonb not null default '[]'::jsonb"));
+  await db.execute(sql.raw("alter table sessions add column if not exists worker_node_id text references worker_nodes(id)"));
+  await db.execute(sql.raw("alter table sessions add column if not exists sticky_node_id text references worker_nodes(id)"));
+  await db.execute(sql.raw("alter table sessions add column if not exists placement_constraint_labels jsonb not null default '[]'::jsonb"));
   await db.execute(sql.raw("alter table sessions add column if not exists state text not null default 'active'"));
   await db.execute(sql.raw("alter table sessions add column if not exists stale_reason text"));
   await db.execute(sql.raw("alter table repositories add column if not exists provider text not null default 'other'"));

@@ -16,7 +16,10 @@ import {
   taskCreateSchema,
   taskStatusUpdateSchema,
   validationCreateSchema as contractValidationCreateSchema,
-  validationsListQuerySchema
+  validationsListQuerySchema,
+  workerNodeDrainUpdateSchema,
+  workerNodeHeartbeatSchema,
+  workerNodeRegisterSchema
 } from "@codex-swarm/contracts";
 
 import { messageKinds } from "../domain/types.js";
@@ -56,5 +59,8 @@ export {
   runStatusUpdateSchema,
   taskCreateSchema,
   taskStatusUpdateSchema,
-  validationsListQuerySchema
+  validationsListQuerySchema,
+  workerNodeDrainUpdateSchema,
+  workerNodeHeartbeatSchema,
+  workerNodeRegisterSchema
 };

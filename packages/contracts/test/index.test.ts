@@ -6,9 +6,16 @@ import {
   agentCreateSchema,
   cleanupJobRunSchema,
   repositoryCreateSchema,
+  remoteWorkerBootstrapSchema,
   runBranchPublishSchema,
   runCreateSchema,
   runPullRequestHandoffSchema,
+  workerDispatchAssignmentSchema,
+  workerDrainCommandSchema,
+  workerNodeDrainUpdateSchema,
+  workerNodeHeartbeatSchema,
+  workerNodeRuntimeSchema,
+  workerNodeRegisterSchema,
   validationCreateSchema,
   taskCreateSchema
 } from "../src/index.js";
@@ -67,8 +74,40 @@ describe("agentCreateSchema", () => {
     expect(agent.status).toBe("provisioning");
     expect(agent.session).toMatchObject({
       includePlanTool: false,
+      placementConstraintLabels: [],
       metadata: {}
     });
+  });
+});
+
+describe("workerNodeRegisterSchema", () => {
+  it("defaults capability labels and active scheduling state", () => {
+    const workerNode = workerNodeRegisterSchema.parse({
+      name: "node-a"
+    });
+
+    expect(workerNode.capabilityLabels).toEqual([]);
+    expect(workerNode.status).toBe("online");
+    expect(workerNode.drainState).toBe("active");
+  });
+});
+
+describe("workerNodeHeartbeatSchema", () => {
+  it("defaults heartbeat status and labels", () => {
+    const heartbeat = workerNodeHeartbeatSchema.parse({});
+
+    expect(heartbeat.status).toBe("online");
+    expect(heartbeat.capabilityLabels).toEqual([]);
+  });
+});
+
+describe("workerNodeDrainUpdateSchema", () => {
+  it("accepts explicit drain state transitions", () => {
+    const drainUpdate = workerNodeDrainUpdateSchema.parse({
+      drainState: "draining"
+    });
+
+    expect(drainUpdate.drainState).toBe("draining");
   });
 });
 
@@ -160,5 +199,112 @@ describe("cleanupJobRunSchema", () => {
 
     expect(cleanup.staleAfterMinutes).toBe(15);
     expect(cleanup.existingWorktreePaths).toEqual([]);
+  });
+});
+
+describe("workerDispatchAssignmentSchema", () => {
+  it("defaults queue and retry controls for remote dispatch", () => {
+    const assignment = workerDispatchAssignmentSchema.parse({
+      id: "550e8400-e29b-41d4-a716-446655440010",
+      runId: "550e8400-e29b-41d4-a716-446655440001",
+      taskId: "550e8400-e29b-41d4-a716-446655440002",
+      agentId: "550e8400-e29b-41d4-a716-446655440003",
+      repositoryId: "550e8400-e29b-41d4-a716-446655440004",
+      repositoryName: "codex-swarm",
+      worktreePath: "/tmp/codex-swarm/run-001/agent-001",
+      prompt: "Run the task",
+      profile: "default",
+      sandbox: "danger-full-access",
+      approvalPolicy: "never",
+      createdAt: new Date("2026-03-28T12:00:00.000Z")
+    });
+
+    expect(assignment).toMatchObject({
+      queue: "worker-dispatch",
+      state: "queued",
+      stickyNodeId: null,
+      preferredNodeId: null,
+      requiredCapabilities: [],
+      branchName: null,
+      includePlanTool: false,
+      metadata: {},
+      attempt: 0,
+      maxAttempts: 3,
+      leaseTtlSeconds: 300
+    });
+  });
+});
+
+describe("workerNodeRuntimeSchema", () => {
+  it("defaults queue prefix and heartbeat interval", () => {
+    const runtime = workerNodeRuntimeSchema.parse({
+      nodeId: "node-a",
+      nodeName: "node-a",
+      state: "active",
+      workspaceRoot: "/srv/codex-swarm",
+      codexCommand: ["codex", "mcp-server"],
+      controlPlaneUrl: "https://control-plane.internal",
+      postgresUrl: "postgres://postgres:postgres@db.internal:5432/codex",
+      redisUrl: "redis://cache.internal:6379/0"
+    });
+
+    expect(runtime.queueKeyPrefix).toBe("codex-swarm");
+    expect(runtime.capabilities).toEqual([]);
+    expect(runtime.credentialEnvNames).toEqual([]);
+    expect(runtime.heartbeatIntervalSeconds).toBe(30);
+  });
+});
+
+describe("remoteWorkerBootstrapSchema", () => {
+  it("accepts bootstrap envelopes for remote worker startup", () => {
+    const bootstrap = remoteWorkerBootstrapSchema.parse({
+      runtime: {
+        nodeId: "node-a",
+        nodeName: "node-a",
+        state: "active",
+        workspaceRoot: "/srv/codex-swarm",
+        codexCommand: ["codex", "mcp-server"],
+        controlPlaneUrl: "https://control-plane.internal",
+        postgresUrl: "postgres://postgres:postgres@db.internal:5432/codex",
+        redisUrl: "redis://cache.internal:6379/0"
+      },
+      dispatch: {
+        id: "550e8400-e29b-41d4-a716-446655440010",
+        runId: "550e8400-e29b-41d4-a716-446655440001",
+        taskId: "550e8400-e29b-41d4-a716-446655440002",
+        agentId: "550e8400-e29b-41d4-a716-446655440003",
+        repositoryId: "550e8400-e29b-41d4-a716-446655440004",
+        repositoryName: "codex-swarm",
+        worktreePath: "/tmp/codex-swarm/run-001/agent-001",
+        prompt: "Run the task",
+        profile: "default",
+        sandbox: "danger-full-access",
+        approvalPolicy: "never",
+        createdAt: new Date("2026-03-28T12:00:00.000Z")
+      },
+      environment: {
+        CODEX_SWARM_NODE_ID: "node-a"
+      },
+      checks: [{
+        name: "redis",
+        status: "ready",
+        detail: "redis connection string configured"
+      }]
+    });
+
+    expect(bootstrap.environment.CODEX_SWARM_NODE_ID).toBe("node-a");
+    expect(bootstrap.dispatch.queue).toBe("worker-dispatch");
+  });
+});
+
+describe("workerDrainCommandSchema", () => {
+  it("defaults drain commands to allowing active assignments during transition", () => {
+    const command = workerDrainCommandSchema.parse({
+      nodeId: "node-a",
+      targetState: "draining",
+      reason: "maintenance"
+    });
+
+    expect(command.allowActiveAssignments).toBe(true);
   });
 });
