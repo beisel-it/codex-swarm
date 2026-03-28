@@ -19,9 +19,10 @@ TypeScript pnpm-workspace scaffold for the M0/M1 slice described in [PRD.md](./P
 1. Install workspace dependencies:
    `corepack pnpm install`
 2. Copy `.env.example` to `.env` and set `DATABASE_URL` and `DEV_AUTH_TOKEN`.
-3. Start the API package:
+3. For governed-repo testing, optionally switch `SECRET_SOURCE_MODE=external_manager`, set `SECRET_PROVIDER=vault`, and list task-scoped credential names in `REMOTE_SECRET_ENV_NAMES`.
+4. Start the API package:
    `corepack pnpm --dir apps/api dev`
-4. Start the frontend package:
+5. Start the frontend package:
    `corepack pnpm --dir frontend dev`
 
 ## Verification
@@ -32,6 +33,13 @@ TypeScript pnpm-workspace scaffold for the M0/M1 slice described in [PRD.md](./P
 - API tests: `corepack pnpm --dir apps/api test`
 
 Use `Authorization: Bearer <DEV_AUTH_TOKEN>` for `/api/v1/*` requests.
+
+Admin-oriented governance endpoints:
+
+- `GET /api/v1/admin/governance-report`
+- `POST /api/v1/admin/retention/reconcile`
+- `GET /api/v1/admin/secrets/integration-boundary`
+- `GET /api/v1/admin/secrets/access-plan/:id`
 
 ## Productivity Packs
 

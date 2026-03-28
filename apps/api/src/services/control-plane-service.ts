@@ -1149,7 +1149,7 @@ export class ControlPlaneService {
   }): Promise<GovernanceAdminReport> {
     const now = this.clock.now();
     assertAccessBoundary(input.access);
-    const [repositoryRows, runRows, approvalRows, artifactRows, eventRows] = await Promise.all([
+    const [repositoryRows, runRows, approvalRows] = await Promise.all([
       this.db.select().from(repositories)
         .where(and(eq(repositories.workspaceId, input.access.workspaceId), eq(repositories.teamId, input.access.teamId)))
         .orderBy(asc(repositories.createdAt)),
@@ -1172,14 +1172,19 @@ export class ControlPlaneService {
         : this.db.select().from(approvals).where(and(
           eq(approvals.workspaceId, input.access.workspaceId),
           eq(approvals.teamId, input.access.teamId)
-        )).orderBy(asc(approvals.createdAt)),
-      input.runId
-        ? this.db.select().from(artifacts).where(eq(artifacts.runId, input.runId)).orderBy(asc(artifacts.createdAt))
-        : this.db.select().from(artifacts).orderBy(asc(artifacts.createdAt)),
-      input.runId
-        ? this.db.select().from(controlPlaneEvents).where(eq(controlPlaneEvents.runId, input.runId)).orderBy(asc(controlPlaneEvents.createdAt))
-        : this.db.select().from(controlPlaneEvents).orderBy(asc(controlPlaneEvents.createdAt))
+        )).orderBy(asc(approvals.createdAt))
     ]);
+    const governedRunIds = runRows.map((run) => run.id);
+    const [artifactRows, eventRows] = governedRunIds.length === 0
+      ? [[], []]
+      : await Promise.all([
+        this.db.select().from(artifacts)
+          .where(inArray(artifacts.runId, governedRunIds))
+          .orderBy(asc(artifacts.createdAt)),
+        this.db.select().from(controlPlaneEvents)
+          .where(inArray(controlPlaneEvents.runId, governedRunIds))
+          .orderBy(asc(controlPlaneEvents.createdAt))
+      ]);
 
     const repositoriesById = new Map(repositoryRows.map((repository) => [repository.id, this.mapRepository(repository)] as const));
     const runsById = new Map(runRows.map((run) => [run.id, this.mapRun(run)] as const));
@@ -1266,12 +1271,13 @@ export class ControlPlaneService {
         eq(runs.workspaceId, input.access.workspaceId),
         eq(runs.teamId, input.access.teamId)
       ));
-    const artifactRows = input.runId
-      ? await this.db.select().from(artifacts).where(eq(artifacts.runId, input.runId))
-      : await this.db.select().from(artifacts);
-    const eventRows = input.runId
-      ? await this.db.select().from(controlPlaneEvents).where(eq(controlPlaneEvents.runId, input.runId))
-      : await this.db.select().from(controlPlaneEvents);
+    const governedRunIds = runsRows.map((run) => run.id);
+    const [artifactRows, eventRows] = governedRunIds.length === 0
+      ? [[], []]
+      : await Promise.all([
+        this.db.select().from(artifacts).where(inArray(artifacts.runId, governedRunIds)),
+        this.db.select().from(controlPlaneEvents).where(inArray(controlPlaneEvents.runId, governedRunIds))
+      ]);
 
     const reconcileMetadata = (existing: Record<string, unknown>, expiresAt: Date) => ({
       ...existing,
