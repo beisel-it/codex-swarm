@@ -19,7 +19,7 @@ type TaskStatus =
   | 'cancelled'
 
 type AgentStatus = 'provisioning' | 'idle' | 'busy' | 'paused' | 'stopped' | 'failed'
-type ApprovalStatus = 'pending' | 'approved' | 'rejected'
+type ReviewStatus = 'pending' | 'approved' | 'attention'
 type ValidationStatus = 'pending' | 'passed' | 'failed'
 type ArtifactKind = 'plan' | 'patch' | 'log' | 'report' | 'diff' | 'screenshot' | 'other'
 
@@ -35,7 +35,7 @@ type Run = {
   repositoryId: string
   goal: string
   status: RunStatus
-  branchName: string
+  branchName: string | null
   createdAt: string
   updatedAt: string
   metadata?: Record<string, unknown>
@@ -49,7 +49,7 @@ type Task = {
   role: string
   status: TaskStatus
   priority: number
-  ownerAgentId?: string
+  ownerAgentId?: string | null
   acceptanceCriteria: string[]
 }
 
@@ -59,38 +59,40 @@ type Agent = {
   name: string
   role: string
   status: AgentStatus
-  branchName: string
-  worktreePath: string
-}
-
-type Approval = {
-  id: string
-  runId: string
-  taskId?: string
-  kind: string
-  requestedBy: string
-  reviewer?: string
-  notes?: string
-  status: ApprovalStatus
+  branchName: string | null
+  worktreePath: string | null
 }
 
 type Validation = {
   id: string
   runId: string
-  taskId?: string
+  taskId?: string | null
   name: string
   command: string
-  summary?: string
+  summary?: string | null
   status: ValidationStatus
 }
 
 type Artifact = {
   id: string
   runId: string
-  taskId?: string
+  taskId?: string | null
   kind: ArtifactKind
   path: string
   contentType: string
+}
+
+type RunDetail = Run & {
+  tasks: Task[]
+  agents: Agent[]
+}
+
+type ReviewItem = {
+  id: string
+  title: string
+  status: ReviewStatus
+  notes: string
+  meta: string
 }
 
 type SwarmData = {
@@ -98,11 +100,13 @@ type SwarmData = {
   runs: Run[]
   tasks: Task[]
   agents: Agent[]
-  approvals: Approval[]
   validations: Validation[]
   artifacts: Artifact[]
   source: 'mock' | 'api'
 }
+
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? '').replace(/\/$/, '')
+const API_TOKEN = import.meta.env.VITE_API_TOKEN ?? 'codex-swarm-dev-token'
 
 const mockData: SwarmData = {
   source: 'mock',
@@ -162,13 +166,13 @@ const mockData: SwarmData = {
     {
       id: 'task-ui',
       runId: 'run-alpha',
-      title: 'Replace the starter app with the board shell',
-      description: 'Show run overview, task lanes, blocked work, and review placeholders against stable shared shapes.',
+      title: 'Wire the board shell to live API data',
+      description: 'Replace mocked-only hydration with backend-backed run details and live review signals.',
       role: 'frontend',
       status: 'in_progress',
       priority: 4,
       ownerAgentId: 'agent-frontend',
-      acceptanceCriteria: ['Starter removed', 'Responsive board shell added', 'Mock data path exists'],
+      acceptanceCriteria: ['Runs hydrate from API', 'Review states derive from live status', 'Fallback remains safe'],
     },
     {
       id: 'task-runtime',
@@ -217,7 +221,7 @@ const mockData: SwarmData = {
       name: 'frontend-dev',
       role: 'frontend',
       status: 'busy',
-      branchName: 'feature/board-shell',
+      branchName: 'feature/live-board-data',
       worktreePath: '/worktrees/run-alpha/frontend',
     },
     {
@@ -228,27 +232,6 @@ const mockData: SwarmData = {
       status: 'paused',
       branchName: 'review/beta-handoff',
       worktreePath: '/worktrees/run-beta/reviewer',
-    },
-  ],
-  approvals: [
-    {
-      id: 'approval-plan',
-      runId: 'run-beta',
-      taskId: 'task-review',
-      kind: 'plan',
-      requestedBy: 'tech-lead',
-      reviewer: 'principal-eng',
-      notes: 'Approve the board shell before live event streaming and richer review actions land.',
-      status: 'pending',
-    },
-    {
-      id: 'approval-exception',
-      runId: 'run-alpha',
-      kind: 'policy_exception',
-      requestedBy: 'backend-dev',
-      reviewer: 'security',
-      notes: 'Remote provider smoke tests remain blocked until policy defaults are documented.',
-      status: 'rejected',
     },
   ],
   validations: [
@@ -265,9 +248,9 @@ const mockData: SwarmData = {
       id: 'validation-ui',
       runId: 'run-alpha',
       taskId: 'task-ui',
-      name: 'Board shell build',
-      command: 'pnpm --dir frontend build',
-      summary: 'Pending until the starter app is replaced by the real board shell.',
+      name: 'Board live data build',
+      command: 'npm --prefix frontend run build',
+      summary: 'Live hydration is ready to validate once the API process is running.',
       status: 'pending',
     },
     {
@@ -284,7 +267,7 @@ const mockData: SwarmData = {
     {
       id: 'artifact-plan',
       runId: 'run-alpha',
-      taskId: 'task-plan',
+      taskId: 'task-api',
       kind: 'plan',
       path: '.swarm/plan.md',
       contentType: 'text/markdown',
@@ -294,7 +277,7 @@ const mockData: SwarmData = {
       runId: 'run-alpha',
       taskId: 'task-ui',
       kind: 'report',
-      path: 'artifacts/ui/board-shell-preview.html',
+      path: 'artifacts/ui/live-board-preview.html',
       contentType: 'text/html',
     },
     {
@@ -329,10 +312,10 @@ const agentStatusTone: Record<AgentStatus, string> = {
   failed: 'danger',
 }
 
-const approvalStatusTone: Record<ApprovalStatus, string> = {
+const reviewStatusTone: Record<ReviewStatus, string> = {
   pending: 'warning',
   approved: 'success',
-  rejected: 'danger',
+  attention: 'danger',
 }
 
 const validationStatusTone: Record<ValidationStatus, string> = {
@@ -341,8 +324,16 @@ const validationStatusTone: Record<ValidationStatus, string> = {
   failed: 'danger',
 }
 
+function buildApiUrl(path: string) {
+  return API_BASE_URL ? `${API_BASE_URL}${path}` : path
+}
+
 async function requestJson<T>(path: string): Promise<T> {
-  const response = await fetch(path)
+  const response = await fetch(buildApiUrl(path), {
+    headers: {
+      Authorization: `Bearer ${API_TOKEN}`,
+    },
+  })
 
   if (!response.ok) {
     throw new Error(`Request failed: ${response.status}`)
@@ -355,32 +346,40 @@ async function loadSwarmData(): Promise<SwarmData> {
   try {
     const repositories = await requestJson<Repository[]>('/api/v1/repositories')
     const runs = await requestJson<Run[]>('/api/v1/runs')
-    const tasks = await requestJson<Task[]>('/api/v1/tasks')
 
     if (repositories.length === 0 || runs.length === 0) {
       return mockData
     }
 
-    const agents = await requestJson<Agent[]>('/api/v1/agents').catch(() => mockData.agents)
-    const approvals = await requestJson<Approval[]>('/api/v1/approvals').catch(() => mockData.approvals)
-    const artifacts = await requestJson<Artifact[]>('/api/v1/artifacts').catch(() => mockData.artifacts)
+    const details = await Promise.all(
+      runs.map((run) =>
+        requestJson<RunDetail>(`/api/v1/runs/${encodeURIComponent(run.id)}`),
+      ),
+    )
 
-    const validations: Validation[] = []
-    for (const run of runs) {
-      const runValidations = await requestJson<Validation[]>(
-        `/api/v1/validations?runId=${encodeURIComponent(run.id)}`,
-      ).catch(() => [])
-      validations.push(...runValidations)
-    }
+    const validationsPerRun = await Promise.all(
+      runs.map((run) =>
+        requestJson<Validation[]>(`/api/v1/validations?runId=${encodeURIComponent(run.id)}`).catch(
+          () => [],
+        ),
+      ),
+    )
+
+    const artifactsPerRun = await Promise.all(
+      runs.map((run) =>
+        requestJson<Artifact[]>(`/api/v1/artifacts?runId=${encodeURIComponent(run.id)}`).catch(
+          () => [],
+        ),
+      ),
+    )
 
     return {
       repositories,
       runs,
-      tasks,
-      agents,
-      approvals,
-      validations: validations.length > 0 ? validations : mockData.validations,
-      artifacts,
+      tasks: details.flatMap((detail) => detail.tasks),
+      agents: details.flatMap((detail) => detail.agents),
+      validations: validationsPerRun.flat(),
+      artifacts: artifactsPerRun.flat(),
       source: 'api',
     }
   } catch {
@@ -395,6 +394,56 @@ function formatDate(input: string) {
     hour: '2-digit',
     minute: '2-digit',
   }).format(new Date(input))
+}
+
+function deriveReviewItems(run: Run, tasks: Task[], validations: Validation[]): ReviewItem[] {
+  const items: ReviewItem[] = []
+
+  if (run.status === 'awaiting_approval') {
+    items.push({
+      id: `${run.id}-approval`,
+      title: 'Run approval required',
+      status: 'pending',
+      notes: 'The backend marks this run as awaiting approval. Human review is required before execution continues.',
+      meta: `Run ${run.id}`,
+    })
+  }
+
+  tasks
+    .filter((task) => task.status === 'awaiting_review')
+    .forEach((task) => {
+      items.push({
+        id: `${task.id}-review`,
+        title: task.title,
+        status: 'pending',
+        notes: 'Task is waiting on reviewer sign-off before it can be considered complete.',
+        meta: `${task.role} task`,
+      })
+    })
+
+  validations
+    .filter((validation) => validation.status === 'failed')
+    .forEach((validation) => {
+      items.push({
+        id: `${validation.id}-failed`,
+        title: validation.name,
+        status: 'attention',
+        notes: validation.summary ?? 'A validation failed and requires attention before merge.',
+        meta: validation.command,
+      })
+    })
+
+  if (items.length === 0) {
+    items.push({
+      id: `${run.id}-clear`,
+      title: 'No active review blockers',
+      status: 'approved',
+      notes: 'No pending review tasks or failed validations are active for this run.',
+      meta: `Run ${run.id}`,
+    })
+  }
+
+  return items
 }
 
 function App() {
@@ -448,9 +497,9 @@ function App() {
     })
 
   const runAgents = data.agents.filter((agent) => agent.runId === selectedRun?.id)
-  const runApprovals = data.approvals.filter((approval) => approval.runId === selectedRun?.id)
   const runValidations = data.validations.filter((validation) => validation.runId === selectedRun?.id)
   const runArtifacts = data.artifacts.filter((artifact) => artifact.runId === selectedRun?.id)
+  const reviewItems = selectedRun ? deriveReviewItems(selectedRun, visibleTasks, runValidations) : []
 
   return (
     <div className="app-shell">
@@ -458,31 +507,18 @@ function App() {
 
       <header className="hero-panel">
         <div className="hero-copy">
-          <p className="eyebrow">Codex Swarm Board Shell</p>
+          <p className="eyebrow">Codex Swarm Live Board</p>
           <h1>Track runs, blocked work, and review gates in one durable view.</h1>
           <p className="lede">
-            This frontend replaces the starter app with the first orchestration board shell:
-            run overview, task lanes, blocked-state rendering, and review placeholders built
-            against shared resource shapes.
+            The board now hydrates from live backend endpoints when they are available, and it
+            falls back to seeded workspace data when the API is unavailable or still empty.
           </p>
         </div>
 
         <div className="hero-metrics">
-          <MetricCard
-            label="Runs on board"
-            value={String(data.runs.length)}
-            hint="Foundation plus review-loop tracks"
-          />
-          <MetricCard
-            label="Busy workers"
-            value={String(data.agents.filter((agent) => agent.status === 'busy').length)}
-            hint="Agents executing against isolated lanes"
-          />
-          <MetricCard
-            label="Pending approvals"
-            value={String(data.approvals.filter((approval) => approval.status === 'pending').length)}
-            hint="Review gates still waiting on a decision"
-          />
+          <MetricCard label="Runs on board" value={String(data.runs.length)} hint="Hydrated from the control plane" />
+          <MetricCard label="Busy workers" value={String(data.agents.filter((agent) => agent.status === 'busy').length)} hint="Live agents with active lanes" />
+          <MetricCard label="Review signals" value={String(reviewItems.filter((item) => item.status !== 'approved').length)} hint="Derived from run, task, and validation state" />
         </div>
       </header>
 
@@ -493,7 +529,7 @@ function App() {
               <p className="panel-kicker">Run ledger</p>
               <h2>Execution tracks</h2>
             </div>
-            <span className="data-pill">{data.source === 'api' ? 'Live API' : 'Mock data'}</span>
+            <span className="data-pill">{data.source === 'api' ? 'Live API' : 'Mock fallback'}</span>
           </div>
 
           <div className="run-stack">
@@ -513,7 +549,7 @@ function App() {
                   <span className="run-timestamp">{formatDate(run.updatedAt)}</span>
                 </div>
                 <h3>{run.goal}</h3>
-                <p>{run.branchName}</p>
+                <p>{run.branchName ?? 'Branch not assigned yet'}</p>
               </button>
             ))}
           </div>
@@ -534,7 +570,7 @@ function App() {
 
               <div className="overview-grid">
                 <InfoCard label="Goal" value={selectedRun.goal} />
-                <InfoCard label="Branch" value={selectedRun.branchName} />
+                <InfoCard label="Branch" value={selectedRun.branchName ?? 'Pending branch assignment'} />
                 <InfoCard label="Repository" value={selectedRepository?.url ?? 'No URL available'} />
                 <InfoCard label="Default branch" value={selectedRepository?.defaultBranch ?? 'main'} />
               </div>
@@ -542,7 +578,7 @@ function App() {
               <div className="signal-band">
                 <div>
                   <p className="signal-label">Milestone</p>
-                  <strong>{String(selectedRun.metadata?.phase ?? 'M1')}</strong>
+                  <strong>{String(selectedRun.metadata?.phase ?? 'Unspecified')}</strong>
                 </div>
                 <div>
                   <p className="signal-label">Concurrency</p>
@@ -550,7 +586,7 @@ function App() {
                 </div>
                 <div>
                   <p className="signal-label">Hydration</p>
-                  <strong>{loading ? 'Refreshing' : 'Current snapshot'}</strong>
+                  <strong>{loading ? 'Refreshing' : data.source === 'api' ? 'Live control plane' : 'Fallback snapshot'}</strong>
                 </div>
               </div>
             </section>
@@ -635,11 +671,11 @@ function App() {
                     <dl>
                       <div>
                         <dt>Branch</dt>
-                        <dd>{agent.branchName}</dd>
+                        <dd>{agent.branchName ?? 'Branch pending'}</dd>
                       </div>
                       <div>
                         <dt>Worktree</dt>
-                        <dd>{agent.worktreePath}</dd>
+                        <dd>{agent.worktreePath ?? 'Worktree pending'}</dd>
                       </div>
                     </dl>
                   </article>
@@ -650,24 +686,24 @@ function App() {
             <section className="panel panel-approvals">
               <div className="panel-header">
                 <div>
-                  <p className="panel-kicker">Review placeholders</p>
+                  <p className="panel-kicker">Review states</p>
                   <h2>Approvals and gates</h2>
                 </div>
               </div>
 
               <div className="approval-list">
-                {runApprovals.map((approval) => (
-                  <article key={approval.id} className="approval-card">
+                {reviewItems.map((item) => (
+                  <article key={item.id} className="approval-card">
                     <div className="approval-title">
-                      <strong>{approval.kind}</strong>
-                      <span className={`tone-chip tone-${approvalStatusTone[approval.status]}`}>
-                        {approval.status}
+                      <strong>{item.title}</strong>
+                      <span className={`tone-chip tone-${reviewStatusTone[item.status]}`}>
+                        {item.status}
                       </span>
                     </div>
-                    <p>{approval.notes ?? 'No reviewer notes captured yet.'}</p>
+                    <p>{item.notes}</p>
                     <div className="approval-meta">
-                      <span>Requested by {approval.requestedBy}</span>
-                      <span>{approval.reviewer ? `Reviewer: ${approval.reviewer}` : 'Reviewer unassigned'}</span>
+                      <span>{item.meta}</span>
+                      <span>Derived from live run/task/validation state</span>
                     </div>
                   </article>
                 ))}
@@ -695,6 +731,9 @@ function App() {
                     <p>{validation.summary ?? 'No summary available.'}</p>
                   </article>
                 ))}
+                {runValidations.length === 0 ? (
+                  <div className="empty-state">No validation records published yet.</div>
+                ) : null}
               </div>
             </section>
 
@@ -702,7 +741,7 @@ function App() {
               <div className="panel-header">
                 <div>
                   <p className="panel-kicker">Artifacts</p>
-                  <h2>Handoff placeholders</h2>
+                  <h2>Live handoff payloads</h2>
                 </div>
               </div>
 
@@ -714,6 +753,9 @@ function App() {
                     <p>{artifact.contentType}</p>
                   </article>
                 ))}
+                {runArtifacts.length === 0 ? (
+                  <div className="empty-state">No artifacts published yet.</div>
+                ) : null}
               </div>
             </section>
           </>
@@ -721,8 +763,12 @@ function App() {
       </main>
 
       <footer className="footer-bar">
-        <span>{loading ? 'Refreshing board state…' : 'Board shell ready.'}</span>
-        <span>Current slice uses mocked/shared-contract data when live endpoints are unavailable.</span>
+        <span>{loading ? 'Refreshing board state…' : 'Board data ready.'}</span>
+        <span>
+          {data.source === 'api'
+            ? 'Hydrating from live API detail and list endpoints.'
+            : 'Using fallback seed data until the API is reachable.'}
+        </span>
       </footer>
     </div>
   )
