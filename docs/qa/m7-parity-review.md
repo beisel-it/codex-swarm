@@ -530,3 +530,25 @@ Evidence:
 Residual risks:
 
 - The shared-state proof is polling-based and API-centric; it does not separately prove websocket-style fanout, which the roadmap entry does not require.
+
+## Task `a1149a84`
+
+Roadmap entry:
+
+- Phase 4 deliverable: `Node-level health and utilization view`
+
+Verdict:
+
+- parity
+
+Evidence:
+
+- The frontend board contains a dedicated `Fleet visibility` panel titled `Node health, utilization, and drain state` and renders one card per worker node in `frontend/src/App.tsx`.
+- Each fleet card shows node status, drain state, schedulability, capability labels, and a utilization summary derived from live node metadata: CPU percent, memory percent, queue depth, and assigned session count in `frontend/src/App.tsx`.
+- The control-plane API exposes the worker-node contract through `GET /api/v1/worker-nodes`, `PATCH /api/v1/worker-nodes/:id/heartbeat`, and `PATCH /api/v1/worker-nodes/:id/drain` in `apps/api/src/routes/worker-nodes.ts`.
+- Integration coverage verifies worker-node registration, fleet listing, heartbeat updates, drain transitions, and schedulability state in `apps/api/test/app.test.ts`.
+- The multi-node reference deployment docs explicitly call for the board to show node health, utilization, and drain state and point to shipped screenshot evidence in `docs/reference-deployments.md`.
+
+Residual risks:
+
+- Utilization is based on reported node metadata rather than an independently sampled telemetry pipeline, but that still satisfies the roadmap deliverable for a visible node-level health/utilization view.
