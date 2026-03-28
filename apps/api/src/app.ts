@@ -8,8 +8,11 @@ import { dependenciesPlugin } from "./plugins/dependencies.js";
 import { agentRoutes } from "./routes/agents.js";
 import { approvalRoutes } from "./routes/approvals.js";
 import { artifactRoutes } from "./routes/artifacts.js";
+import { eventRoutes } from "./routes/events.js";
 import { healthRoutes } from "./routes/health.js";
+import { ObservabilityService } from "./lib/observability.js";
 import { messageRoutes } from "./routes/messages.js";
+import { metricsRoutes } from "./routes/metrics.js";
 import { repositoryRoutes } from "./routes/repositories.js";
 import { runRoutes } from "./routes/runs.js";
 import { taskRoutes } from "./routes/tasks.js";
@@ -23,6 +26,43 @@ function getErrorMessage(error: unknown) {
 interface BuildAppOptions {
   config?: ReturnType<typeof getConfig>;
   controlPlane?: ControlPlaneService;
+  observability?: ObservabilityService;
+}
+
+function createNoopObservability(): Pick<
+  ObservabilityService,
+  "beginRequest" | "getMetrics" | "listEvents" | "recordRecoverableDatabaseFallback" | "recordRequestFailure" | "recordTimelineEvent" | "withTrace"
+> {
+  return Object.assign(Object.create(ObservabilityService.prototype) as ObservabilityService, {
+    beginRequest: () => undefined,
+    getMetrics: async () => ({
+      queueDepth: {
+        runsPending: 0,
+        tasksPending: 0,
+        tasksBlocked: 0,
+        approvalsPending: 0,
+        busyAgents: 0
+      },
+      retries: {
+        recoverableDatabaseFallbacks: 0,
+        taskUnblocks: 0
+      },
+      failures: {
+        runsFailed: 0,
+        tasksFailed: 0,
+        agentsFailed: 0,
+        validationsFailed: 0,
+        requestFailures: 0
+      },
+      eventsRecorded: 0,
+      recordedAt: new Date()
+    }),
+    listEvents: async () => [],
+    recordRecoverableDatabaseFallback: () => undefined,
+    recordRequestFailure: () => undefined,
+    recordTimelineEvent: async () => null,
+    withTrace: async <T>(_name: string, fn: () => Promise<T>) => fn()
+  });
 }
 
 export async function buildApp(options: BuildAppOptions = {}) {
@@ -66,6 +106,7 @@ export async function buildApp(options: BuildAppOptions = {}) {
   });
 
   if (options.controlPlane) {
+    app.decorate("observability", (options.observability ?? createNoopObservability()) as ObservabilityService);
     app.decorate("controlPlane", options.controlPlane);
   } else {
     await app.register(dependenciesPlugin);
@@ -81,6 +122,8 @@ export async function buildApp(options: BuildAppOptions = {}) {
   await app.register(approvalRoutes, { prefix: "/api/v1" });
   await app.register(validationRoutes, { prefix: "/api/v1" });
   await app.register(artifactRoutes, { prefix: "/api/v1" });
+  await app.register(eventRoutes, { prefix: "/api/v1" });
+  await app.register(metricsRoutes, { prefix: "/api/v1" });
 
   return app;
 }

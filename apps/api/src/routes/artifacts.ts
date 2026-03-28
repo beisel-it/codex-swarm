@@ -2,6 +2,7 @@ import type { FastifyPluginAsync } from "fastify";
 import { z } from "zod";
 
 import { artifactCreateSchema } from "../http/schemas.js";
+import { requireValue } from "../lib/require-value.js";
 
 const querySchema = z.object({
   runId: z.uuid()
@@ -14,8 +15,24 @@ export const artifactRoutes: FastifyPluginAsync = async (app) => {
   });
 
   app.post("/artifacts", async (request, reply) => {
-    const input = artifactCreateSchema.parse(request.body);
-    const artifact = await app.controlPlane.createArtifact(input);
-    return reply.code(201).send(artifact);
+    return app.observability.withTrace("api.artifacts.create", async () => {
+      const input = artifactCreateSchema.parse(request.body);
+      const artifact = requireValue(
+        await app.controlPlane.createArtifact(input),
+        "control plane returned no artifact"
+      );
+
+      await app.observability.recordTimelineEvent({
+        runId: artifact.runId,
+        taskId: artifact.taskId,
+        eventType: "artifact.created",
+        entityType: "artifact",
+        entityId: artifact.id,
+        status: artifact.kind,
+        summary: `Artifact ${artifact.kind} published`
+      });
+
+      return reply.code(201).send(artifact);
+    }, { route: "artifacts.create" });
   });
 };

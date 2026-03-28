@@ -1,7 +1,10 @@
 import { z } from "zod";
 import {
   agentCreateSchema,
+  approvalCreateSchema as contractApprovalCreateSchema,
+  approvalResolveSchema as contractApprovalResolveSchema,
   approvalsListQuerySchema,
+  eventsListQuerySchema,
   idParamSchema,
   repositoryCreateSchema,
   runCreateSchema,
@@ -10,15 +13,7 @@ import {
   taskStatusUpdateSchema
 } from "@codex-swarm/contracts";
 
-import {
-  agentStatuses,
-  approvalStatuses,
-  artifactKinds,
-  messageKinds,
-  runStatuses,
-  taskStatuses,
-  validationStatuses
-} from "../domain/types.js";
+import { artifactKinds, messageKinds, validationStatuses } from "../domain/types.js";
 
 const idSchema = z.uuid();
 
@@ -38,21 +33,8 @@ export const messageCreateSchema = z.object({
   }
 });
 
-export const approvalCreateSchema = z.object({
-  runId: idSchema,
-  taskId: idSchema.optional(),
-  kind: z.string().min(1),
-  requestedBy: z.string().min(1),
-  reviewer: z.string().min(1).optional(),
-  notes: z.string().min(1).optional(),
-  status: z.enum(approvalStatuses).default("pending")
-});
-
-export const approvalUpdateSchema = z.object({
-  status: z.enum(approvalStatuses),
-  reviewer: z.string().min(1).optional(),
-  notes: z.string().min(1).optional()
-});
+export const approvalCreateSchema = contractApprovalCreateSchema;
+export const approvalResolveSchema = contractApprovalResolveSchema;
 
 export const validationCreateSchema = z.object({
   runId: idSchema,
@@ -75,6 +57,7 @@ export const artifactCreateSchema = z.object({
 export {
   agentCreateSchema,
   approvalsListQuerySchema,
+  eventsListQuerySchema,
   idParamSchema,
   repositoryCreateSchema,
   runCreateSchema,

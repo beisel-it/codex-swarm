@@ -79,9 +79,11 @@ const statements = [
     task_id text,
     kind text not null,
     status text not null,
+    requested_payload jsonb not null default '{}'::jsonb,
+    resolution_payload jsonb not null default '{}'::jsonb,
     requested_by text not null,
-    reviewer text,
-    notes text,
+    resolver text,
+    resolved_at timestamptz,
     created_at timestamptz not null default now(),
     updated_at timestamptz not null default now()
   )`,
@@ -106,6 +108,20 @@ const statements = [
     content_type text not null,
     metadata jsonb not null default '{}'::jsonb,
     created_at timestamptz not null default now()
+  )`,
+  `create table if not exists control_plane_events (
+    id text primary key,
+    run_id text references runs(id),
+    task_id text,
+    agent_id text,
+    trace_id text not null,
+    event_type text not null,
+    entity_type text not null,
+    entity_id text not null,
+    status text not null,
+    summary text not null,
+    metadata jsonb not null default '{}'::jsonb,
+    created_at timestamptz not null default now()
   )`
 ];
 
@@ -116,6 +132,11 @@ async function main() {
   for (const statement of statements) {
     await db.execute(sql.raw(statement));
   }
+
+  await db.execute(sql.raw("alter table approvals add column if not exists requested_payload jsonb not null default '{}'::jsonb"));
+  await db.execute(sql.raw("alter table approvals add column if not exists resolution_payload jsonb not null default '{}'::jsonb"));
+  await db.execute(sql.raw("alter table approvals add column if not exists resolver text"));
+  await db.execute(sql.raw("alter table approvals add column if not exists resolved_at timestamptz"));
 
   await pool.end();
 }

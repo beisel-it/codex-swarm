@@ -3,6 +3,8 @@ import {
   type Run,
   type Agent,
   type AgentCreateInput,
+  type ApprovalCreateInput,
+  type ApprovalResolveInput,
   type RepositoryCreateInput,
   type RunCreateInput,
   type RunDetail,
@@ -30,7 +32,6 @@ import type { Clock } from "../lib/clock.js";
 import { HttpError } from "../lib/http-error.js";
 import type {
   approvalCreateSchema,
-  approvalUpdateSchema,
   artifactCreateSchema,
   messageCreateSchema,
   validationCreateSchema
@@ -44,10 +45,18 @@ type TaskCreate = TaskCreateInput;
 type TaskStatusUpdate = TaskStatusUpdateInput;
 type AgentCreate = AgentCreateInput;
 type MessageCreate = z.infer<typeof messageCreateSchema>;
-type ApprovalCreate = z.infer<typeof approvalCreateSchema>;
-type ApprovalUpdate = z.infer<typeof approvalUpdateSchema>;
+type ApprovalCreate = ApprovalCreateInput;
+type ApprovalResolve = ApprovalResolveInput;
 type ValidationCreate = z.infer<typeof validationCreateSchema>;
 type ArtifactCreate = z.infer<typeof artifactCreateSchema>;
+
+function expectPersistedRecord<T>(record: T | undefined, entity: string): T {
+  if (!record) {
+    throw new HttpError(500, `${entity} persistence failed`);
+  }
+
+  return record;
+}
 
 export class ControlPlaneService {
   constructor(
@@ -73,7 +82,7 @@ export class ControlPlaneService {
       updatedAt: now
     }).returning();
 
-    return repository;
+    return expectPersistedRecord(repository, "repository");
   }
 
   async listRuns(repositoryId?: string) {
@@ -136,7 +145,7 @@ export class ControlPlaneService {
       updatedAt: now
     }).returning();
 
-    return run;
+    return expectPersistedRecord(run, "run");
   }
 
   async updateRunStatus(runId: string, input: RunStatusUpdate) {
@@ -149,7 +158,7 @@ export class ControlPlaneService {
       updatedAt: now
     }).where(eq(runs.id, runId)).returning();
 
-    return run;
+    return expectPersistedRecord(run, "run");
   }
 
   async listTasks(runId?: string) {
@@ -193,7 +202,7 @@ export class ControlPlaneService {
       updatedAt: now
     }).returning();
 
-    return task;
+    return expectPersistedRecord(task, "task");
   }
 
   async updateTaskStatus(taskId: string, input: TaskStatusUpdate) {
@@ -220,7 +229,7 @@ export class ControlPlaneService {
 
     await this.maybeUnblockDependentTasks(task.runId, taskId, effectiveStatus);
 
-    return updated;
+    return expectPersistedRecord(updated, "task");
   }
 
   async createAgent(input: AgentCreate) {
@@ -266,7 +275,7 @@ export class ControlPlaneService {
       return [createdAgent];
     });
 
-    return agent;
+    return expectPersistedRecord(agent, "agent");
   }
 
   async listAgents(runId?: string) {
@@ -298,7 +307,7 @@ export class ControlPlaneService {
       createdAt: this.clock.now()
     }).returning();
 
-    return message;
+    return expectPersistedRecord(message, "message");
   }
 
   async listMessages(runId: string) {
@@ -319,15 +328,17 @@ export class ControlPlaneService {
       runId: input.runId,
       taskId: input.taskId ?? null,
       kind: input.kind,
-      status: input.status,
+      status: "pending",
+      requestedPayload: input.requestedPayload,
+      resolutionPayload: {},
       requestedBy: input.requestedBy,
-      reviewer: input.reviewer ?? null,
-      notes: input.notes ?? null,
+      resolver: null,
+      resolvedAt: null,
       createdAt: now,
       updatedAt: now
     }).returning();
 
-    return approval;
+    return expectPersistedRecord(approval, "approval");
   }
 
   async listApprovals(runId?: string) {
@@ -339,13 +350,27 @@ export class ControlPlaneService {
     return this.db.select().from(approvals).orderBy(asc(approvals.createdAt));
   }
 
-  async updateApproval(approvalId: string, input: ApprovalUpdate) {
+  async getApproval(approvalId: string) {
+    const [approval] = await this.db.select().from(approvals).where(eq(approvals.id, approvalId));
+
+    if (!approval) {
+      throw new HttpError(404, `approval ${approvalId} not found`);
+    }
+
+    return expectPersistedRecord(approval, "approval");
+  }
+
+  async resolveApproval(approvalId: string, input: ApprovalResolve) {
     const now = this.clock.now();
 
     const [approval] = await this.db.update(approvals).set({
       status: input.status,
-      reviewer: input.reviewer ?? null,
-      notes: input.notes ?? null,
+      resolver: input.resolver,
+      resolutionPayload: {
+        ...input.resolutionPayload,
+        feedback: input.feedback ?? null
+      },
+      resolvedAt: now,
       updatedAt: now
     }).where(eq(approvals.id, approvalId)).returning();
 
@@ -353,7 +378,7 @@ export class ControlPlaneService {
       throw new HttpError(404, `approval ${approvalId} not found`);
     }
 
-    return approval;
+    return expectPersistedRecord(approval, "approval");
   }
 
   async createValidation(input: ValidationCreate) {
@@ -377,7 +402,7 @@ export class ControlPlaneService {
       updatedAt: now
     }).returning();
 
-    return validation;
+    return expectPersistedRecord(validation, "validation");
   }
 
   async listValidations(runId: string) {
@@ -403,7 +428,7 @@ export class ControlPlaneService {
       createdAt: this.clock.now()
     }).returning();
 
-    return artifact;
+    return expectPersistedRecord(artifact, "artifact");
   }
 
   async listArtifacts(runId: string) {

@@ -27,8 +27,9 @@ const controlPlane = {
   listMessages: vi.fn(),
   createMessage: vi.fn(),
   listApprovals: vi.fn(),
+  getApproval: vi.fn(),
   createApproval: vi.fn(),
-  updateApproval: vi.fn(),
+  resolveApproval: vi.fn(),
   listValidations: vi.fn(),
   createValidation: vi.fn(),
   listArtifacts: vi.fn(),
@@ -214,9 +215,13 @@ class FakeVerticalSliceControlPlane {
         taskId: ids.taskA,
         kind: "plan",
         status: "pending",
+        requestedPayload: {
+          summary: "Review the execution plan"
+        },
+        resolutionPayload: {},
         requestedBy: "tech-lead",
-        reviewer: null,
-        notes: null,
+        resolver: null,
+        resolvedAt: null,
         createdAt: new Date(),
         updatedAt: new Date()
       },
@@ -226,9 +231,15 @@ class FakeVerticalSliceControlPlane {
         taskId: null,
         kind: "merge",
         status: "approved",
+        requestedPayload: {
+          summary: "Approve merge handoff"
+        },
+        resolutionPayload: {
+          feedback: "ok"
+        },
         requestedBy: "tech-lead",
-        reviewer: "reviewer",
-        notes: "ok",
+        resolver: "reviewer",
+        resolvedAt: new Date(),
         createdAt: new Date(),
         updatedAt: new Date()
       }
@@ -237,12 +248,47 @@ class FakeVerticalSliceControlPlane {
     return runId ? approvals.filter((approval) => approval.runId === runId) : approvals;
   }
 
-  async createApproval() {
-    throw new Error("not implemented");
+  async getApproval(approvalId: string) {
+    const approval = (await this.listApprovals()).find((candidate) => candidate.id === approvalId);
+
+    if (!approval) {
+      throw new HttpError(404, `approval ${approvalId} not found`);
+    }
+
+    return approval;
   }
 
-  async updateApproval() {
-    throw new Error("not implemented");
+  async createApproval(input: any) {
+    return {
+      id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      runId: input.runId,
+      taskId: input.taskId ?? null,
+      kind: input.kind,
+      status: "pending",
+      requestedPayload: input.requestedPayload,
+      resolutionPayload: {},
+      requestedBy: input.requestedBy,
+      resolver: null,
+      resolvedAt: null,
+      createdAt: new Date(),
+      updatedAt: new Date()
+    };
+  }
+
+  async resolveApproval(approvalId: string, input: any) {
+    const approval = await this.getApproval(approvalId);
+
+    return {
+      ...approval,
+      status: input.status,
+      resolver: input.resolver,
+      resolutionPayload: {
+        ...input.resolutionPayload,
+        feedback: input.feedback ?? null
+      },
+      resolvedAt: new Date(),
+      updatedAt: new Date()
+    };
   }
 
   async listValidations() {
@@ -354,7 +400,8 @@ describe("buildApp", () => {
         PORT: 3000,
         HOST: "127.0.0.1",
         DATABASE_URL: "postgres://unused/dev",
-        DEV_AUTH_TOKEN: "test-token"
+        DEV_AUTH_TOKEN: "test-token",
+        OPENAI_TRACING_DISABLED: true
       },
       controlPlane: controlPlane as unknown as ControlPlaneService
     });
@@ -390,7 +437,13 @@ describe("buildApp", () => {
       {
         id: "77777777-7777-4777-8777-777777777777",
         runId: ids.run,
-        status: "pending"
+        kind: "plan",
+        status: "pending",
+        requestedPayload: {},
+        resolutionPayload: {},
+        requestedBy: "tech-lead",
+        resolver: null,
+        resolvedAt: null
       }
     ]);
 
@@ -411,10 +464,168 @@ describe("buildApp", () => {
       {
         id: "77777777-7777-4777-8777-777777777777",
         runId: ids.run,
-        status: "pending"
+        kind: "plan",
+        status: "pending",
+        requestedPayload: {},
+        resolutionPayload: {},
+        requestedBy: "tech-lead",
+        resolver: null,
+        resolvedAt: null
       }
     ]);
     expect(controlPlane.listApprovals).toHaveBeenCalledWith(ids.run);
+
+    await app.close();
+  });
+
+  it("exposes an empty event timeline when no live observability backend is injected", async () => {
+    const app = await buildApp({
+      controlPlane: controlPlane as unknown as ControlPlaneService
+    });
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/api/v1/events",
+      headers: {
+        authorization: "Bearer codex-swarm-dev-token"
+      }
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual([]);
+
+    await app.close();
+  });
+
+  it("exposes a zeroed metrics snapshot when no live observability backend is injected", async () => {
+    const app = await buildApp({
+      controlPlane: controlPlane as unknown as ControlPlaneService
+    });
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/api/v1/metrics",
+      headers: {
+        authorization: "Bearer codex-swarm-dev-token"
+      }
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      queueDepth: {
+        runsPending: 0,
+        tasksPending: 0,
+        tasksBlocked: 0,
+        approvalsPending: 0,
+        busyAgents: 0
+      },
+      retries: {
+        recoverableDatabaseFallbacks: 0,
+        taskUnblocks: 0
+      },
+      failures: {
+        runsFailed: 0,
+        tasksFailed: 0,
+        agentsFailed: 0,
+        validationsFailed: 0,
+        requestFailures: 0
+      },
+      eventsRecorded: 0
+    });
+
+    await app.close();
+  });
+
+  it("gets an approval by id", async () => {
+    controlPlane.getApproval.mockResolvedValueOnce({
+      id: "77777777-7777-4777-8777-777777777777",
+      runId: ids.run,
+      taskId: ids.taskA,
+      kind: "plan",
+      status: "pending",
+      requestedPayload: {
+        summary: "Review the execution plan"
+      },
+      resolutionPayload: {},
+      requestedBy: "tech-lead",
+      resolver: null,
+      resolvedAt: null
+    });
+
+    const app = await buildApp({
+      controlPlane: controlPlane as unknown as ControlPlaneService
+    });
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/api/v1/approvals/77777777-7777-4777-8777-777777777777",
+      headers: {
+        authorization: "Bearer codex-swarm-dev-token"
+      }
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      id: "77777777-7777-4777-8777-777777777777",
+      kind: "plan",
+      status: "pending"
+    });
+
+    await app.close();
+  });
+
+  it("resolves approvals with structured reject feedback", async () => {
+    controlPlane.resolveApproval.mockResolvedValueOnce({
+      id: "77777777-7777-4777-8777-777777777777",
+      runId: ids.run,
+      taskId: ids.taskA,
+      kind: "plan",
+      status: "rejected",
+      requestedPayload: {
+        summary: "Review the execution plan"
+      },
+      resolutionPayload: {
+        feedback: "Please attach validation evidence"
+      },
+      requestedBy: "tech-lead",
+      resolver: "reviewer-1",
+      resolvedAt: "2026-03-28T12:00:00.000Z"
+    });
+
+    const app = await buildApp({
+      controlPlane: controlPlane as unknown as ControlPlaneService
+    });
+
+    const response = await app.inject({
+      method: "PATCH",
+      url: "/api/v1/approvals/77777777-7777-4777-8777-777777777777",
+      headers: {
+        authorization: "Bearer codex-swarm-dev-token"
+      },
+      payload: {
+        status: "rejected",
+        resolver: "reviewer-1",
+        feedback: "Please attach validation evidence"
+      }
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      status: "rejected",
+      resolver: "reviewer-1",
+      resolutionPayload: {
+        feedback: "Please attach validation evidence"
+      }
+    });
+    expect(controlPlane.resolveApproval).toHaveBeenCalledWith(
+      "77777777-7777-4777-8777-777777777777",
+      {
+        status: "rejected",
+        resolver: "reviewer-1",
+        feedback: "Please attach validation evidence",
+        resolutionPayload: {}
+      }
+    );
 
     await app.close();
   });
@@ -476,7 +687,8 @@ describe("buildApp", () => {
         PORT: 3000,
         HOST: "127.0.0.1",
         DATABASE_URL: "postgres://unused/test",
-        DEV_AUTH_TOKEN: "test-token"
+        DEV_AUTH_TOKEN: "test-token",
+        OPENAI_TRACING_DISABLED: true
       },
       controlPlane: new FakeVerticalSliceControlPlane() as unknown as ControlPlaneService
     });
@@ -603,7 +815,8 @@ describe("buildApp", () => {
         PORT: 3000,
         HOST: "127.0.0.1",
         DATABASE_URL: "postgres://unused/test",
-        DEV_AUTH_TOKEN: "test-token"
+        DEV_AUTH_TOKEN: "test-token",
+        OPENAI_TRACING_DISABLED: true
       },
       controlPlane: new FakeVerticalSliceControlPlane() as unknown as ControlPlaneService
     });
@@ -621,7 +834,9 @@ describe("buildApp", () => {
       expect.objectContaining({
         runId: ids.run,
         kind: "plan",
-        status: "pending"
+        status: "pending",
+        requestedPayload: expect.any(Object),
+        resolutionPayload: expect.any(Object)
       })
     ]);
 

@@ -89,9 +89,11 @@ export const approvals = pgTable("approvals", {
   taskId: text("task_id"),
   kind: text("kind").notNull(),
   status: text("status").notNull(),
+  requestedPayload: jsonb("requested_payload").$type<Record<string, unknown>>().notNull().default({}),
+  resolutionPayload: jsonb("resolution_payload").$type<Record<string, unknown>>().notNull().default({}),
   requestedBy: text("requested_by").notNull(),
-  reviewer: text("reviewer"),
-  notes: text("notes"),
+  resolver: text("resolver"),
+  resolvedAt: timestamp("resolved_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
 });
@@ -116,6 +118,21 @@ export const artifacts = pgTable("artifacts", {
   kind: text("kind").notNull(),
   path: text("path").notNull(),
   contentType: text("content_type").notNull(),
+  metadata: jsonb("metadata").$type<Record<string, unknown>>().notNull().default({}),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow()
+});
+
+export const controlPlaneEvents = pgTable("control_plane_events", {
+  id: text("id").primaryKey(),
+  runId: text("run_id").references(() => runs.id),
+  taskId: text("task_id"),
+  agentId: text("agent_id"),
+  traceId: text("trace_id").notNull(),
+  eventType: text("event_type").notNull(),
+  entityType: text("entity_type").notNull(),
+  entityId: text("entity_id").notNull(),
+  status: text("status").notNull(),
+  summary: text("summary").notNull(),
   metadata: jsonb("metadata").$type<Record<string, unknown>>().notNull().default({}),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow()
 });

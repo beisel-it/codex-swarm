@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  approvalCreateSchema,
+  approvalResolveSchema,
   agentCreateSchema,
   repositoryCreateSchema,
   runCreateSchema,
@@ -63,5 +65,29 @@ describe("agentCreateSchema", () => {
       includePlanTool: false,
       metadata: {}
     });
+  });
+});
+
+describe("approvalCreateSchema", () => {
+  it("defaults requested payload to an empty object", () => {
+    const approval = approvalCreateSchema.parse({
+      runId: "550e8400-e29b-41d4-a716-446655440000",
+      kind: "plan",
+      requestedBy: "tech-lead"
+    });
+
+    expect(approval.requestedPayload).toEqual({});
+  });
+});
+
+describe("approvalResolveSchema", () => {
+  it("defaults resolution payload to an empty object", () => {
+    const resolution = approvalResolveSchema.parse({
+      status: "rejected",
+      resolver: "reviewer-1",
+      feedback: "Validation report is incomplete"
+    });
+
+    expect(resolution.resolutionPayload).toEqual({});
   });
 });

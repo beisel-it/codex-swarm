@@ -4,6 +4,7 @@ export const runStatuses = ["pending", "planning", "in_progress", "awaiting_appr
 export const taskStatuses = ["pending", "blocked", "in_progress", "awaiting_review", "completed", "failed", "cancelled"] as const;
 export const agentStatuses = ["provisioning", "idle", "busy", "paused", "stopped", "failed"] as const;
 export const approvalStatuses = ["pending", "approved", "rejected"] as const;
+export const approvalKinds = ["plan", "patch", "merge", "network", "policy_exception"] as const;
 export const artifactKinds = ["plan", "patch", "log", "report", "diff", "screenshot", "other"] as const;
 export const validationStatuses = ["pending", "passed", "failed"] as const;
 export const messageKinds = ["direct", "broadcast", "system"] as const;
@@ -120,17 +121,77 @@ export const approvalSchema = z.object({
   id: z.uuid(),
   runId: z.uuid(),
   taskId: z.uuid().nullable(),
-  kind: z.string().min(1),
+  kind: z.enum(approvalKinds),
   status: z.enum(approvalStatuses),
+  requestedPayload: z.record(z.string(), z.unknown()),
+  resolutionPayload: z.record(z.string(), z.unknown()),
   requestedBy: z.string().min(1),
-  reviewer: z.string().min(1).nullable(),
-  notes: z.string().min(1).nullable(),
+  resolver: z.string().min(1).nullable(),
+  resolvedAt: z.date().nullable(),
   createdAt: z.date(),
   updatedAt: z.date()
 });
 
 export const approvalsListQuerySchema = z.object({
   runId: z.uuid().optional()
+});
+
+export const eventsListQuerySchema = z.object({
+  runId: z.uuid().optional(),
+  limit: z.coerce.number().int().positive().max(200).default(100)
+});
+
+export const controlPlaneEventSchema = z.object({
+  id: z.uuid(),
+  runId: z.uuid().nullable(),
+  taskId: z.string().nullable(),
+  agentId: z.string().nullable(),
+  traceId: z.string().min(1),
+  eventType: z.string().min(1),
+  entityType: z.string().min(1),
+  entityId: z.string().min(1),
+  status: z.string().min(1),
+  summary: z.string().min(1),
+  metadata: z.record(z.string(), z.unknown()).default({}),
+  createdAt: z.date()
+});
+
+export const controlPlaneMetricsSchema = z.object({
+  queueDepth: z.object({
+    runsPending: z.number().int().nonnegative(),
+    tasksPending: z.number().int().nonnegative(),
+    tasksBlocked: z.number().int().nonnegative(),
+    approvalsPending: z.number().int().nonnegative(),
+    busyAgents: z.number().int().nonnegative()
+  }),
+  retries: z.object({
+    recoverableDatabaseFallbacks: z.number().int().nonnegative(),
+    taskUnblocks: z.number().int().nonnegative()
+  }),
+  failures: z.object({
+    runsFailed: z.number().int().nonnegative(),
+    tasksFailed: z.number().int().nonnegative(),
+    agentsFailed: z.number().int().nonnegative(),
+    validationsFailed: z.number().int().nonnegative(),
+    requestFailures: z.number().int().nonnegative()
+  }),
+  eventsRecorded: z.number().int().nonnegative(),
+  recordedAt: z.date()
+});
+
+export const approvalCreateSchema = z.object({
+  runId: z.uuid(),
+  taskId: z.uuid().optional(),
+  kind: z.enum(approvalKinds),
+  requestedBy: z.string().min(1),
+  requestedPayload: z.record(z.string(), z.unknown()).default({})
+});
+
+export const approvalResolveSchema = z.object({
+  status: z.enum(["approved", "rejected"]),
+  resolver: z.string().min(1),
+  feedback: z.string().min(1).optional(),
+  resolutionPayload: z.record(z.string(), z.unknown()).default({})
 });
 
 export const runDetailSchema = runSchema.extend({
@@ -153,3 +214,8 @@ export type Session = z.infer<typeof sessionSchema>;
 export type Approval = z.infer<typeof approvalSchema>;
 export type RunDetail = z.infer<typeof runDetailSchema>;
 export type ApprovalsListQuery = z.infer<typeof approvalsListQuerySchema>;
+export type ApprovalCreateInput = z.infer<typeof approvalCreateSchema>;
+export type ApprovalResolveInput = z.infer<typeof approvalResolveSchema>;
+export type EventsListQuery = z.infer<typeof eventsListQuerySchema>;
+export type ControlPlaneEvent = z.infer<typeof controlPlaneEventSchema>;
+export type ControlPlaneMetrics = z.infer<typeof controlPlaneMetricsSchema>;

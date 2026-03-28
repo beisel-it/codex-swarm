@@ -1,6 +1,7 @@
 import type { FastifyPluginAsync } from "fastify";
 
 import { idParamSchema, taskCreateSchema, taskStatusUpdateSchema } from "../http/schemas.js";
+import { requireValue } from "../lib/require-value.js";
 
 export const taskRoutes: FastifyPluginAsync = async (app) => {
   app.get("/tasks", async (request) => {
@@ -12,14 +13,49 @@ export const taskRoutes: FastifyPluginAsync = async (app) => {
   });
 
   app.post("/tasks", async (request, reply) => {
-    const input = taskCreateSchema.parse(request.body);
-    const task = await app.controlPlane.createTask(input);
-    return reply.code(201).send(task);
+    return app.observability.withTrace("api.tasks.create", async () => {
+      const input = taskCreateSchema.parse(request.body);
+      const task = requireValue(
+        await app.controlPlane.createTask(input),
+        "control plane returned no task"
+      );
+
+      await app.observability.recordTimelineEvent({
+        runId: task.runId,
+        taskId: task.id,
+        agentId: task.ownerAgentId,
+        eventType: "task.created",
+        entityType: "task",
+        entityId: task.id,
+        status: task.status,
+        summary: `Task ${task.title} created`
+      });
+
+      return reply.code(201).send(task);
+    }, { route: "tasks.create" });
   });
 
   app.patch("/tasks/:id/status", async (request) => {
-    const { id } = idParamSchema.parse(request.params);
-    const input = taskStatusUpdateSchema.parse(request.body);
-    return app.controlPlane.updateTaskStatus(id, input);
+    return app.observability.withTrace("api.tasks.update-status", async () => {
+      const { id } = idParamSchema.parse(request.params);
+      const input = taskStatusUpdateSchema.parse(request.body);
+      const task = requireValue(
+        await app.controlPlane.updateTaskStatus(id, input),
+        "control plane returned no task"
+      );
+
+      await app.observability.recordTimelineEvent({
+        runId: task.runId,
+        taskId: task.id,
+        agentId: task.ownerAgentId,
+        eventType: "task.status_updated",
+        entityType: "task",
+        entityId: task.id,
+        status: task.status,
+        summary: `Task ${task.title} status updated to ${task.status}`
+      });
+
+      return task;
+    }, { route: "tasks.update-status" });
   });
 };

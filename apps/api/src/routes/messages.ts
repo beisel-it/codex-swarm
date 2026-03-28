@@ -2,6 +2,7 @@ import type { FastifyPluginAsync } from "fastify";
 import { z } from "zod";
 
 import { messageCreateSchema } from "../http/schemas.js";
+import { requireValue } from "../lib/require-value.js";
 
 const querySchema = z.object({
   runId: z.uuid()
@@ -14,8 +15,27 @@ export const messageRoutes: FastifyPluginAsync = async (app) => {
   });
 
   app.post("/messages", async (request, reply) => {
-    const input = messageCreateSchema.parse(request.body);
-    const message = await app.controlPlane.createMessage(input);
-    return reply.code(201).send(message);
+    return app.observability.withTrace("api.messages.create", async () => {
+      const input = messageCreateSchema.parse(request.body);
+      const message = requireValue(
+        await app.controlPlane.createMessage(input),
+        "control plane returned no message"
+      );
+
+      await app.observability.recordTimelineEvent({
+        runId: message.runId,
+        eventType: "message.created",
+        entityType: "message",
+        entityId: message.id,
+        status: message.kind,
+        summary: `Message ${message.kind} created`,
+        metadata: {
+          senderAgentId: message.senderAgentId,
+          recipientAgentId: message.recipientAgentId
+        }
+      });
+
+      return reply.code(201).send(message);
+    }, { route: "messages.create" });
   });
 };

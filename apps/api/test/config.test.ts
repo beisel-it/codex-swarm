@@ -22,7 +22,9 @@ describe("getConfig", () => {
       PORT: undefined,
       HOST: undefined,
       DATABASE_URL: undefined,
-      DEV_AUTH_TOKEN: undefined
+      DEV_AUTH_TOKEN: undefined,
+      OPENAI_TRACING_DISABLED: undefined,
+      OPENAI_TRACING_EXPORT_API_KEY: undefined
     });
 
     expect(config).toMatchObject({
@@ -40,7 +42,9 @@ describe("getConfig", () => {
       PORT: "4010",
       HOST: "127.0.0.1",
       DATABASE_URL: "postgres://example/test",
-      DEV_AUTH_TOKEN: "secret-token"
+      DEV_AUTH_TOKEN: "secret-token",
+      OPENAI_TRACING_DISABLED: "false",
+      OPENAI_TRACING_EXPORT_API_KEY: undefined
     });
 
     expect(config).toEqual({
@@ -48,7 +52,9 @@ describe("getConfig", () => {
       PORT: 4010,
       HOST: "127.0.0.1",
       DATABASE_URL: "postgres://example/test",
-      DEV_AUTH_TOKEN: "secret-token"
+      DEV_AUTH_TOKEN: "secret-token",
+      OPENAI_TRACING_DISABLED: false,
+      OPENAI_TRACING_EXPORT_API_KEY: undefined
     });
   });
 });
