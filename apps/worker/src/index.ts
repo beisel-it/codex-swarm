@@ -2,6 +2,7 @@ import {
   buildCodexServerCommand,
   buildCodexSessionReplyRequest,
   buildCodexSessionStartRequest,
+  buildSessionRecoveryPlan,
   createWorktreePath
 } from "./runtime.js";
 import { SessionRegistry } from "./session-registry.js";
@@ -10,6 +11,7 @@ export {
   buildCodexServerCommand,
   buildCodexSessionReplyRequest,
   buildCodexSessionStartRequest,
+  buildSessionRecoveryPlan,
   createWorktreePath,
   SessionRegistry
 };

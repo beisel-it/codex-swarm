@@ -4,6 +4,7 @@ import {
   buildCodexServerCommand,
   buildCodexSessionReplyRequest,
   buildCodexSessionStartRequest,
+  buildSessionRecoveryPlan,
   createWorktreePath
 } from "../src/runtime.js";
 
@@ -73,5 +74,90 @@ describe("worker runtime helpers", () => {
         prompt: "Continue the worker"
       }
     });
+  });
+
+  it("builds a restart recovery plan for persisted sessions", () => {
+    expect(buildSessionRecoveryPlan([
+      {
+        sessionId: "session-active",
+        runId: "run-001",
+        agentId: "agent-001",
+        worktreePath: ".swarm/worktrees/codex-swarm/run-001/agent-001",
+        state: "active",
+        threadId: "thread-001",
+        lastHeartbeatAt: new Date("2026-03-28T12:10:00.000Z")
+      },
+      {
+        sessionId: "session-pending",
+        runId: "run-001",
+        agentId: "agent-002",
+        worktreePath: ".swarm/worktrees/codex-swarm/run-001/agent-002",
+        state: "pending",
+        threadId: null,
+        lastHeartbeatAt: null
+      },
+      {
+        sessionId: "session-stale",
+        runId: "run-001",
+        agentId: "agent-003",
+        worktreePath: ".swarm/worktrees/codex-swarm/run-001/agent-003",
+        state: "active",
+        threadId: "thread-003",
+        lastHeartbeatAt: new Date("2026-03-28T11:30:00.000Z")
+      },
+      {
+        sessionId: "session-missing-worktree",
+        runId: "run-001",
+        agentId: "agent-004",
+        worktreePath: ".swarm/worktrees/codex-swarm/run-001/agent-004",
+        state: "active",
+        threadId: "thread-004",
+        lastHeartbeatAt: new Date("2026-03-28T12:10:00.000Z")
+      },
+      {
+        sessionId: "session-failed",
+        runId: "run-001",
+        agentId: "agent-005",
+        worktreePath: ".swarm/worktrees/codex-swarm/run-001/agent-005",
+        state: "failed",
+        threadId: "thread-005",
+        lastHeartbeatAt: new Date("2026-03-28T12:10:00.000Z")
+      }
+    ], {
+      now: new Date("2026-03-28T12:15:00.000Z"),
+      staleAfterMs: 10 * 60 * 1000,
+      existingWorktreePaths: [
+        ".swarm/worktrees/codex-swarm/run-001/agent-001",
+        ".swarm/worktrees/codex-swarm/run-001/agent-002",
+        ".swarm/worktrees/codex-swarm/run-001/agent-003",
+        ".swarm/worktrees/codex-swarm/run-001/agent-005"
+      ]
+    })).toEqual([
+      {
+        sessionId: "session-active",
+        action: "resume",
+        reason: "resume_session"
+      },
+      {
+        sessionId: "session-pending",
+        action: "retry",
+        reason: "retry_pending_session"
+      },
+      {
+        sessionId: "session-stale",
+        action: "mark_stale",
+        reason: "heartbeat_timeout"
+      },
+      {
+        sessionId: "session-missing-worktree",
+        action: "mark_stale",
+        reason: "missing_worktree"
+      },
+      {
+        sessionId: "session-failed",
+        action: "archive",
+        reason: "terminal_state"
+      }
+    ]);
   });
 });

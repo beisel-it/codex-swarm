@@ -1,4 +1,4 @@
-export type WorkerSessionState = "pending" | "active" | "stopped" | "failed";
+export type WorkerSessionState = "pending" | "active" | "stopped" | "failed" | "stale" | "archived";
 
 export interface WorkerSessionRecord {
   sessionId: string;
@@ -7,6 +7,8 @@ export interface WorkerSessionRecord {
   worktreePath: string;
   state: WorkerSessionState;
   threadId: string | null;
+  staleReason: string | null;
+  lastHeartbeatAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -22,7 +24,6 @@ export class SessionRegistry {
   private readonly sessions = new Map<string, WorkerSessionRecord>();
 
   seed(input: SessionSeedInput) {
-    const now = new Date();
     const record: WorkerSessionRecord = {
       sessionId: input.sessionId,
       runId: input.runId,
@@ -30,10 +31,27 @@ export class SessionRegistry {
       worktreePath: input.worktreePath,
       state: "pending",
       threadId: null,
-      createdAt: now,
-      updatedAt: now
+      staleReason: null,
+      lastHeartbeatAt: null,
+      createdAt: new Date(),
+      updatedAt: new Date()
     };
 
+    this.sessions.set(record.sessionId, record);
+    return record;
+  }
+
+  hydrate(records: WorkerSessionRecord[]) {
+    for (const record of records) {
+      this.sessions.set(record.sessionId, {
+        ...record
+      });
+    }
+
+    return this.list();
+  }
+
+  upsert(record: WorkerSessionRecord) {
     this.sessions.set(record.sessionId, record);
     return record;
   }
@@ -47,13 +65,23 @@ export class SessionRegistry {
 
     record.threadId = threadId;
     record.state = "active";
+    record.staleReason = null;
+    record.lastHeartbeatAt = new Date();
     record.updatedAt = new Date();
+    return record;
+  }
+
+  heartbeat(sessionId: string, at = new Date()) {
+    const record = this.get(sessionId);
+    record.lastHeartbeatAt = at;
+    record.updatedAt = at;
     return record;
   }
 
   stop(sessionId: string) {
     const record = this.get(sessionId);
     record.state = "stopped";
+    record.staleReason = null;
     record.updatedAt = new Date();
     return record;
   }
@@ -61,6 +89,23 @@ export class SessionRegistry {
   fail(sessionId: string) {
     const record = this.get(sessionId);
     record.state = "failed";
+    record.staleReason = null;
+    record.updatedAt = new Date();
+    return record;
+  }
+
+  markStale(sessionId: string, reason: string) {
+    const record = this.get(sessionId);
+    record.state = "stale";
+    record.staleReason = reason;
+    record.updatedAt = new Date();
+    return record;
+  }
+
+  archive(sessionId: string) {
+    const record = this.get(sessionId);
+    record.state = "archived";
+    record.staleReason = null;
     record.updatedAt = new Date();
     return record;
   }

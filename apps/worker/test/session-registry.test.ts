@@ -16,10 +16,11 @@ describe("SessionRegistry", () => {
 
     expect(record.state).toBe("active");
     expect(record.threadId).toBe("thread-001");
+    expect(record.lastHeartbeatAt).toBeInstanceOf(Date);
     expect(registry.findByThreadId("thread-001")?.sessionId).toBe("session-001");
   });
 
-  it("stops and fails sessions explicitly", () => {
+  it("stops, fails, marks stale, and archives sessions explicitly", () => {
     const registry = new SessionRegistry();
     registry.seed({
       sessionId: "session-002",
@@ -30,6 +31,8 @@ describe("SessionRegistry", () => {
 
     expect(registry.stop("session-002").state).toBe("stopped");
     expect(registry.fail("session-002").state).toBe("failed");
+    expect(registry.markStale("session-002", "heartbeat_timeout").staleReason).toBe("heartbeat_timeout");
+    expect(registry.archive("session-002").state).toBe("archived");
   });
 
   it("rejects conflicting thread bindings", () => {
@@ -46,5 +49,30 @@ describe("SessionRegistry", () => {
     expect(() => registry.activate("session-003", "thread-other")).toThrow(
       "session session-003 is already bound to thread thread-003"
     );
+  });
+
+  it("hydrates persisted sessions and updates heartbeats", () => {
+    const registry = new SessionRegistry();
+    const heartbeatAt = new Date("2026-03-28T12:00:00.000Z");
+
+    registry.hydrate([
+      {
+        sessionId: "session-004",
+        runId: "run-001",
+        agentId: "agent-004",
+        worktreePath: ".swarm/worktrees/codex-swarm/run-001/agent-004",
+        state: "active",
+        threadId: "thread-004",
+        staleReason: null,
+        lastHeartbeatAt: heartbeatAt,
+        createdAt: new Date("2026-03-28T11:00:00.000Z"),
+        updatedAt: new Date("2026-03-28T11:30:00.000Z")
+      }
+    ]);
+
+    const updated = registry.heartbeat("session-004", new Date("2026-03-28T12:05:00.000Z"));
+
+    expect(registry.get("session-004").threadId).toBe("thread-004");
+    expect(updated.lastHeartbeatAt?.toISOString()).toBe("2026-03-28T12:05:00.000Z");
   });
 });
