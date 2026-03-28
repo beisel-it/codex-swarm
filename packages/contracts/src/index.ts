@@ -20,7 +20,8 @@ export const repositoryCreateSchema = z.object({
   provider: z.enum(repositoryProviders).optional(),
   defaultBranch: z.string().min(1).default("main"),
   localPath: z.string().min(1).optional(),
-  trustLevel: z.enum(repositoryTrustLevels).default("trusted")
+  trustLevel: z.enum(repositoryTrustLevels).default("trusted"),
+  approvalProfile: z.string().min(1).default("standard")
 });
 
 export const runCreateSchema = z.object({
@@ -325,6 +326,19 @@ export const runDetailSchema = runSchema.extend({
   sessions: z.array(sessionSchema)
 });
 
+export const runAuditExportSchema = z.object({
+  repository: repositorySchema,
+  run: runSchema,
+  tasks: z.array(taskSchema),
+  agents: z.array(agentSchema),
+  sessions: z.array(sessionSchema),
+  approvals: z.array(approvalSchema),
+  validations: z.array(validationHistoryEntrySchema),
+  artifacts: z.array(artifactSchema),
+  events: z.array(controlPlaneEventSchema),
+  exportedAt: z.date()
+});
+
 export type RepositoryCreateInput = z.infer<typeof repositoryCreateSchema>;
 export type RunCreateInput = z.infer<typeof runCreateSchema>;
 export type RunStatusUpdateInput = z.infer<typeof runStatusUpdateSchema>;
@@ -339,6 +353,7 @@ export type Session = z.infer<typeof sessionSchema>;
 export type Approval = z.infer<typeof approvalSchema>;
 export type Artifact = z.infer<typeof artifactSchema>;
 export type RunDetail = z.infer<typeof runDetailSchema>;
+export type RunAuditExport = z.infer<typeof runAuditExportSchema>;
 export type ApprovalsListQuery = z.infer<typeof approvalsListQuerySchema>;
 export type ApprovalCreateInput = z.infer<typeof approvalCreateSchema>;
 export type ApprovalResolveInput = z.infer<typeof approvalResolveSchema>;

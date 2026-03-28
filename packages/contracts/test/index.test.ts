@@ -117,6 +117,7 @@ describe("repositoryCreateSchema", () => {
     });
 
     expect(repository.trustLevel).toBe("trusted");
+    expect(repository.approvalProfile).toBe("standard");
   });
 });
 

@@ -1,10 +1,13 @@
 import { and, asc, eq, inArray } from "drizzle-orm";
 import {
+  type Approval,
   type Artifact,
   type ArtifactCreateInput,
   type CleanupJobReport,
   type CleanupJobRunInput,
+  type ControlPlaneEvent,
   type Run,
+  type RunAuditExport,
   type Agent,
   type AgentCreateInput,
   type ApprovalCreateInput,
@@ -29,6 +32,7 @@ import {
   agents,
   approvals,
   artifacts,
+  controlPlaneEvents,
   messages,
   repositories,
   runs,
@@ -119,6 +123,7 @@ export class ControlPlaneService {
       defaultBranch: input.defaultBranch,
       localPath: input.localPath ?? null,
       trustLevel: input.trustLevel,
+      approvalProfile: input.approvalProfile,
       createdAt: now,
       updatedAt: now
     }).returning();
@@ -169,7 +174,7 @@ export class ControlPlaneService {
   }
 
   async createRun(input: RunCreate, createdBy: string) {
-    await this.assertRepositoryExists(input.repositoryId);
+    const repository = await this.assertRepositoryExists(input.repositoryId);
 
     const id = crypto.randomUUID();
     const now = this.clock.now();
@@ -184,7 +189,7 @@ export class ControlPlaneService {
       budgetTokens: input.budgetTokens ?? null,
       budgetCostUsd: dollarsToCents(input.budgetCostUsd),
       concurrencyCap: input.concurrencyCap,
-      policyProfile: input.policyProfile ?? null,
+      policyProfile: input.policyProfile ?? repository.approvalProfile,
       publishedBranch: null,
       branchPublishedAt: null,
       pullRequestUrl: null,
@@ -362,10 +367,24 @@ export class ControlPlaneService {
   }
 
   async createAgent(input: AgentCreate) {
-    await this.assertRunExists(input.runId);
+    const run = await this.assertRunExists(input.runId);
 
     if (input.currentTaskId) {
       await this.assertTaskExists(input.currentTaskId);
+    }
+
+    const activeAgents = await this.db
+      .select({ status: agents.status })
+      .from(agents)
+      .where(eq(agents.runId, input.runId));
+    const activeAgentCount = activeAgents.filter((agent) =>
+      agent.status === "provisioning"
+      || agent.status === "idle"
+      || agent.status === "busy"
+      || agent.status === "paused").length;
+
+    if (activeAgentCount >= run.concurrencyCap) {
+      throw new HttpError(409, `run concurrency cap of ${run.concurrencyCap} active agents reached`);
     }
 
     const id = crypto.randomUUID();
@@ -477,10 +496,20 @@ export class ControlPlaneService {
   async listApprovals(runId?: string) {
     if (runId) {
       await this.assertRunExists(runId);
-      return this.db.select().from(approvals).where(eq(approvals.runId, runId)).orderBy(asc(approvals.createdAt));
+      const rows = await this.db.select().from(approvals).where(eq(approvals.runId, runId)).orderBy(asc(approvals.createdAt));
+      return rows.map((approval): Approval => ({
+        ...approval,
+        kind: approval.kind as Approval["kind"],
+        status: approval.status as Approval["status"]
+      }));
     }
 
-    return this.db.select().from(approvals).orderBy(asc(approvals.createdAt));
+    const rows = await this.db.select().from(approvals).orderBy(asc(approvals.createdAt));
+    return rows.map((approval): Approval => ({
+      ...approval,
+      kind: approval.kind as Approval["kind"],
+      status: approval.status as Approval["status"]
+    }));
   }
 
   async getApproval(approvalId: string) {
@@ -590,7 +619,37 @@ export class ControlPlaneService {
 
   async listArtifacts(runId: string) {
     await this.assertRunExists(runId);
-    return this.db.select().from(artifacts).where(eq(artifacts.runId, runId)).orderBy(asc(artifacts.createdAt));
+    const rows = await this.db.select().from(artifacts).where(eq(artifacts.runId, runId)).orderBy(asc(artifacts.createdAt));
+    return rows.map((artifact): Artifact => ({
+      ...artifact,
+      kind: artifact.kind as Artifact["kind"]
+    }));
+  }
+
+  async exportRunAudit(runId: string): Promise<RunAuditExport> {
+    const [runDetail, approvalsList, validationsList, artifactsList, events] = await Promise.all([
+      this.getRun(runId),
+      this.listApprovals(runId),
+      this.listValidations(runId),
+      this.listArtifacts(runId),
+      this.db.select().from(controlPlaneEvents)
+        .where(eq(controlPlaneEvents.runId, runId))
+        .orderBy(asc(controlPlaneEvents.createdAt))
+    ]);
+    const repository = await this.assertRepositoryExists(runDetail.repositoryId);
+
+    return {
+      repository: this.mapRepository(repository),
+      run: this.mapRun(await this.assertRunExists(runId)),
+      tasks: runDetail.tasks,
+      agents: runDetail.agents,
+      sessions: runDetail.sessions,
+      approvals: approvalsList,
+      validations: validationsList,
+      artifacts: artifactsList,
+      events: events.map((event): ControlPlaneEvent => event),
+      exportedAt: this.clock.now()
+    };
   }
 
   async runCleanupJob(input: CleanupJobRunInput): Promise<CleanupJobReport> {

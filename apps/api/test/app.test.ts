@@ -21,6 +21,7 @@ const controlPlane = {
   updateRunStatus: vi.fn(),
   publishRunBranch: vi.fn(),
   createRunPullRequestHandoff: vi.fn(),
+  exportRunAudit: vi.fn(),
   listTasks: vi.fn(),
   createTask: vi.fn(),
   updateTaskStatus: vi.fn(),
@@ -59,6 +60,7 @@ class FakeVerticalSliceControlPlane {
       defaultBranch: "main",
       localPath: null,
       trustLevel: "trusted",
+      approvalProfile: "standard",
       createdAt: new Date("2026-03-28T00:00:00.000Z"),
       updatedAt: new Date("2026-03-28T00:00:00.000Z")
     }
@@ -90,6 +92,12 @@ class FakeVerticalSliceControlPlane {
   }
 
   async createRun(input: any, createdBy: string) {
+    const repository = this.repositories.find((candidate) => candidate.id === input.repositoryId);
+
+    if (!repository) {
+      throw new HttpError(404, `repository ${input.repositoryId} not found`);
+    }
+
     const run = {
       id: ids.run,
       repositoryId: input.repositoryId,
@@ -100,7 +108,7 @@ class FakeVerticalSliceControlPlane {
       budgetTokens: input.budgetTokens ?? null,
       budgetCostUsd: input.budgetCostUsd ?? null,
       concurrencyCap: input.concurrencyCap ?? 1,
-      policyProfile: input.policyProfile ?? null,
+      policyProfile: input.policyProfile ?? repository.approvalProfile,
       publishedBranch: null,
       branchPublishedAt: null,
       pullRequestUrl: null,
@@ -216,6 +224,16 @@ class FakeVerticalSliceControlPlane {
 
   async createAgent(input: any) {
     const run = await this.getRun(input.runId);
+    const activeAgents = run.agents.filter((candidate: any) =>
+      candidate.status === "provisioning"
+      || candidate.status === "idle"
+      || candidate.status === "busy"
+      || candidate.status === "paused");
+
+    if (activeAgents.length >= run.concurrencyCap) {
+      throw new HttpError(409, `run concurrency cap of ${run.concurrencyCap} active agents reached`);
+    }
+
     const agent = {
       id: ids.agent,
       runId: input.runId,
@@ -431,6 +449,43 @@ class FakeVerticalSliceControlPlane {
       createdAt: new Date()
     };
   }
+
+  async exportRunAudit(runId: string) {
+    const run = await this.getRun(runId);
+
+    return {
+      repository: this.repositories[0],
+      run: {
+        ...run,
+        tasks: undefined,
+        agents: undefined,
+        sessions: undefined
+      },
+      tasks: run.tasks,
+      agents: run.agents,
+      sessions: run.sessions,
+      approvals: await this.listApprovals(runId),
+      validations: await this.listValidations(),
+      artifacts: await this.listArtifacts(),
+      events: [
+        {
+          id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+          runId,
+          taskId: ids.taskA,
+          agentId: ids.agent,
+          traceId: "trace-audit",
+          eventType: "run.created",
+          entityType: "run",
+          entityId: runId,
+          status: "pending",
+          summary: "Run created for repository",
+          metadata: {},
+          createdAt: new Date("2026-03-28T00:00:00.000Z")
+        }
+      ],
+      exportedAt: new Date("2026-03-28T12:45:00.000Z")
+    };
+  }
 }
 
 describe("buildApp", () => {
@@ -588,7 +643,8 @@ describe("buildApp", () => {
       provider: "github",
       defaultBranch: "main",
       localPath: null,
-      trustLevel: "trusted"
+      trustLevel: "trusted",
+      approvalProfile: "standard"
     });
 
     const app = await buildApp({
@@ -611,13 +667,15 @@ describe("buildApp", () => {
     expect(response.statusCode).toBe(201);
     expect(response.json()).toMatchObject({
       provider: "github",
-      trustLevel: "trusted"
+      trustLevel: "trusted",
+      approvalProfile: "standard"
     });
     expect(controlPlane.createRepository).toHaveBeenCalledWith({
       name: "codex-swarm",
       url: "https://github.com/example/codex-swarm",
       provider: "github",
       defaultBranch: "main",
+      approvalProfile: "standard",
       trustLevel: "trusted"
     });
 
@@ -940,6 +998,81 @@ describe("buildApp", () => {
       staleAfterMinutes: 20,
       existingWorktreePaths: []
     });
+
+    await app.close();
+  });
+
+  it("exports a run audit bundle", async () => {
+    controlPlane.exportRunAudit.mockResolvedValueOnce({
+      repository: {
+        id: ids.repository,
+        name: "codex-swarm",
+        url: "https://github.com/example/codex-swarm",
+        provider: "github",
+        defaultBranch: "main",
+        localPath: null,
+        trustLevel: "trusted",
+        approvalProfile: "standard",
+        createdAt: "2026-03-28T00:00:00.000Z",
+        updatedAt: "2026-03-28T00:00:00.000Z"
+      },
+      run: {
+        id: ids.run,
+        repositoryId: ids.repository,
+        goal: "Ship M3 governance-lite",
+        status: "in_progress",
+        branchName: "runs/m3-governance",
+        planArtifactPath: null,
+        budgetTokens: 120000,
+        budgetCostUsd: 12.5,
+        concurrencyCap: 2,
+        policyProfile: "standard",
+        publishedBranch: null,
+        branchPublishedAt: null,
+        pullRequestUrl: null,
+        pullRequestNumber: null,
+        pullRequestStatus: null,
+        handoffStatus: "pending",
+        completedAt: null,
+        metadata: {},
+        createdBy: "tech-lead",
+        createdAt: "2026-03-28T10:00:00.000Z",
+        updatedAt: "2026-03-28T12:00:00.000Z"
+      },
+      tasks: [],
+      agents: [],
+      sessions: [],
+      approvals: [],
+      validations: [],
+      artifacts: [],
+      events: [],
+      exportedAt: "2026-03-28T12:45:00.000Z"
+    });
+
+    const app = await buildApp({
+      controlPlane: controlPlane as unknown as ControlPlaneService
+    });
+
+    const response = await app.inject({
+      method: "GET",
+      url: `/api/v1/runs/${ids.run}/audit-export`,
+      headers: {
+        authorization: "Bearer codex-swarm-dev-token"
+      }
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      repository: {
+        approvalProfile: "standard"
+      },
+      run: {
+        budgetTokens: 120000,
+        concurrencyCap: 2,
+        policyProfile: "standard"
+      }
+    });
+    expect(controlPlane.exportRunAudit).toHaveBeenCalledWith(ids.run);
 
     await app.close();
   });
@@ -1315,6 +1448,10 @@ describe("buildApp", () => {
     });
 
     expect(createRunResponse.statusCode).toBe(201);
+    expect(createRunResponse.json()).toMatchObject({
+      policyProfile: "standard",
+      concurrencyCap: 1
+    });
 
     const createTaskAResponse = await app.inject({
       method: "POST",
@@ -1387,6 +1524,24 @@ describe("buildApp", () => {
     });
 
     expect(createAgentResponse.statusCode).toBe(201);
+
+    const createSecondAgentResponse = await app.inject({
+      method: "POST",
+      url: "/api/v1/agents",
+      headers,
+      payload: {
+        runId: ids.run,
+        name: "worker-2",
+        role: "backend-developer",
+        status: "idle"
+      }
+    });
+
+    expect(createSecondAgentResponse.statusCode).toBe(409);
+    expect(createSecondAgentResponse.json()).toEqual({
+      error: "run concurrency cap of 1 active agents reached",
+      details: null
+    });
 
     const getRunResponse = await app.inject({
       method: "GET",

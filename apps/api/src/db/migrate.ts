@@ -11,6 +11,7 @@ const statements = [
     default_branch text not null,
     local_path text,
     trust_level text not null default 'trusted',
+    approval_profile text not null default 'standard',
     created_at timestamptz not null default now(),
     updated_at timestamptz not null default now()
   )`,
@@ -158,6 +159,7 @@ async function main() {
   await db.execute(sql.raw("alter table sessions add column if not exists stale_reason text"));
   await db.execute(sql.raw("alter table repositories add column if not exists provider text not null default 'other'"));
   await db.execute(sql.raw("alter table repositories add column if not exists trust_level text not null default 'trusted'"));
+  await db.execute(sql.raw("alter table repositories add column if not exists approval_profile text not null default 'standard'"));
   await db.execute(sql.raw("alter table runs add column if not exists budget_tokens integer"));
   await db.execute(sql.raw("alter table runs add column if not exists budget_cost_usd_cents integer"));
   await db.execute(sql.raw("alter table runs add column if not exists concurrency_cap integer not null default 1"));

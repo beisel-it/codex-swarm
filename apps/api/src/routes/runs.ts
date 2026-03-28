@@ -33,6 +33,27 @@ export const runRoutes: FastifyPluginAsync = async (app) => {
     return app.controlPlane.getRun(id);
   });
 
+  app.get("/runs/:id/audit-export", async (request) => {
+    return app.observability.withTrace("api.runs.audit-export", async () => {
+      const { id } = idParamSchema.parse(request.params);
+      const auditExport = requireValue(
+        await app.controlPlane.exportRunAudit(id),
+        "control plane returned no audit export"
+      );
+
+      await app.observability.recordTimelineEvent({
+        runId: id,
+        eventType: "run.audit_exported",
+        entityType: "run",
+        entityId: id,
+        status: auditExport.run.status,
+        summary: `Audit export generated for run ${id}`
+      });
+
+      return auditExport;
+    }, { route: "runs.audit-export" });
+  });
+
   app.post("/runs", async (request, reply) => {
     return app.observability.withTrace("api.runs.create", async () => {
       const input = runCreateSchema.parse(request.body);

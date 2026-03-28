@@ -15,6 +15,7 @@ export const repositories = pgTable("repositories", {
   defaultBranch: text("default_branch").notNull(),
   localPath: text("local_path"),
   trustLevel: text("trust_level").notNull().default("trusted"),
+  approvalProfile: text("approval_profile").notNull().default("standard"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
 });
