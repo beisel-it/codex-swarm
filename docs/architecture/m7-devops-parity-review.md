@@ -126,3 +126,75 @@ Evidence:
 Residual risks:
 
 - The metrics surface is operator-oriented rather than Prometheus-native, so external scraping/export compatibility is out of scope unless a later backlog item adds it.
+
+## 5845d742 — Review [107] Queueing in Redis
+
+- Roadmap entry: `ROADMAP.md` Phase 4, Scheduling, `Queueing in Redis`
+- Verdict: `parity`
+- Reasoning: the worker package implements Redis-backed pending, inflight, lease, and node-state queues, and the dispatch model is carried through shared contracts and control-plane API routes.
+
+Evidence:
+
+- [apps/worker/src/dispatch.ts](/home/florian/codex-swarm/apps/worker/src/dispatch.ts): `RedisDispatchQueue` implements enqueue, claim, acknowledge, requeue, and node-state coordination on Redis keys.
+- [apps/worker/src/dispatch.ts](/home/florian/codex-swarm/apps/worker/src/dispatch.ts): `buildRedisDispatchQueueKeys()` standardizes the Redis namespace for pending, inflight, lease, and node-state structures.
+- [packages/contracts/src/index.ts](/home/florian/codex-swarm/packages/contracts/src/index.ts): `workerDispatchAssignmentSchema` and related schemas define the durable queue payload shape.
+- [apps/worker/test/dispatch.test.ts](/home/florian/codex-swarm/apps/worker/test/dispatch.test.ts): tests verify queue key generation, claiming, draining behavior, and retry requeue semantics.
+- [apps/api/src/routes/worker-dispatch-assignments.ts](/home/florian/codex-swarm/apps/api/src/routes/worker-dispatch-assignments.ts): the API exposes dispatch assignment creation and update routes around the queue-backed workflow.
+
+Residual risks:
+
+- The repo proves Redis queue primitives and API integration, but not a production Redis client binding or live multi-node soak run inside this review artifact.
+
+## ced3b858 — Review [111] Standardized worker bootstrap
+
+- Roadmap entry: `ROADMAP.md` Phase 4, Remote operation model, `Standardized worker bootstrap`
+- Verdict: `better`
+- Reasoning: the bootstrap path is not just implied. It is encoded as a shared contract, a concrete environment envelope, and a dependency-check report that remote workers can evaluate before execution.
+
+Evidence:
+
+- [packages/contracts/src/index.ts](/home/florian/codex-swarm/packages/contracts/src/index.ts): `workerNodeRuntimeSchema`, `workerRuntimeDependencyCheckSchema`, and `remoteWorkerBootstrapSchema` define the shared bootstrap envelope.
+- [apps/worker/src/dispatch.ts](/home/florian/codex-swarm/apps/worker/src/dispatch.ts): `buildRemoteWorkerBootstrap()` emits a standardized runtime, dispatch, environment, and dependency-check structure.
+- [apps/worker/src/dispatch.ts](/home/florian/codex-swarm/apps/worker/src/dispatch.ts): `evaluateWorkerRuntimeDependencies()` validates control-plane, Postgres, Redis, artifact, Codex CLI, and workspace-root dependencies.
+- [apps/worker/test/dispatch.test.ts](/home/florian/codex-swarm/apps/worker/test/dispatch.test.ts): tests assert the bootstrap environment and dependency checks.
+- [docs/architecture/m4-delivery-plan.md](/home/florian/codex-swarm/docs/architecture/m4-delivery-plan.md): Track 2 explicitly names standardized worker bootstrap as a devops deliverable and the implementation matches that shape.
+
+Residual risks:
+
+- The bootstrap contract is well defined, but there is still no fully documented worker startup command or supervisor example for a real remote node lifecycle.
+
+## 22e70264 — Review [113] Central Postgres + Redis
+
+- Roadmap entry: `ROADMAP.md` Phase 4, Remote operation model, `Central Postgres + Redis`
+- Verdict: `parity`
+- Reasoning: remote worker runtime assumptions and deployment docs consistently center Postgres and Redis as shared services reachable by all nodes.
+
+Evidence:
+
+- [packages/contracts/src/index.ts](/home/florian/codex-swarm/packages/contracts/src/index.ts): `workerNodeRuntimeSchema` requires `postgresUrl` and `redisUrl`.
+- [apps/worker/src/dispatch.ts](/home/florian/codex-swarm/apps/worker/src/dispatch.ts): runtime dependency checks mark Postgres and Redis as required dependencies and inject both into the bootstrap environment.
+- [apps/worker/test/dispatch.test.ts](/home/florian/codex-swarm/apps/worker/test/dispatch.test.ts): bootstrap tests use shared Postgres and Redis URLs for remote worker runtime.
+- [docs/reference-deployments.md](/home/florian/codex-swarm/docs/reference-deployments.md): the multi-node reference deployment lists shared Postgres and shared Redis as required components.
+- [apps/api/scripts/ops/control-plane-snapshot.mjs](/home/florian/codex-swarm/apps/api/scripts/ops/control-plane-snapshot.mjs): backup and DR tooling operate against the centralized control-plane database model, reinforcing the shared-state deployment posture.
+
+Residual risks:
+
+- This verifies the central-service model and runtime contract, but not HA topologies or Redis/Postgres failover behavior; those remain operational concerns outside the original roadmap wording.
+
+## b8282ec0 — Review [114] Secure credential distribution pattern
+
+- Roadmap entry: `ROADMAP.md` Phase 4, Remote operation model, `Secure credential distribution pattern`
+- Verdict: `better`
+- Reasoning: the repo defines a narrow, policy-aware credential boundary instead of leaving remote secret flow implicit. Workers receive only declared task-scoped env names, and governed repositories are forced into a brokered path.
+
+Evidence:
+
+- [.env.example](/home/florian/codex-swarm/.env.example): `REMOTE_SECRET_ENV_NAMES`, `SECRET_ALLOWED_TRUST_LEVELS`, `SENSITIVE_POLICY_PROFILES`, and `SECRET_DISTRIBUTION_BOUNDARY` expose the operator-configured credential boundary.
+- [apps/api/src/lib/governance-config.ts](/home/florian/codex-swarm/apps/api/src/lib/governance-config.ts): the control plane computes repository-specific secret access plans, including `allowed`, `brokered`, and `denied` outcomes.
+- [docs/operations/security.md](/home/florian/codex-swarm/docs/operations/security.md): the documented distribution boundary says API/control-plane owns policy evaluation and remote workers receive only task-scoped env vars.
+- [README.md](/home/florian/codex-swarm/README.md): governed-repo setup points operators to the bounded external-manager path and task-scoped credential names.
+- [apps/api/test/app.test.ts](/home/florian/codex-swarm/apps/api/test/app.test.ts): governance tests cover secret integration boundary and repository access-plan payloads.
+
+Residual risks:
+
+- The pattern is intentionally narrow and policy-driven, not a generalized secret broker for multiple providers or arbitrary per-task credential minting.
