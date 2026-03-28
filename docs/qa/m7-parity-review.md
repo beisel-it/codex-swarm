@@ -458,3 +458,29 @@ Residual risks:
 Backlog follow-up:
 
 - Add a real provider-backed end-to-end acceptance path for GitHub and/or GitLab PR creation, or intentionally narrow the roadmap exit criterion to the current publish-plus-handoff tracking model.
+
+## Task `42ebb355`
+
+Roadmap entry:
+
+- Phase 3 exit criterion: `Budget caps and concurrency caps are enforced during real runs.`
+
+Verdict:
+
+- gap
+
+Evidence:
+
+- Concurrency enforcement is real: `ControlPlaneService.createRun` persists `concurrencyCap`, sensitive repositories are clamped to `1` through `requiresSensitiveDefaults(...)`, and `ControlPlaneService.createAgent` rejects additional active agents once the run cap is exhausted in `apps/api/src/services/control-plane-service.ts`.
+- Executable tests prove that concurrency path by rejecting a second agent with `run concurrency cap of 1 active agents reached` in `apps/api/test/app.test.ts`, and policy tests verify the sensitive-repo override in `apps/api/test/control-plane-service.policy.test.ts`.
+- Budget handling is weaker: `createRun` stores `budgetTokens` and `budgetCostUsd`, while observability only aggregates `runsWithBudget` and budget totals for reporting in `apps/api/src/services/control-plane-service.ts` and `apps/api/src/lib/observability.ts`.
+- The repo-wide budget references in docs and code describe budgeted posture and reporting, not enforcement. `docs/operations/cost-usage-performance.md` and `docs/user-guide.md` both frame budget data as persisted/reporting metadata rather than an execution stop or admission-control mechanism.
+- I found no route, scheduler, worker, or integration test that rejects, pauses, or terminates run activity based on a consumed or projected budget threshold.
+
+Residual risks:
+
+- Reviewers can support concurrency-cap enforcement, but not the stronger combined claim that both budget caps and concurrency caps are enforced during real runs.
+
+Backlog follow-up:
+
+- Add real budget-cap enforcement semantics with acceptance coverage, or intentionally narrow the roadmap exit criterion to the currently implemented concurrency enforcement plus budget reporting model.
