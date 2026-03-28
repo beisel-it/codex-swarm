@@ -596,3 +596,24 @@ Evidence:
 Residual risks:
 
 - The current repo shows policy management through API-backed inheritance, governance reporting, and admin visibility. It does not yet expose a richer policy-editor workflow beyond the modeled profiles and repository onboarding fields.
+
+## Task `4d3567b8`
+
+Roadmap entry:
+
+- Phase 1 deliverable: `Tasks visible via API`
+
+Verdict:
+
+- parity
+
+Evidence:
+
+- The task API exposes `GET /api/v1/tasks`, `POST /api/v1/tasks`, and `PATCH /api/v1/tasks/:id/status` in `apps/api/src/routes/tasks.ts`.
+- `ControlPlaneService.listTasks`, `createTask`, and `updateTaskStatus` persist and return task records with dependency IDs, owner, priority, acceptance criteria, and status in `apps/api/src/services/control-plane-service.ts`.
+- The vertical-slice integration test proves task creation, dependency-driven blocked status, status update, and subsequent visibility through run detail in `apps/api/test/app.test.ts`.
+- The architecture sequence docs also reflect persisted task DAG creation through the task API in `docs/architecture/system-context-and-sequences.md`.
+
+Residual risks:
+
+- This verdict covers task visibility and mutation through the API surface. It does not by itself prove a full end-to-end coding workflow, which remains tracked separately as a gap.
