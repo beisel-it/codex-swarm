@@ -617,3 +617,25 @@ Evidence:
 Residual risks:
 
 - This verdict covers task visibility and mutation through the API surface. It does not by itself prove a full end-to-end coding workflow, which remains tracked separately as a gap.
+
+## Task `518754be`
+
+Roadmap entry:
+
+- Phase 2 exit criterion: `A reviewer can inspect a completed task and approve/reject it in the browser.`
+
+Verdict:
+
+- parity
+
+Evidence:
+
+- The frontend `Review workspace` loads approval detail, requested context, prior resolution data, validation history, and artifacts for the selected run in `frontend/src/App.tsx`.
+- Browser actions call the live `PATCH /api/v1/approvals/:id` route through `updateApprovalDecision(...)`, allowing reviewers to approve or reject with structured notes directly from the UI in `frontend/src/App.tsx`.
+- The API exposes both approval-detail read and approval-resolution write surfaces in `apps/api/src/routes/approvals.ts`.
+- Integration tests verify approval lookup, delegated approval creation, structured reject-with-feedback resolution, and authorization boundaries for approval resolution in `apps/api/test/app.test.ts`.
+- The user guide explicitly documents the browser review flow, including inspecting approval context and recording approve/reject decisions from the action row in `docs/user-guide.md`.
+
+Residual risks:
+
+- The review surface is approval-centric rather than a dedicated “completed task” page, but it satisfies the roadmap criterion by letting reviewers inspect task-linked approval context and act in the browser.
