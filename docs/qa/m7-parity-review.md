@@ -185,3 +185,28 @@ Evidence:
 Residual risks:
 
 - The frontend panel currently shows command and summary details but not the full linked artifact metadata inline; that deeper evidence remains available through the API and review surfaces.
+
+## Task `f3d00aca`
+
+Roadmap entry:
+
+- Phase 3 deliverable: `One-click PR handoff`
+
+Verdict:
+
+- gap
+
+Evidence:
+
+- The live API exposes two separate actions, `POST /api/v1/runs/:id/publish-branch` and `POST /api/v1/runs/:id/pull-request-handoff`, in `apps/api/src/routes/runs.ts`.
+- `ControlPlaneService.createRunPullRequestHandoff` records PR metadata and publishes an artifact, but it does not itself create a provider pull request; the current implementation persists a supplied URL/number or falls back to a manual handoff artifact in `apps/api/src/services/control-plane-service.ts`.
+- Integration coverage verifies branch publish and recording a PR handoff for an already published run in `apps/api/test/app.test.ts`, which is weaker than a one-click end-to-end provider handoff.
+- The frontend reflects PR state and provider links in run detail surfaces in `frontend/src/App.tsx`, but it does not establish a single action that takes a run from ready state to provider PR creation from the browser.
+
+Residual risks:
+
+- The platform has structured branch publish and PR-state tracking, but reviewers cannot support the stronger roadmap claim that a user has a one-click PR handoff path.
+
+Backlog follow-up:
+
+- Add a real single-action PR handoff flow that either invokes provider PR creation directly or clearly supersedes the roadmap claim with a documented replacement interaction and acceptance evidence.
