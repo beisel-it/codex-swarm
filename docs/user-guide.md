@@ -45,7 +45,7 @@ Governed repositories and runs expose:
 
 ## Frontend Surface Checklist
 
-The GA documentation set must include screenshot coverage for these surfaces:
+The GA documentation set includes screenshot coverage for these surfaces:
 
 - board overview
 - run detail
@@ -53,7 +53,51 @@ The GA documentation set must include screenshot coverage for these surfaces:
 - governance and admin views
 - fleet and node visibility panels
 
-Frontend screenshot and walkthrough assets are produced under task `3a902ee5` and should be inserted into this guide before final GA signoff.
+Screenshot assets live under `docs/assets/screenshots/`.
+
+## Walkthrough: Board Overview
+
+Use the board as the default landing surface for active work:
+
+1. Select the repository-backed run in the left rail.
+2. Confirm the goal, branch, publish state, and PR reflection in the run overview card.
+3. Scan fleet visibility before acting on blocked work so you can distinguish execution issues from node-placement issues.
+4. Use the task lanes and DAG to identify the next unblock path.
+
+![Board overview showing active runs, fleet posture, onboarding state, and task lanes](./assets/screenshots/user-board-overview.png)
+
+## Walkthrough: Run Detail
+
+Use Run Detail when you need placement, recovery, or provider handoff specifics:
+
+1. Open `Run Detail` from the tab switcher.
+2. Inspect the placement surface to confirm current node, sticky node, placement constraints, and stale markers per session.
+3. Review the recovery surface for session state, sandbox, and node impact before retrying or reassigning work.
+4. Cross-check PR handoff and onboarding state before escalating a publish failure to operators.
+
+![Run detail showing session placement, sticky-node diagnostics, and recovery state](./assets/screenshots/user-run-detail.png)
+
+## Walkthrough: Review Console
+
+Use the review console when a run is waiting on human or delegated approval:
+
+1. Open `Review` and select the approval request from the left-side review list.
+2. Read the requested context and structured payload before deciding.
+3. Inspect recent validations and artifacts in the same surface so approval is tied to current evidence.
+4. Record resolution feedback directly in the browser, then approve or reject from the action row.
+
+![Review console showing approval context, resolution workspace, validations, and artifacts](./assets/screenshots/user-review-console.png)
+
+## Walkthrough: Governance and Admin
+
+Governed runs expose policy and provenance without forcing users into raw API inspection:
+
+1. Open `Admin` to confirm actor, workspace, and team boundary for the current run.
+2. Review the governance report for approval totals, retention posture, and secret boundary state.
+3. Inspect approval provenance to see who requested, delegated, and resolved each governed approval.
+4. Use the audit export and secret access plan cards when documenting or troubleshooting governance posture.
+
+![Admin governance surface showing retention posture, approval provenance, and audit context](./assets/screenshots/admin-governance-view.png)
 
 ## Daily Usage Guidance
 

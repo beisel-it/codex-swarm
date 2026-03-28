@@ -45,6 +45,13 @@ Notes:
 - drain-mode procedures should be documented and exercised
 - restore and upgrade procedures must account for both control-plane and worker coordination
 
+Frontend reference:
+
+- the board should visibly show node health, utilization, drain state, repository onboarding, and task progression in one operator-facing surface
+- use the GA capture below as the expected documentation reference for the multi-node board posture
+
+![Multi-node board showing fleet visibility, onboarding readiness, and task lanes](./assets/screenshots/reference-multinode-board.png)
+
 ## Deployment Checklist
 
 For both topologies:
@@ -63,5 +70,12 @@ The final GA docs set should reference:
 - DR drill evidence
 - upgrade/versioning evidence
 - frontend walkthrough screenshots and user flows
+
+For UI evidence, use these references:
+
+- [User Guide](./user-guide.md) for board, run-detail, review, and admin walkthroughs
+- [Admin Guide](./admin-guide.md) for governance, provenance, and audit/admin interpretation
+- [Board overview screenshot](./assets/screenshots/user-board-overview.png) for single-host/operator walkthrough context
+- [Multi-node board screenshot](./assets/screenshots/reference-multinode-board.png) for fleet-placement and drain-mode documentation
 
 Those artifacts together define the supported deployment and support boundary, not any one document by itself.

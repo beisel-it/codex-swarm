@@ -31,6 +31,8 @@ The current governance model includes:
 - confirm sensitive repositories inherit stricter defaults
 - inspect audit/governance summaries before changing policy
 
+![Governance report and approval provenance in the admin surface](./assets/screenshots/admin-governance-view.png)
+
 ### 2. Check approval provenance
 
 - use audit export and governance/admin views to confirm who approved what and when
@@ -46,6 +48,17 @@ The current governance model includes:
 
 - use the integration boundary and access plan surfaces to confirm whether a repo is allowed, brokered, or denied
 - verify trust level and sensitive-policy posture before granting or troubleshooting access
+
+## Admin UI Reference
+
+The frontend admin surface is the fastest way to verify governance state during support and signoff work:
+
+1. Start in `Admin context` to confirm the current principal, workspace, team, and policy profile.
+2. Use `Governance report` to check approval totals, retention posture, and secret-distribution boundaries.
+3. Use `Approval provenance` as the source of truth for requested-by, resolver, delegated actor, policy profile, and resolved-at details.
+4. Use `Audit and secrets` to confirm run export evidence and the repository's secret access plan before escalating to operators.
+
+The admin UI is intended to answer routine governance questions without direct database access. When the frontend and audit export disagree, treat the audit export and API response as authoritative and escalate the inconsistency.
 
 ## Administrative Boundaries
 
