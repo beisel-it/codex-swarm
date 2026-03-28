@@ -385,3 +385,28 @@ Evidence:
 Residual risks:
 
 - The implementation is polling-based rather than push-streamed, so "near real time" is currently bounded by the 15-second refresh interval instead of sub-second event delivery.
+
+## Task `2ed1519c`
+
+Roadmap entry:
+
+- Phase 3 quality item: `Load and soak tests`
+
+Verdict:
+
+- gap
+
+Evidence:
+
+- The only checked-in performance tool is `apps/api/scripts/ops/perf-envelope.mjs`, which performs a bounded concurrent HTTP probe against one endpoint using configurable `PERF_CONCURRENCY` and `PERF_ITERATIONS`.
+- The operator documentation in `docs/operations/cost-usage-performance.md` explicitly calls that path an `HTTP concurrency probe` and states that it is `a bounded smoke baseline, not a full load-generation platform`.
+- The top-level operator summary in `README.md` also describes `corepack pnpm ops:perf` as `a simple concurrent HTTP latency check`, which is materially weaker than roadmap-promised load and soak tests.
+- The final RC note in `docs/qa/m6-rc-signoff.md` repeats that the current performance probe `is a bounded smoke baseline and not a substitute for sustained production load testing`.
+
+Residual risks:
+
+- Operators have a useful latency probe, but the repo does not currently provide supportable sustained-load or soak-test coverage for the control plane or worker flows.
+
+Backlog follow-up:
+
+- Add real load and soak test assets plus runnable acceptance guidance, or explicitly narrow the roadmap wording to the current bounded HTTP concurrency probe.
