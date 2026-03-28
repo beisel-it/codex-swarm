@@ -49,3 +49,46 @@ Residual risks:
 Backlog follow-up:
 
 - Add a tracked implementation slice for leader plan generation and `.swarm/plan.md` persistence, with an acceptance test or runnable smoke path proving the artifact is created and persisted.
+
+## Task `23364aee`
+
+Roadmap entry:
+
+- Phase 1 deliverable: `Up to 3 concurrent workers on one host`
+
+Verdict:
+
+- better
+
+Evidence:
+
+- Run creation accepts a configurable positive `concurrencyCap` instead of a fixed ceiling of three in `packages/contracts/src/index.ts`.
+- `ControlPlaneService.createRun` persists the requested cap, and `ControlPlaneService.createAgent` blocks additional active agents once the run-level cap is reached in `apps/api/src/services/control-plane-service.ts`.
+- Integration coverage proves the enforcement path by rejecting a second active agent once the configured cap is exhausted in `apps/api/test/app.test.ts`.
+- Local sessions do not require a remote worker-node binding, so the concurrency gate applies to single-host execution as well as later distributed placement in `packages/contracts/src/index.ts` and `apps/api/src/services/control-plane-service.ts`.
+
+Residual risks:
+
+- The repo does not include an explicit smoke or integration test that exercises exactly three host-local workers in one run; the verdict relies on the stronger generic cap implementation rather than a hard-coded `3` acceptance test.
+
+## Task `f8000545`
+
+Roadmap entry:
+
+- Phase 1 exit criterion: `each worker session is resumable through persisted threadId`
+
+Verdict:
+
+- parity
+
+Evidence:
+
+- Session persistence requires a non-null `threadId` in the durable schema in `packages/database/prisma/schema.prisma`.
+- The control plane persists session `threadId` values when agents are created with session metadata in `apps/api/src/services/control-plane-service.ts`.
+- Session-registry behavior explicitly hydrates persisted sessions, enforces stable thread binding, and supports lookup by `threadId` in `apps/worker/src/session-registry.ts` and `apps/worker/test/session-registry.test.ts`.
+- Recovery planning prefers `resume` for active sessions that still have persisted `threadId` values in `apps/worker/src/runtime.ts` and `apps/worker/test/runtime.test.ts`.
+- The API vertical-slice test returns the persisted session and `threadId` as part of the run detail payload in `apps/api/test/app.test.ts`.
+
+Residual risks:
+
+- This verifies persistence and restart/recovery decision logic around `threadId`; it does not prove an actual external Codex backend resumed a live conversation during the test run.
