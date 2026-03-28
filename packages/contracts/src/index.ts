@@ -28,6 +28,38 @@ export const repositoryCreateSchema = z.object({
   approvalProfile: z.string().min(1).default("standard")
 });
 
+export const workspaceSchema = z.object({
+  id: z.string().min(1),
+  name: z.string().min(1),
+  createdAt: z.date(),
+  updatedAt: z.date()
+});
+
+export const teamSchema = z.object({
+  id: z.string().min(1),
+  workspaceId: z.string().min(1),
+  name: z.string().min(1),
+  createdAt: z.date(),
+  updatedAt: z.date()
+});
+
+export const identityContextSchema = z.object({
+  principal: z.string().min(1),
+  subject: z.string().min(1),
+  email: z.string().email().nullable().default(null),
+  roles: z.array(z.string().min(1)).default([]),
+  workspace: workspaceSchema.pick({
+    id: true,
+    name: true
+  }),
+  team: teamSchema.pick({
+    id: true,
+    workspaceId: true,
+    name: true
+  }),
+  actorType: z.enum(["system", "user", "service"]).default("user")
+});
+
 export const runCreateSchema = z.object({
   repositoryId: z.uuid(),
   goal: z.string().min(1),
@@ -109,6 +141,8 @@ export const idParamSchema = z.object({
 
 export const repositorySchema = repositoryCreateSchema.extend({
   id: z.uuid(),
+  workspaceId: z.string().min(1),
+  teamId: z.string().min(1),
   provider: z.enum(repositoryProviders),
   localPath: z.string().min(1).nullable(),
   trustLevel: z.enum(repositoryTrustLevels),
@@ -118,6 +152,8 @@ export const repositorySchema = repositoryCreateSchema.extend({
 
 export const runSchema = runCreateSchema.extend({
   id: z.uuid(),
+  workspaceId: z.string().min(1),
+  teamId: z.string().min(1),
   status: z.enum(runStatuses),
   branchName: z.string().min(1).nullable(),
   planArtifactPath: z.string().min(1).nullable(),
@@ -190,6 +226,8 @@ export const workerNodeSchema = workerNodeRegisterSchema.extend({
 export const approvalSchema = z.object({
   id: z.uuid(),
   runId: z.uuid(),
+  workspaceId: z.string().min(1),
+  teamId: z.string().min(1),
   taskId: z.uuid().nullable(),
   kind: z.enum(approvalKinds),
   status: z.enum(approvalStatuses),
@@ -265,6 +303,19 @@ export const eventsListQuerySchema = z.object({
   limit: z.coerce.number().int().positive().max(200).default(100)
 });
 
+export const actorIdentitySchema = z.object({
+  principal: z.string().min(1),
+  actorId: z.string().min(1),
+  actorType: z.enum(["system", "user", "service"]).default("user"),
+  email: z.string().email().nullable().default(null),
+  role: z.string().min(1),
+  workspaceId: z.string().min(1).nullable().default(null),
+  workspaceName: z.string().min(1).nullable().default(null),
+  teamId: z.string().min(1).nullable().default(null),
+  teamName: z.string().min(1).nullable().default(null),
+  policyProfile: z.string().min(1).nullable().default(null)
+});
+
 export const controlPlaneEventSchema = z.object({
   id: z.uuid(),
   runId: z.uuid().nullable(),
@@ -276,8 +327,21 @@ export const controlPlaneEventSchema = z.object({
   entityId: z.string().min(1),
   status: z.string().min(1),
   summary: z.string().min(1),
+  actor: actorIdentitySchema.nullable().default(null),
   metadata: z.record(z.string(), z.unknown()).default({}),
   createdAt: z.date()
+});
+
+export const retentionPolicySchema = z.object({
+  runsDays: z.number().int().positive(),
+  artifactsDays: z.number().int().positive(),
+  eventsDays: z.number().int().positive()
+});
+
+export const retentionWindowSummarySchema = z.object({
+  total: z.number().int().nonnegative(),
+  expired: z.number().int().nonnegative(),
+  retained: z.number().int().nonnegative()
 });
 
 export const controlPlaneMetricsSchema = z.object({
@@ -485,6 +549,98 @@ export const workerDrainStatusSchema = z.object({
   reason: z.string().min(1)
 });
 
+export const approvalAuditEntrySchema = z.object({
+  approvalId: z.uuid(),
+  runId: z.uuid(),
+  taskId: z.uuid().nullable(),
+  repositoryId: z.uuid(),
+  repositoryName: z.string().min(1),
+  kind: z.enum(approvalKinds),
+  status: z.enum(approvalStatuses),
+  requestedAt: z.date(),
+  resolvedAt: z.date().nullable(),
+  requestedBy: z.string().min(1),
+  requestedByActor: actorIdentitySchema.nullable().default(null),
+  resolver: z.string().min(1).nullable(),
+  resolverActor: actorIdentitySchema.nullable().default(null),
+  policyProfile: z.string().min(1).nullable(),
+  requestedPayload: z.record(z.string(), z.unknown()).default({}),
+  resolutionPayload: z.record(z.string(), z.unknown()).default({})
+});
+
+export const auditProvenanceSchema = z.object({
+  exportedBy: actorIdentitySchema,
+  approvals: z.array(approvalAuditEntrySchema),
+  eventActors: z.array(actorIdentitySchema),
+  generatedAt: z.date()
+});
+
+export const secretIntegrationBoundarySchema = z.object({
+  sourceMode: z.enum(["environment", "external_manager"]).default("environment"),
+  provider: z.string().min(1).nullable().default(null),
+  remoteCredentialEnvNames: z.array(z.string().min(1)).default([]),
+  allowedRepositoryTrustLevels: z.array(z.enum(repositoryTrustLevels)).default(["trusted"]),
+  sensitivePolicyProfiles: z.array(z.string().min(1)).default([]),
+  credentialDistribution: z.array(z.string().min(1)).default([]),
+  policyDrivenAccess: z.boolean().default(false)
+});
+
+export const governanceAdminReportSchema = z.object({
+  generatedAt: z.date(),
+  requestedBy: actorIdentitySchema,
+  retention: z.object({
+    policy: retentionPolicySchema,
+    runs: retentionWindowSummarySchema,
+    artifacts: retentionWindowSummarySchema,
+    events: retentionWindowSummarySchema
+  }),
+  approvals: z.object({
+    total: z.number().int().nonnegative(),
+    pending: z.number().int().nonnegative(),
+    approved: z.number().int().nonnegative(),
+    rejected: z.number().int().nonnegative(),
+    history: z.array(approvalAuditEntrySchema)
+  }),
+  policies: z.object({
+    repositoryProfiles: z.array(z.object({
+      profile: z.string().min(1),
+      repositoryCount: z.number().int().nonnegative(),
+      runCount: z.number().int().nonnegative()
+    })),
+    sensitiveRepositories: z.array(z.object({
+      repositoryId: z.uuid(),
+      repositoryName: z.string().min(1),
+      trustLevel: z.enum(repositoryTrustLevels),
+      approvalProfile: z.string().min(1)
+    }))
+  }),
+  secrets: secretIntegrationBoundarySchema
+});
+
+export const retentionReconcileReportSchema = z.object({
+  dryRun: z.boolean(),
+  appliedAt: z.date(),
+  requestedBy: actorIdentitySchema,
+  runsUpdated: z.number().int().nonnegative(),
+  artifactsUpdated: z.number().int().nonnegative(),
+  eventsUpdated: z.number().int().nonnegative()
+});
+
+export const secretAccessPlanSchema = z.object({
+  repositoryId: z.uuid(),
+  repositoryName: z.string().min(1),
+  trustLevel: z.enum(repositoryTrustLevels),
+  policyProfile: z.string().min(1),
+  access: z.enum(["allowed", "brokered", "denied"]),
+  sourceMode: z.enum(["environment", "external_manager"]),
+  provider: z.string().min(1).nullable().default(null),
+  credentialEnvNames: z.array(z.string().min(1)).default([]),
+  distributionBoundary: z.array(z.string().min(1)).default([]),
+  reason: z.string().min(1)
+});
+
+export const identityEntrypointSchema = identityContextSchema;
+
 export const runDetailSchema = runSchema.extend({
   tasks: z.array(taskSchema),
   agents: z.array(agentSchema),
@@ -502,6 +658,13 @@ export const runAuditExportSchema = z.object({
   validations: z.array(validationHistoryEntrySchema),
   artifacts: z.array(artifactSchema),
   events: z.array(controlPlaneEventSchema),
+  provenance: auditProvenanceSchema,
+  retention: z.object({
+    policy: retentionPolicySchema,
+    runs: retentionWindowSummarySchema,
+    artifacts: retentionWindowSummarySchema,
+    events: retentionWindowSummarySchema
+  }),
   exportedAt: z.date()
 });
 
@@ -513,6 +676,9 @@ export type TaskStatusUpdateInput = z.infer<typeof taskStatusUpdateSchema>;
 export type AgentCreateInput = z.infer<typeof agentCreateSchema>;
 export type Repository = z.infer<typeof repositorySchema>;
 export type Run = z.infer<typeof runSchema>;
+export type Workspace = z.infer<typeof workspaceSchema>;
+export type Team = z.infer<typeof teamSchema>;
+export type IdentityContext = z.infer<typeof identityContextSchema>;
 export type Task = z.infer<typeof taskSchema>;
 export type Agent = z.infer<typeof agentSchema>;
 export type Session = z.infer<typeof sessionSchema>;
@@ -538,7 +704,10 @@ export type CleanupJobRunInput = z.infer<typeof cleanupJobRunSchema>;
 export type CleanupJobItem = z.infer<typeof cleanupJobItemSchema>;
 export type CleanupJobReport = z.infer<typeof cleanupJobReportSchema>;
 export type EventsListQuery = z.infer<typeof eventsListQuerySchema>;
+export type ActorIdentity = z.infer<typeof actorIdentitySchema>;
 export type ControlPlaneEvent = z.infer<typeof controlPlaneEventSchema>;
+export type RetentionPolicy = z.infer<typeof retentionPolicySchema>;
+export type RetentionWindowSummary = z.infer<typeof retentionWindowSummarySchema>;
 export type ControlPlaneMetrics = z.infer<typeof controlPlaneMetricsSchema>;
 export type WorkerDispatchAssignment = z.infer<typeof workerDispatchAssignmentSchema>;
 export type WorkerDispatchCreateInput = z.infer<typeof workerDispatchCreateSchema>;
@@ -551,3 +720,10 @@ export type WorkerDrainCommand = z.infer<typeof workerDrainCommandSchema>;
 export type WorkerDrainStatus = z.infer<typeof workerDrainStatusSchema>;
 export type WorkerNodeReconcileInput = z.infer<typeof workerNodeReconcileSchema>;
 export type WorkerNodeReconcileReport = z.infer<typeof workerNodeReconcileReportSchema>;
+export type ApprovalAuditEntry = z.infer<typeof approvalAuditEntrySchema>;
+export type AuditProvenance = z.infer<typeof auditProvenanceSchema>;
+export type SecretIntegrationBoundary = z.infer<typeof secretIntegrationBoundarySchema>;
+export type GovernanceAdminReport = z.infer<typeof governanceAdminReportSchema>;
+export type RetentionReconcileReport = z.infer<typeof retentionReconcileReportSchema>;
+export type SecretAccessPlan = z.infer<typeof secretAccessPlanSchema>;
+export type IdentityEntrypoint = z.infer<typeof identityEntrypointSchema>;

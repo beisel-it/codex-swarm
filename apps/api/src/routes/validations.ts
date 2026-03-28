@@ -6,14 +6,14 @@ import { requireValue } from "../lib/require-value.js";
 export const validationRoutes: FastifyPluginAsync = async (app) => {
   app.get("/validations", async (request) => {
     const query = validationsListQuerySchema.parse(request.query);
-    return app.controlPlane.listValidations(query);
+    return app.controlPlane.listValidations(query, request.authContext);
   });
 
   app.post("/validations", async (request, reply) => {
     return app.observability.withTrace("api.validations.create", async () => {
       const input = validationCreateSchema.parse(request.body);
       const validation = requireValue(
-        await app.controlPlane.createValidation(input),
+        await app.controlPlane.createValidation(input, request.authContext),
         "control plane returned no validation"
       );
 

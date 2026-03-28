@@ -11,14 +11,14 @@ const querySchema = z.object({
 export const messageRoutes: FastifyPluginAsync = async (app) => {
   app.get("/messages", async (request) => {
     const { runId } = querySchema.parse(request.query);
-    return app.controlPlane.listMessages(runId);
+    return app.controlPlane.listMessages(runId, request.authContext);
   });
 
   app.post("/messages", async (request, reply) => {
     return app.observability.withTrace("api.messages.create", async () => {
       const input = messageCreateSchema.parse(request.body);
       const message = requireValue(
-        await app.controlPlane.createMessage(input),
+        await app.controlPlane.createMessage(input, request.authContext),
         "control plane returned no message"
       );
 

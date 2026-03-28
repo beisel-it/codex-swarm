@@ -1,11 +1,14 @@
-import { and, asc, eq, inArray } from "drizzle-orm";
+import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import {
+  type ActorIdentity,
   type Approval,
+  type ApprovalAuditEntry,
   type Artifact,
   type ArtifactCreateInput,
   type CleanupJobReport,
   type CleanupJobRunInput,
   type ControlPlaneEvent,
+  type GovernanceAdminReport,
   type Run,
   type RunAuditExport,
   type Agent,
@@ -14,7 +17,12 @@ import {
   type ApprovalResolveInput,
   type Repository,
   type RepositoryCreateInput,
+  type RetentionPolicy,
+  type RetentionReconcileReport,
+  type RetentionWindowSummary,
   type RunCreateInput,
+  type SecretIntegrationBoundary,
+  type SecretAccessPlan,
   type WorkerDispatchAssignment,
   type WorkerDispatchCompleteInput,
   type WorkerDispatchCreateInput,
@@ -48,9 +56,11 @@ import {
   runs,
   sessions,
   tasks,
+  teams,
   validations,
   workerDispatchAssignments,
-  workerNodes
+  workerNodes,
+  workspaces
 } from "../db/schema.js";
 import type { Clock } from "../lib/clock.js";
 import { HttpError } from "../lib/http-error.js";
@@ -83,6 +93,32 @@ type WorkerNodeDrainUpdate = WorkerNodeDrainUpdateInput;
 type WorkerDispatchCreate = WorkerDispatchCreateInput;
 type WorkerDispatchComplete = WorkerDispatchCompleteInput;
 type WorkerNodeReconcile = WorkerNodeReconcileInput;
+type AccessBoundary = Pick<ActorIdentity, "workspaceId" | "workspaceName" | "teamId" | "teamName">;
+
+function assertAccessBoundary(access: AccessBoundary | undefined): asserts access is AccessBoundary & {
+  workspaceId: string;
+  teamId: string;
+} {
+  if (!access?.workspaceId || !access.teamId) {
+    throw new HttpError(403, "workspace or team boundary is required");
+  }
+}
+
+function requireAccessBoundary(access: AccessBoundary | undefined): {
+  workspaceId: string;
+  workspaceName: string | null;
+  teamId: string;
+  teamName: string | null;
+} {
+  assertAccessBoundary(access);
+
+  return {
+    workspaceId: access.workspaceId!,
+    workspaceName: access.workspaceName ?? null,
+    teamId: access.teamId!,
+    teamName: access.teamName ?? null
+  };
+}
 
 function workerNodeSupportsAssignment(
   workerNode: Pick<WorkerNode, "capabilityLabels" | "status" | "drainState" | "id">,
@@ -117,6 +153,44 @@ function workerDispatchRank(nodeId: string, assignment: Pick<WorkerDispatchAssig
 
 function isWorkerNodeEligible(workerNode: Pick<WorkerNode, "status" | "drainState">) {
   return workerNode.status === "online" && workerNode.drainState === "active";
+}
+
+function createRetentionWindowSummary(
+  dates: Array<Date | null | undefined>,
+  retentionDays: number,
+  now: Date
+): RetentionWindowSummary {
+  const cutoff = new Date(now.getTime() - retentionDays * 24 * 60 * 60 * 1000);
+  const total = dates.filter((value): value is Date => value instanceof Date).length;
+  const expired = dates.filter((value): value is Date => value instanceof Date && value.getTime() < cutoff.getTime()).length;
+
+  return {
+    total,
+    expired,
+    retained: total - expired
+  };
+}
+
+function dedupeActors(actors: Array<ActorIdentity | null | undefined>) {
+  const seen = new Set<string>();
+  const result: ActorIdentity[] = [];
+
+  for (const actor of actors) {
+    if (!actor) {
+      continue;
+    }
+
+    const key = `${actor.actorId}:${actor.teamId ?? "none"}:${actor.role}:${actor.policyProfile ?? "none"}`;
+
+    if (seen.has(key)) {
+      continue;
+    }
+
+    seen.add(key);
+    result.push(actor);
+  }
+
+  return result;
 }
 
 function inferRepositoryProvider(url: string): Repository["provider"] {
@@ -159,8 +233,16 @@ export class ControlPlaneService {
     private readonly clock: Clock
   ) {}
 
-  async listRepositories() {
-    const rows = await this.db.select().from(repositories).orderBy(asc(repositories.createdAt));
+  async listRepositories(access?: AccessBoundary) {
+    const boundary = requireAccessBoundary(access);
+    const rows = await this.db
+      .select()
+      .from(repositories)
+      .where(and(
+        eq(repositories.workspaceId, boundary.workspaceId),
+        eq(repositories.teamId, boundary.teamId)
+      ))
+      .orderBy(asc(repositories.createdAt));
     return rows.map((repository) => this.mapRepository(repository));
   }
 
@@ -213,12 +295,16 @@ export class ControlPlaneService {
     return this.mapWorkerNode(expectPersistedRecord(workerNode, "worker node"));
   }
 
-  async createRepository(input: RepositoryCreate) {
+  async createRepository(input: RepositoryCreate, access?: AccessBoundary) {
+    const boundary = requireAccessBoundary(access);
+    await this.ensureOwnershipBoundary(boundary);
     const id = crypto.randomUUID();
     const now = this.clock.now();
 
     const [repository] = await this.db.insert(repositories).values({
       id,
+      workspaceId: boundary.workspaceId,
+      teamId: boundary.teamId,
       name: input.name,
       url: input.url,
       provider: input.provider ?? inferRepositoryProvider(input.url),
@@ -233,22 +319,27 @@ export class ControlPlaneService {
     return this.mapRepository(expectPersistedRecord(repository, "repository"));
   }
 
-  async listRuns(repositoryId?: string) {
+  async listRuns(repositoryId?: string, access?: AccessBoundary) {
+    const boundary = requireAccessBoundary(access);
     if (repositoryId) {
-      const rows = await this.db.select().from(runs).where(eq(runs.repositoryId, repositoryId)).orderBy(asc(runs.createdAt));
+      const repository = await this.assertRepositoryExists(repositoryId, boundary);
+      const rows = await this.db.select().from(runs).where(and(
+        eq(runs.repositoryId, repository.id),
+        eq(runs.workspaceId, boundary.workspaceId),
+        eq(runs.teamId, boundary.teamId)
+      )).orderBy(asc(runs.createdAt));
       return rows.map((run) => this.mapRun(run));
     }
 
-    const rows = await this.db.select().from(runs).orderBy(asc(runs.createdAt));
+    const rows = await this.db.select().from(runs).where(and(
+      eq(runs.workspaceId, boundary.workspaceId),
+      eq(runs.teamId, boundary.teamId)
+    )).orderBy(asc(runs.createdAt));
     return rows.map((run) => this.mapRun(run));
   }
 
-  async getRun(runId: string): Promise<RunDetail> {
-    const [run] = await this.db.select().from(runs).where(eq(runs.id, runId));
-
-    if (!run) {
-      throw new HttpError(404, `run ${runId} not found`);
-    }
+  async getRun(runId: string, access?: AccessBoundary): Promise<RunDetail> {
+    const run = await this.assertRunExists(runId, access);
 
     const [runTasks, runAgents, runSessions] = await Promise.all([
       this.db.select().from(tasks).where(eq(tasks.runId, runId)).orderBy(asc(tasks.createdAt)),
@@ -275,8 +366,9 @@ export class ControlPlaneService {
     };
   }
 
-  async createRun(input: RunCreate, createdBy: string) {
-    const repository = await this.assertRepositoryExists(input.repositoryId);
+  async createRun(input: RunCreate, createdBy: string, access?: AccessBoundary) {
+    assertAccessBoundary(access);
+    const repository = await this.assertRepositoryExists(input.repositoryId, access);
 
     const id = crypto.randomUUID();
     const now = this.clock.now();
@@ -284,6 +376,8 @@ export class ControlPlaneService {
     const [run] = await this.db.insert(runs).values({
       id,
       repositoryId: input.repositoryId,
+      workspaceId: repository.workspaceId,
+      teamId: repository.teamId,
       goal: input.goal,
       status: "pending",
       branchName: input.branchName ?? null,
@@ -308,8 +402,8 @@ export class ControlPlaneService {
     return this.mapRun(expectPersistedRecord(run, "run"));
   }
 
-  async updateRunStatus(runId: string, input: RunStatusUpdate) {
-    await this.assertRunExists(runId);
+  async updateRunStatus(runId: string, input: RunStatusUpdate, access?: AccessBoundary) {
+    await this.assertRunExists(runId, access);
     const now = this.clock.now();
 
     const [run] = await this.db.update(runs).set({
@@ -322,8 +416,8 @@ export class ControlPlaneService {
     return this.mapRun(expectPersistedRecord(run, "run"));
   }
 
-  async publishRunBranch(runId: string, input: RunBranchPublish) {
-    const existingRun = await this.assertRunExists(runId);
+  async publishRunBranch(runId: string, input: RunBranchPublish, access?: AccessBoundary) {
+    const existingRun = await this.assertRunExists(runId, access);
     const now = this.clock.now();
     const branchName = input.branchName ?? existingRun.branchName;
 
@@ -342,10 +436,10 @@ export class ControlPlaneService {
     return this.mapRun(expectPersistedRecord(run, "run"));
   }
 
-  async createRunPullRequestHandoff(runId: string, input: RunPullRequestHandoff) {
+  async createRunPullRequestHandoff(runId: string, input: RunPullRequestHandoff, access?: AccessBoundary) {
     const now = this.clock.now();
-    const run = await this.assertRunExists(runId);
-    const repository = await this.assertRepositoryExists(run.repositoryId);
+    const run = await this.assertRunExists(runId, access);
+    const repository = await this.assertRepositoryExists(run.repositoryId, access);
     const headBranch = input.headBranch ?? run.publishedBranch ?? run.branchName;
 
     if (!headBranch) {
@@ -397,23 +491,43 @@ export class ControlPlaneService {
     return this.mapRun(expectPersistedRecord(updatedRun, "run"));
   }
 
-  async listTasks(runId?: string) {
+  async listTasks(runId?: string, access?: AccessBoundary) {
+    const boundary = requireAccessBoundary(access);
     if (runId) {
+      await this.assertRunExists(runId, boundary);
       return this.db.select().from(tasks).where(eq(tasks.runId, runId)).orderBy(asc(tasks.createdAt));
     }
 
-    return this.db.select().from(tasks).orderBy(asc(tasks.createdAt));
+    return this.db.select({
+      id: tasks.id,
+      runId: tasks.runId,
+      parentTaskId: tasks.parentTaskId,
+      title: tasks.title,
+      description: tasks.description,
+      role: tasks.role,
+      status: tasks.status,
+      priority: tasks.priority,
+      ownerAgentId: tasks.ownerAgentId,
+      dependencyIds: tasks.dependencyIds,
+      acceptanceCriteria: tasks.acceptanceCriteria,
+      createdAt: tasks.createdAt,
+      updatedAt: tasks.updatedAt
+    })
+      .from(tasks)
+      .innerJoin(runs, eq(tasks.runId, runs.id))
+      .where(and(eq(runs.workspaceId, boundary.workspaceId), eq(runs.teamId, boundary.teamId)))
+      .orderBy(asc(tasks.createdAt));
   }
 
-  async createTask(input: TaskCreate) {
-    await this.assertRunExists(input.runId);
+  async createTask(input: TaskCreate, access?: AccessBoundary) {
+    await this.assertRunExists(input.runId, access);
 
     if (input.ownerAgentId) {
-      await this.assertAgentExists(input.ownerAgentId);
+      await this.assertAgentExists(input.ownerAgentId, access);
     }
 
     if (input.parentTaskId) {
-      await this.assertTaskExists(input.parentTaskId);
+      await this.assertTaskExists(input.parentTaskId, access);
     }
 
     await this.assertDependenciesBelongToRun(input.runId, input.dependencyIds);
@@ -441,11 +555,11 @@ export class ControlPlaneService {
     return expectPersistedRecord(task, "task");
   }
 
-  async updateTaskStatus(taskId: string, input: TaskStatusUpdate) {
-    const task = await this.assertTaskExists(taskId);
+  async updateTaskStatus(taskId: string, input: TaskStatusUpdate, access?: AccessBoundary) {
+    const task = await this.assertTaskExists(taskId, access);
 
     if (input.ownerAgentId) {
-      await this.assertAgentExists(input.ownerAgentId);
+      await this.assertAgentExists(input.ownerAgentId, access);
     }
 
     const ready = await this.areDependenciesSatisfied(task.runId, task.dependencyIds);
@@ -468,11 +582,11 @@ export class ControlPlaneService {
     return expectPersistedRecord(updated, "task");
   }
 
-  async createAgent(input: AgentCreate) {
-    const run = await this.assertRunExists(input.runId);
+  async createAgent(input: AgentCreate, access?: AccessBoundary) {
+    const run = await this.assertRunExists(input.runId, access);
 
     if (input.currentTaskId) {
-      await this.assertTaskExists(input.currentTaskId);
+      await this.assertTaskExists(input.currentTaskId, access);
     }
 
     const activeAgents = await this.db
@@ -549,23 +663,41 @@ export class ControlPlaneService {
     return expectPersistedRecord(agent, "agent");
   }
 
-  async listAgents(runId?: string) {
+  async listAgents(runId?: string, access?: AccessBoundary) {
+    const boundary = requireAccessBoundary(access);
     if (runId) {
+      await this.assertRunExists(runId, boundary);
       return this.db.select().from(agents).where(eq(agents.runId, runId)).orderBy(asc(agents.createdAt));
     }
 
-    return this.db.select().from(agents).orderBy(asc(agents.createdAt));
+    return this.db.select({
+      id: agents.id,
+      runId: agents.runId,
+      name: agents.name,
+      role: agents.role,
+      status: agents.status,
+      worktreePath: agents.worktreePath,
+      branchName: agents.branchName,
+      currentTaskId: agents.currentTaskId,
+      lastHeartbeatAt: agents.lastHeartbeatAt,
+      createdAt: agents.createdAt,
+      updatedAt: agents.updatedAt
+    })
+      .from(agents)
+      .innerJoin(runs, eq(agents.runId, runs.id))
+      .where(and(eq(runs.workspaceId, boundary.workspaceId), eq(runs.teamId, boundary.teamId)))
+      .orderBy(asc(agents.createdAt));
   }
 
-  async createMessage(input: MessageCreate) {
-    await this.assertRunExists(input.runId);
+  async createMessage(input: MessageCreate, access?: AccessBoundary) {
+    await this.assertRunExists(input.runId, access);
 
     if (input.senderAgentId) {
-      await this.assertAgentExists(input.senderAgentId);
+      await this.assertAgentExists(input.senderAgentId, access);
     }
 
     if (input.recipientAgentId) {
-      await this.assertAgentExists(input.recipientAgentId);
+      await this.assertAgentExists(input.recipientAgentId, access);
     }
 
     const [message] = await this.db.insert(messages).values({
@@ -581,22 +713,24 @@ export class ControlPlaneService {
     return expectPersistedRecord(message, "message");
   }
 
-  async listMessages(runId: string) {
-    await this.assertRunExists(runId);
+  async listMessages(runId: string, access?: AccessBoundary) {
+    await this.assertRunExists(runId, access);
     return this.db.select().from(messages).where(eq(messages.runId, runId)).orderBy(asc(messages.createdAt));
   }
 
-  async createApproval(input: ApprovalCreate) {
-    await this.assertRunExists(input.runId);
+  async createApproval(input: ApprovalCreate, access?: AccessBoundary) {
+    const run = await this.assertRunExists(input.runId, access);
 
     if (input.taskId) {
-      await this.assertTaskExists(input.taskId);
+      await this.assertTaskExists(input.taskId, access);
     }
 
     const now = this.clock.now();
     const [approval] = await this.db.insert(approvals).values({
       id: crypto.randomUUID(),
       runId: input.runId,
+      workspaceId: run.workspaceId,
+      teamId: run.teamId,
       taskId: input.taskId ?? null,
       kind: input.kind,
       status: "pending",
@@ -612,10 +746,15 @@ export class ControlPlaneService {
     return expectPersistedRecord(approval, "approval");
   }
 
-  async listApprovals(runId?: string) {
+  async listApprovals(runId?: string, access?: AccessBoundary) {
+    const boundary = requireAccessBoundary(access);
     if (runId) {
-      await this.assertRunExists(runId);
-      const rows = await this.db.select().from(approvals).where(eq(approvals.runId, runId)).orderBy(asc(approvals.createdAt));
+      await this.assertRunExists(runId, boundary);
+      const rows = await this.db.select().from(approvals).where(and(
+        eq(approvals.runId, runId),
+        eq(approvals.workspaceId, boundary.workspaceId),
+        eq(approvals.teamId, boundary.teamId)
+      )).orderBy(asc(approvals.createdAt));
       return rows.map((approval): Approval => ({
         ...approval,
         kind: approval.kind as Approval["kind"],
@@ -623,7 +762,10 @@ export class ControlPlaneService {
       }));
     }
 
-    const rows = await this.db.select().from(approvals).orderBy(asc(approvals.createdAt));
+    const rows = await this.db.select().from(approvals).where(and(
+      eq(approvals.workspaceId, boundary.workspaceId),
+      eq(approvals.teamId, boundary.teamId)
+    )).orderBy(asc(approvals.createdAt));
     return rows.map((approval): Approval => ({
       ...approval,
       kind: approval.kind as Approval["kind"],
@@ -631,17 +773,20 @@ export class ControlPlaneService {
     }));
   }
 
-  async getApproval(approvalId: string) {
+  async getApproval(approvalId: string, access?: AccessBoundary) {
     const [approval] = await this.db.select().from(approvals).where(eq(approvals.id, approvalId));
 
     if (!approval) {
       throw new HttpError(404, `approval ${approvalId} not found`);
     }
 
+    this.assertBoundaryMatch(access, approval.workspaceId, approval.teamId, "approval", approvalId);
+
     return expectPersistedRecord(approval, "approval");
   }
 
-  async resolveApproval(approvalId: string, input: ApprovalResolve) {
+  async resolveApproval(approvalId: string, input: ApprovalResolve, access?: AccessBoundary) {
+    await this.getApproval(approvalId, access);
     const now = this.clock.now();
 
     const [approval] = await this.db.update(approvals).set({
@@ -662,11 +807,11 @@ export class ControlPlaneService {
     return expectPersistedRecord(approval, "approval");
   }
 
-  async createValidation(input: ValidationCreate) {
-    await this.assertRunExists(input.runId);
+  async createValidation(input: ValidationCreate, access?: AccessBoundary) {
+    await this.assertRunExists(input.runId, access);
 
     if (input.taskId) {
-      await this.assertTaskExists(input.taskId);
+      await this.assertTaskExists(input.taskId, access);
     }
 
     const artifactIds = await this.resolveValidationArtifactIds(
@@ -693,12 +838,12 @@ export class ControlPlaneService {
     return this.hydrateValidationHistoryEntry(expectPersistedRecord(validation, "validation"));
   }
 
-  async listValidations(query: ValidationListQuery | string): Promise<ValidationHistoryEntry[]> {
+  async listValidations(query: ValidationListQuery | string, access?: AccessBoundary): Promise<ValidationHistoryEntry[]> {
     const { runId, taskId } = typeof query === "string"
       ? { runId: query, taskId: undefined }
       : query;
 
-    await this.assertRunExists(runId);
+    await this.assertRunExists(runId, access);
 
     const clauses = [eq(validations.runId, runId)];
 
@@ -715,11 +860,11 @@ export class ControlPlaneService {
     return this.hydrateValidationHistory(rows);
   }
 
-  async createArtifact(input: ArtifactCreate) {
-    await this.assertRunExists(input.runId);
+  async createArtifact(input: ArtifactCreate, access?: AccessBoundary) {
+    await this.assertRunExists(input.runId, access);
 
     if (input.taskId) {
-      await this.assertTaskExists(input.taskId);
+      await this.assertTaskExists(input.taskId, access);
     }
 
     const [artifact] = await this.db.insert(artifacts).values({
@@ -935,8 +1080,8 @@ export class ControlPlaneService {
     };
   }
 
-  async listArtifacts(runId: string) {
-    await this.assertRunExists(runId);
+  async listArtifacts(runId: string, access?: AccessBoundary) {
+    await this.assertRunExists(runId, access);
     const rows = await this.db.select().from(artifacts).where(eq(artifacts.runId, runId)).orderBy(asc(artifacts.createdAt));
     return rows.map((artifact): Artifact => ({
       ...artifact,
@@ -944,22 +1089,30 @@ export class ControlPlaneService {
     }));
   }
 
-  async exportRunAudit(runId: string): Promise<RunAuditExport> {
+  async exportRunAudit(runId: string, exportedBy: ActorIdentity, retentionPolicy: RetentionPolicy, access?: AccessBoundary): Promise<RunAuditExport> {
     const [runDetail, approvalsList, validationsList, artifactsList, events, allWorkerNodes] = await Promise.all([
-      this.getRun(runId),
-      this.listApprovals(runId),
-      this.listValidations(runId),
-      this.listArtifacts(runId),
+      this.getRun(runId, access),
+      this.listApprovals(runId, access),
+      this.listValidations(runId, access),
+      this.listArtifacts(runId, access),
       this.db.select().from(controlPlaneEvents)
         .where(eq(controlPlaneEvents.runId, runId))
         .orderBy(asc(controlPlaneEvents.createdAt)),
       this.listWorkerNodes()
     ]);
-    const repository = await this.assertRepositoryExists(runDetail.repositoryId);
+    const repository = await this.assertRepositoryExists(runDetail.repositoryId, access);
+    const now = this.clock.now();
+    const mappedEvents = events.map((event): ControlPlaneEvent => event);
+    const approvalAuditEntries = this.buildApprovalAuditEntries(
+      approvalsList,
+      runDetail,
+      this.mapRepository(repository),
+      mappedEvents
+    );
 
     return {
       repository: this.mapRepository(repository),
-      run: this.mapRun(await this.assertRunExists(runId)),
+      run: this.mapRun(await this.assertRunExists(runId, access)),
       tasks: runDetail.tasks,
       agents: runDetail.agents,
       sessions: runDetail.sessions,
@@ -969,8 +1122,229 @@ export class ControlPlaneService {
       approvals: approvalsList,
       validations: validationsList,
       artifacts: artifactsList,
-      events: events.map((event): ControlPlaneEvent => event),
-      exportedAt: this.clock.now()
+      events: mappedEvents,
+      provenance: {
+        exportedBy,
+        approvals: approvalAuditEntries,
+        eventActors: dedupeActors(mappedEvents.map((event) => event.actor)),
+        generatedAt: now
+      },
+      retention: {
+        policy: retentionPolicy,
+        runs: createRetentionWindowSummary([runDetail.completedAt ?? runDetail.createdAt], retentionPolicy.runsDays, now),
+        artifacts: createRetentionWindowSummary(artifactsList.map((artifact) => artifact.createdAt), retentionPolicy.artifactsDays, now),
+        events: createRetentionWindowSummary(mappedEvents.map((event) => event.createdAt), retentionPolicy.eventsDays, now)
+      },
+      exportedAt: now
+    };
+  }
+
+  async getGovernanceAdminReport(input: {
+    requestedBy: ActorIdentity;
+    retentionPolicy: RetentionPolicy;
+    secrets: SecretIntegrationBoundary;
+    access: AccessBoundary;
+    runId?: string;
+    limit?: number;
+  }): Promise<GovernanceAdminReport> {
+    const now = this.clock.now();
+    assertAccessBoundary(input.access);
+    const [repositoryRows, runRows, approvalRows, artifactRows, eventRows] = await Promise.all([
+      this.db.select().from(repositories)
+        .where(and(eq(repositories.workspaceId, input.access.workspaceId), eq(repositories.teamId, input.access.teamId)))
+        .orderBy(asc(repositories.createdAt)),
+      input.runId
+        ? this.db.select().from(runs).where(and(
+          eq(runs.id, input.runId),
+          eq(runs.workspaceId, input.access.workspaceId),
+          eq(runs.teamId, input.access.teamId)
+        )).orderBy(asc(runs.createdAt))
+        : this.db.select().from(runs).where(and(
+          eq(runs.workspaceId, input.access.workspaceId),
+          eq(runs.teamId, input.access.teamId)
+        )).orderBy(asc(runs.createdAt)),
+      input.runId
+        ? this.db.select().from(approvals).where(and(
+          eq(approvals.runId, input.runId),
+          eq(approvals.workspaceId, input.access.workspaceId),
+          eq(approvals.teamId, input.access.teamId)
+        )).orderBy(asc(approvals.createdAt))
+        : this.db.select().from(approvals).where(and(
+          eq(approvals.workspaceId, input.access.workspaceId),
+          eq(approvals.teamId, input.access.teamId)
+        )).orderBy(asc(approvals.createdAt)),
+      input.runId
+        ? this.db.select().from(artifacts).where(eq(artifacts.runId, input.runId)).orderBy(asc(artifacts.createdAt))
+        : this.db.select().from(artifacts).orderBy(asc(artifacts.createdAt)),
+      input.runId
+        ? this.db.select().from(controlPlaneEvents).where(eq(controlPlaneEvents.runId, input.runId)).orderBy(asc(controlPlaneEvents.createdAt))
+        : this.db.select().from(controlPlaneEvents).orderBy(asc(controlPlaneEvents.createdAt))
+    ]);
+
+    const repositoriesById = new Map(repositoryRows.map((repository) => [repository.id, this.mapRepository(repository)] as const));
+    const runsById = new Map(runRows.map((run) => [run.id, this.mapRun(run)] as const));
+    const approvalHistory = approvalRows
+      .map((approval): Approval => ({
+        ...approval,
+        kind: approval.kind as Approval["kind"],
+        status: approval.status as Approval["status"]
+      }))
+      .sort((left, right) => right.createdAt.getTime() - left.createdAt.getTime())
+      .slice(0, input.limit ?? 50)
+      .map((approval) => {
+        const run = runsById.get(approval.runId);
+        const repository = run ? repositoriesById.get(run.repositoryId) : undefined;
+
+        return this.buildApprovalAuditEntry(
+          approval,
+          run,
+          repository,
+          eventRows.map((event): ControlPlaneEvent => event)
+        );
+      });
+
+    const repositoryProfiles = [...repositoriesById.values()]
+      .reduce<Map<string, { profile: string; repositoryCount: number; runCount: number }>>((acc, repository) => {
+        const entry = acc.get(repository.approvalProfile) ?? {
+          profile: repository.approvalProfile,
+          repositoryCount: 0,
+          runCount: 0
+        };
+        entry.repositoryCount += 1;
+        entry.runCount += runRows.filter((run) => run.repositoryId === repository.id).length;
+        acc.set(repository.approvalProfile, entry);
+        return acc;
+      }, new Map());
+
+    return {
+      generatedAt: now,
+      requestedBy: input.requestedBy,
+      retention: {
+        policy: input.retentionPolicy,
+        runs: createRetentionWindowSummary(runRows.map((run) => run.completedAt ?? run.createdAt), input.retentionPolicy.runsDays, now),
+        artifacts: createRetentionWindowSummary(artifactRows.map((artifact) => artifact.createdAt), input.retentionPolicy.artifactsDays, now),
+        events: createRetentionWindowSummary(eventRows.map((event) => event.createdAt), input.retentionPolicy.eventsDays, now)
+      },
+      approvals: {
+        total: approvalRows.length,
+        pending: approvalRows.filter((approval) => approval.status === "pending").length,
+        approved: approvalRows.filter((approval) => approval.status === "approved").length,
+        rejected: approvalRows.filter((approval) => approval.status === "rejected").length,
+        history: approvalHistory
+      },
+      policies: {
+        repositoryProfiles: [...repositoryProfiles.values()],
+        sensitiveRepositories: [...repositoriesById.values()]
+          .filter((repository) => repository.trustLevel !== "trusted" || repository.approvalProfile !== "standard")
+          .map((repository) => ({
+            repositoryId: repository.id,
+            repositoryName: repository.name,
+            trustLevel: repository.trustLevel,
+            approvalProfile: repository.approvalProfile
+          }))
+      },
+      secrets: input.secrets
+    };
+  }
+
+  async reconcileGovernanceRetention(input: {
+    requestedBy: ActorIdentity;
+    retentionPolicy: RetentionPolicy;
+    dryRun: boolean;
+    access: AccessBoundary;
+    runId?: string;
+  }): Promise<RetentionReconcileReport> {
+    const now = this.clock.now();
+    assertAccessBoundary(input.access);
+    const runsRows = input.runId
+      ? await this.db.select().from(runs).where(and(
+        eq(runs.id, input.runId),
+        eq(runs.workspaceId, input.access.workspaceId),
+        eq(runs.teamId, input.access.teamId)
+      ))
+      : await this.db.select().from(runs).where(and(
+        eq(runs.workspaceId, input.access.workspaceId),
+        eq(runs.teamId, input.access.teamId)
+      ));
+    const artifactRows = input.runId
+      ? await this.db.select().from(artifacts).where(eq(artifacts.runId, input.runId))
+      : await this.db.select().from(artifacts);
+    const eventRows = input.runId
+      ? await this.db.select().from(controlPlaneEvents).where(eq(controlPlaneEvents.runId, input.runId))
+      : await this.db.select().from(controlPlaneEvents);
+
+    const reconcileMetadata = (existing: Record<string, unknown>, expiresAt: Date) => ({
+      ...existing,
+      retention: {
+        expiresAt: expiresAt.toISOString(),
+        lastAppliedAt: now.toISOString(),
+        appliedBy: input.requestedBy.principal
+      }
+    });
+
+    if (!input.dryRun) {
+      for (const run of runsRows) {
+        const expiresAt = new Date((run.completedAt ?? run.createdAt).getTime() + input.retentionPolicy.runsDays * 24 * 60 * 60 * 1000);
+        await this.db.update(runs).set({
+          metadata: reconcileMetadata(run.metadata, expiresAt),
+          updatedAt: now
+        }).where(eq(runs.id, run.id));
+      }
+
+      for (const artifact of artifactRows) {
+        const expiresAt = new Date(artifact.createdAt.getTime() + input.retentionPolicy.artifactsDays * 24 * 60 * 60 * 1000);
+        await this.db.update(artifacts).set({
+          metadata: reconcileMetadata(artifact.metadata, expiresAt)
+        }).where(eq(artifacts.id, artifact.id));
+      }
+
+      for (const event of eventRows) {
+        const expiresAt = new Date(event.createdAt.getTime() + input.retentionPolicy.eventsDays * 24 * 60 * 60 * 1000);
+        await this.db.update(controlPlaneEvents).set({
+          metadata: reconcileMetadata(event.metadata, expiresAt)
+        }).where(eq(controlPlaneEvents.id, event.id));
+      }
+    }
+
+    return {
+      dryRun: input.dryRun,
+      appliedAt: now,
+      requestedBy: input.requestedBy,
+      runsUpdated: runsRows.length,
+      artifactsUpdated: artifactRows.length,
+      eventsUpdated: eventRows.length
+    };
+  }
+
+  async getRepositorySecretAccessPlan(input: {
+    repositoryId: string;
+    secrets: SecretIntegrationBoundary;
+    access: AccessBoundary;
+  }): Promise<SecretAccessPlan> {
+    const repository = this.mapRepository(await this.assertRepositoryExists(input.repositoryId, input.access));
+    const trustAllowed = input.secrets.allowedRepositoryTrustLevels.includes(repository.trustLevel);
+    const sensitivePolicy = input.secrets.sensitivePolicyProfiles.includes(repository.approvalProfile);
+    const access = !trustAllowed
+      ? "denied"
+      : sensitivePolicy
+        ? "brokered"
+        : "allowed";
+
+    return {
+      repositoryId: repository.id,
+      repositoryName: repository.name,
+      trustLevel: repository.trustLevel,
+      policyProfile: repository.approvalProfile,
+      access,
+      sourceMode: input.secrets.sourceMode,
+      provider: input.secrets.provider,
+      credentialEnvNames: input.secrets.remoteCredentialEnvNames,
+      distributionBoundary: input.secrets.credentialDistribution,
+      reason: access === "denied"
+        ? `trust level ${repository.trustLevel} is outside the configured secret boundary`
+        : access === "brokered"
+          ? `policy profile ${repository.approvalProfile} requires brokered secret delivery for governed repos`
+          : `repository can receive the standard ${input.secrets.sourceMode} secret path`
     };
   }
 
@@ -1115,12 +1489,48 @@ export class ControlPlaneService {
     return artifact ? [artifact.id] : [];
   }
 
-  private async assertRepositoryExists(repositoryId: string) {
+  private async ensureOwnershipBoundary(access: AccessBoundary) {
+    const now = this.clock.now();
+
+    await this.db.execute(sql`
+      insert into workspaces (id, name, created_at, updated_at)
+      values (${access.workspaceId}, ${access.workspaceName ?? access.workspaceId}, ${now}, ${now})
+      on conflict (id) do nothing
+    `);
+
+    await this.db.execute(sql`
+      insert into teams (id, workspace_id, name, created_at, updated_at)
+      values (${access.teamId}, ${access.workspaceId}, ${access.teamName ?? access.teamId}, ${now}, ${now})
+      on conflict (id) do nothing
+    `);
+  }
+
+  private assertBoundaryMatch(
+    access: AccessBoundary | undefined,
+    workspaceId: string,
+    teamId: string,
+    entityType: string,
+    entityId: string
+  ) {
+    if (!access) {
+      return;
+    }
+
+    assertAccessBoundary(access);
+
+    if (access.workspaceId !== workspaceId || access.teamId !== teamId) {
+      throw new HttpError(403, `${entityType} ${entityId} is outside the caller boundary`);
+    }
+  }
+
+  private async assertRepositoryExists(repositoryId: string, access?: AccessBoundary) {
     const [repository] = await this.db.select().from(repositories).where(eq(repositories.id, repositoryId));
 
     if (!repository) {
       throw new HttpError(404, `repository ${repositoryId} not found`);
     }
+
+    this.assertBoundaryMatch(access, repository.workspaceId, repository.teamId, "repository", repositoryId);
 
     return repository;
   }
@@ -1155,32 +1565,38 @@ export class ControlPlaneService {
     return assignment;
   }
 
-  private async assertRunExists(runId: string) {
+  private async assertRunExists(runId: string, access?: AccessBoundary) {
     const [run] = await this.db.select().from(runs).where(eq(runs.id, runId));
 
     if (!run) {
       throw new HttpError(404, `run ${runId} not found`);
     }
 
+    this.assertBoundaryMatch(access, run.workspaceId, run.teamId, "run", runId);
+
     return run;
   }
 
-  private async assertTaskExists(taskId: string) {
+  private async assertTaskExists(taskId: string, access?: AccessBoundary) {
     const [task] = await this.db.select().from(tasks).where(eq(tasks.id, taskId));
 
     if (!task) {
       throw new HttpError(404, `task ${taskId} not found`);
     }
 
+    await this.assertRunExists(task.runId, access);
+
     return task;
   }
 
-  private async assertAgentExists(agentId: string) {
+  private async assertAgentExists(agentId: string, access?: AccessBoundary) {
     const [agent] = await this.db.select().from(agents).where(eq(agents.id, agentId));
 
     if (!agent) {
       throw new HttpError(404, `agent ${agentId} not found`);
     }
+
+    await this.assertRunExists(agent.runId, access);
 
     return agent;
   }
@@ -1248,6 +1664,44 @@ export class ControlPlaneService {
       ...repository,
       provider: repository.provider as Repository["provider"],
       trustLevel: repository.trustLevel as Repository["trustLevel"]
+    };
+  }
+
+  private buildApprovalAuditEntries(
+    approvalsList: Approval[],
+    run: Run,
+    repository: Repository,
+    events: ControlPlaneEvent[]
+  ) {
+    return approvalsList.map((approval) => this.buildApprovalAuditEntry(approval, run, repository, events));
+  }
+
+  private buildApprovalAuditEntry(
+    approval: Approval,
+    run: Run | undefined,
+    repository: Repository | undefined,
+    events: ControlPlaneEvent[]
+  ): ApprovalAuditEntry {
+    const createdEvent = events.find((event) => event.entityId === approval.id && event.eventType === "approval.created");
+    const resolvedEvent = events.find((event) => event.entityId === approval.id && event.eventType === "approval.resolved");
+
+    return {
+      approvalId: approval.id,
+      runId: approval.runId,
+      taskId: approval.taskId,
+      repositoryId: run?.repositoryId ?? repository?.id ?? approval.runId,
+      repositoryName: repository?.name ?? "unknown",
+      kind: approval.kind,
+      status: approval.status,
+      requestedAt: approval.createdAt,
+      resolvedAt: approval.resolvedAt,
+      requestedBy: approval.requestedBy,
+      requestedByActor: createdEvent?.actor ?? null,
+      resolver: approval.resolver,
+      resolverActor: resolvedEvent?.actor ?? null,
+      policyProfile: run?.policyProfile ?? repository?.approvalProfile ?? null,
+      requestedPayload: approval.requestedPayload,
+      resolutionPayload: approval.resolutionPayload
     };
   }
 

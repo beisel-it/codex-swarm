@@ -9,14 +9,14 @@ export const agentRoutes: FastifyPluginAsync = async (app) => {
       ? String(request.query.runId)
       : undefined;
 
-    return app.controlPlane.listAgents(runId);
+    return app.controlPlane.listAgents(runId, request.authContext);
   });
 
   app.post("/agents", async (request, reply) => {
     return app.observability.withTrace("api.agents.create", async () => {
       const input = agentCreateSchema.parse(request.body);
       const agent = requireValue(
-        await app.controlPlane.createAgent(input),
+        await app.controlPlane.createAgent(input, request.authContext),
         "control plane returned no agent"
       );
 

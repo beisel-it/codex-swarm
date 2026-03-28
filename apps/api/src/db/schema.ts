@@ -6,9 +6,12 @@ import {
   text,
   timestamp
 } from "drizzle-orm/pg-core";
+import type { ActorIdentity } from "@codex-swarm/contracts";
 
 export const repositories = pgTable("repositories", {
   id: text("id").primaryKey(),
+  workspaceId: text("workspace_id").notNull(),
+  teamId: text("team_id").notNull(),
   name: text("name").notNull(),
   url: text("url").notNull(),
   provider: text("provider").notNull().default("other"),
@@ -23,6 +26,8 @@ export const repositories = pgTable("repositories", {
 export const runs = pgTable("runs", {
   id: text("id").primaryKey(),
   repositoryId: text("repository_id").notNull().references(() => repositories.id),
+  workspaceId: text("workspace_id").notNull(),
+  teamId: text("team_id").notNull(),
   goal: text("goal").notNull(),
   status: text("status").notNull(),
   branchName: text("branch_name"),
@@ -150,6 +155,8 @@ export const messages = pgTable("messages", {
 export const approvals = pgTable("approvals", {
   id: text("id").primaryKey(),
   runId: text("run_id").notNull().references(() => runs.id),
+  workspaceId: text("workspace_id").notNull(),
+  teamId: text("team_id").notNull(),
   taskId: text("task_id"),
   kind: text("kind").notNull(),
   status: text("status").notNull(),
@@ -198,6 +205,22 @@ export const controlPlaneEvents = pgTable("control_plane_events", {
   entityId: text("entity_id").notNull(),
   status: text("status").notNull(),
   summary: text("summary").notNull(),
+  actor: jsonb("actor").$type<ActorIdentity | null>().default(null),
   metadata: jsonb("metadata").$type<Record<string, unknown>>().notNull().default({}),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow()
+});
+
+export const workspaces = pgTable("workspaces", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
+});
+
+export const teams = pgTable("teams", {
+  id: text("id").primaryKey(),
+  workspaceId: text("workspace_id").notNull().references(() => workspaces.id),
+  name: text("name").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
 });

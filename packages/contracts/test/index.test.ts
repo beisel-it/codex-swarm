@@ -5,11 +5,15 @@ import {
   approvalResolveSchema,
   agentCreateSchema,
   cleanupJobRunSchema,
+  governanceAdminReportSchema,
+  identityEntrypointSchema,
   repositoryCreateSchema,
   remoteWorkerBootstrapSchema,
+  retentionReconcileReportSchema,
   runBranchPublishSchema,
   runCreateSchema,
   runPullRequestHandoffSchema,
+  secretAccessPlanSchema,
   workerDispatchAssignmentSchema,
   workerDispatchCompleteSchema,
   workerDispatchCreateSchema,
@@ -32,6 +36,28 @@ describe("repositoryCreateSchema", () => {
     });
 
     expect(repository.defaultBranch).toBe("main");
+  });
+});
+
+describe("identityEntrypointSchema", () => {
+  it("accepts workspace and team-scoped actor identity", () => {
+    const identity = identityEntrypointSchema.parse({
+      principal: "user-123",
+      subject: "user-123",
+      roles: ["member", "reviewer"],
+      workspace: {
+        id: "acme",
+        name: "Acme"
+      },
+      team: {
+        id: "platform",
+        workspaceId: "acme",
+        name: "Platform"
+      }
+    });
+
+    expect(identity.email).toBeNull();
+    expect(identity.actorType).toBe("user");
   });
 });
 
@@ -365,5 +391,107 @@ describe("workerDrainCommandSchema", () => {
     });
 
     expect(command.allowActiveAssignments).toBe(true);
+  });
+});
+
+describe("governance admin schemas", () => {
+  it("accepts actor-provenance governance reports", () => {
+    const report = governanceAdminReportSchema.parse({
+      generatedAt: new Date("2026-03-28T12:00:00.000Z"),
+      requestedBy: {
+        principal: "alice",
+        actorId: "user-1",
+        actorType: "user",
+        role: "platform-admin",
+        teamId: "team-a",
+        policyProfile: "standard"
+      },
+      retention: {
+        policy: { runsDays: 30, artifactsDays: 30, eventsDays: 30 },
+        runs: { total: 3, expired: 1, retained: 2 },
+        artifacts: { total: 4, expired: 1, retained: 3 },
+        events: { total: 5, expired: 2, retained: 3 }
+      },
+      approvals: {
+        total: 1,
+        pending: 0,
+        approved: 1,
+        rejected: 0,
+        history: [{
+          approvalId: "550e8400-e29b-41d4-a716-446655440010",
+          runId: "550e8400-e29b-41d4-a716-446655440001",
+          taskId: null,
+          repositoryId: "550e8400-e29b-41d4-a716-446655440004",
+          repositoryName: "codex-swarm",
+          kind: "plan",
+          status: "approved",
+          requestedAt: new Date("2026-03-28T10:00:00.000Z"),
+          resolvedAt: new Date("2026-03-28T11:00:00.000Z"),
+          requestedBy: "alice",
+          requestedByActor: {
+            principal: "alice",
+            actorId: "user-1",
+            actorType: "user",
+            role: "platform-admin",
+            teamId: "team-a",
+            policyProfile: "standard"
+          },
+          resolver: "bob",
+          resolverActor: null,
+          policyProfile: "standard",
+          requestedPayload: {},
+          resolutionPayload: {}
+        }]
+      },
+      policies: {
+        repositoryProfiles: [{ profile: "standard", repositoryCount: 1, runCount: 2 }],
+        sensitiveRepositories: []
+      },
+      secrets: {
+        sourceMode: "external_manager",
+        provider: "vault",
+        remoteCredentialEnvNames: ["OPENAI_API_KEY"],
+        allowedRepositoryTrustLevels: ["trusted"],
+        sensitivePolicyProfiles: ["sensitive"],
+        credentialDistribution: ["api brokers credentials"],
+        policyDrivenAccess: true
+      }
+    });
+
+    expect(report.approvals.history[0]?.requestedByActor?.actorId).toBe("user-1");
+    expect(report.secrets.provider).toBe("vault");
+  });
+
+  it("accepts retention reconcile and secret access plan payloads", () => {
+    const reconcile = retentionReconcileReportSchema.parse({
+      dryRun: false,
+      appliedAt: new Date("2026-03-28T12:00:00.000Z"),
+      requestedBy: {
+        principal: "alice",
+        actorId: "user-1",
+        actorType: "user",
+        role: "platform-admin",
+        teamId: "team-a",
+        policyProfile: "standard"
+      },
+      runsUpdated: 2,
+      artifactsUpdated: 3,
+      eventsUpdated: 4
+    });
+    const plan = secretAccessPlanSchema.parse({
+      repositoryId: "550e8400-e29b-41d4-a716-446655440004",
+      repositoryName: "codex-swarm",
+      trustLevel: "trusted",
+      policyProfile: "sensitive",
+      access: "brokered",
+      sourceMode: "external_manager",
+      provider: "vault",
+      credentialEnvNames: ["OPENAI_API_KEY"],
+      distributionBoundary: ["workers get task-scoped env"],
+      reason: "policy profile sensitive requires brokered secret delivery for governed repos"
+    });
+
+    expect(reconcile.eventsUpdated).toBe(4);
+    expect(plan.access).toBe("brokered");
   });
 });

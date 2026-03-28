@@ -6,11 +6,13 @@ import { HttpError } from "./lib/http-error.js";
 import { authPlugin } from "./plugins/auth.js";
 import { dependenciesPlugin } from "./plugins/dependencies.js";
 import { agentRoutes } from "./routes/agents.js";
+import { adminRoutes } from "./routes/admin.js";
 import { approvalRoutes } from "./routes/approvals.js";
 import { artifactRoutes } from "./routes/artifacts.js";
 import { cleanupJobRoutes } from "./routes/cleanup-jobs.js";
 import { eventRoutes } from "./routes/events.js";
 import { healthRoutes } from "./routes/health.js";
+import { identityRoutes } from "./routes/identity.js";
 import { ObservabilityService } from "./lib/observability.js";
 import { messageRoutes } from "./routes/messages.js";
 import { metricsRoutes } from "./routes/metrics.js";
@@ -27,17 +29,18 @@ function getErrorMessage(error: unknown) {
 }
 
 interface BuildAppOptions {
-  config?: ReturnType<typeof getConfig>;
+  config?: Partial<ReturnType<typeof getConfig>>;
   controlPlane?: ControlPlaneService;
   observability?: ObservabilityService;
 }
 
 function createNoopObservability(): Pick<
   ObservabilityService,
-  "beginRequest" | "getMetrics" | "listEvents" | "recordRecoverableDatabaseFallback" | "recordRequestFailure" | "recordTimelineEvent" | "withTrace"
+  "beginRequest" | "clearActorContext" | "getMetrics" | "listEvents" | "recordRecoverableDatabaseFallback" | "recordRequestFailure" | "recordTimelineEvent" | "setActorContext" | "withTrace"
 > {
   return Object.assign(Object.create(ObservabilityService.prototype) as ObservabilityService, {
     beginRequest: () => undefined,
+    clearActorContext: () => undefined,
     getMetrics: async () => ({
       queueDepth: {
         runsPending: 0,
@@ -64,12 +67,13 @@ function createNoopObservability(): Pick<
     recordRecoverableDatabaseFallback: () => undefined,
     recordRequestFailure: () => undefined,
     recordTimelineEvent: async () => null,
+    setActorContext: () => undefined,
     withTrace: async <T>(_name: string, fn: () => Promise<T>) => fn()
   });
 }
 
 export async function buildApp(options: BuildAppOptions = {}) {
-  const config = options.config ?? getConfig();
+  const config = getConfig(options.config);
   const app = Fastify({
     logger: false
   });
@@ -117,6 +121,8 @@ export async function buildApp(options: BuildAppOptions = {}) {
 
   await app.register(authPlugin);
   await app.register(healthRoutes);
+  await app.register(adminRoutes, { prefix: "/api/v1" });
+  await app.register(identityRoutes, { prefix: "/api/v1" });
   await app.register(repositoryRoutes, { prefix: "/api/v1" });
   await app.register(runRoutes, { prefix: "/api/v1" });
   await app.register(taskRoutes, { prefix: "/api/v1" });

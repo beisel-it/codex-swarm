@@ -11,14 +11,14 @@ const querySchema = z.object({
 export const artifactRoutes: FastifyPluginAsync = async (app) => {
   app.get("/artifacts", async (request) => {
     const { runId } = querySchema.parse(request.query);
-    return app.controlPlane.listArtifacts(runId);
+    return app.controlPlane.listArtifacts(runId, request.authContext);
   });
 
   app.post("/artifacts", async (request, reply) => {
     return app.observability.withTrace("api.artifacts.create", async () => {
       const input = artifactCreateSchema.parse(request.body);
       const artifact = requireValue(
-        await app.controlPlane.createArtifact(input),
+        await app.controlPlane.createArtifact(input, request.authContext),
         "control plane returned no artifact"
       );
 

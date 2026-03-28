@@ -7,7 +7,7 @@ import { requireValue } from "../lib/require-value.js";
 export const repositoryRoutes: FastifyPluginAsync = async (app) => {
   app.get("/repositories", async (_request, reply) => {
     try {
-      return await app.controlPlane.listRepositories();
+      return await app.controlPlane.listRepositories(_request.authContext);
     } catch (error) {
       if (app.config.NODE_ENV !== "production" && isRecoverableDatabaseError(error)) {
         app.observability.recordRecoverableDatabaseFallback("repositories.list", error);
@@ -23,7 +23,7 @@ export const repositoryRoutes: FastifyPluginAsync = async (app) => {
     return app.observability.withTrace("api.repositories.create", async () => {
       const input = repositoryCreateSchema.parse(request.body);
       const repository = requireValue(
-        await app.controlPlane.createRepository(input),
+        await app.controlPlane.createRepository(input, request.authContext),
         "control plane returned no repository"
       );
 

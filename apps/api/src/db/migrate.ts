@@ -3,8 +3,23 @@ import { sql } from "drizzle-orm";
 import { createDb, createPool } from "./client.js";
 
 const statements = [
+  `create table if not exists workspaces (
+    id text primary key,
+    name text not null,
+    created_at timestamptz not null default now(),
+    updated_at timestamptz not null default now()
+  )`,
+  `create table if not exists teams (
+    id text primary key,
+    workspace_id text not null references workspaces(id),
+    name text not null,
+    created_at timestamptz not null default now(),
+    updated_at timestamptz not null default now()
+  )`,
   `create table if not exists repositories (
     id text primary key,
+    workspace_id text not null default 'default-workspace',
+    team_id text not null default 'default-team',
     name text not null,
     url text not null,
     provider text not null default 'other',
@@ -18,6 +33,8 @@ const statements = [
   `create table if not exists runs (
     id text primary key,
     repository_id text not null references repositories(id),
+    workspace_id text not null default 'default-workspace',
+    team_id text not null default 'default-team',
     goal text not null,
     status text not null,
     branch_name text,
@@ -138,6 +155,8 @@ const statements = [
   `create table if not exists approvals (
     id text primary key,
     run_id text not null references runs(id),
+    workspace_id text not null default 'default-workspace',
+    team_id text not null default 'default-team',
     task_id text,
     kind text not null,
     status text not null,
@@ -183,6 +202,7 @@ const statements = [
     entity_id text not null,
     status text not null,
     summary text not null,
+    actor jsonb default null,
     metadata jsonb not null default '{}'::jsonb,
     created_at timestamptz not null default now()
   )`
@@ -196,8 +216,21 @@ async function main() {
     await db.execute(sql.raw(statement));
   }
 
+  await db.execute(sql.raw(`
+    insert into workspaces (id, name)
+    values ('default-workspace', 'Default Workspace')
+    on conflict (id) do nothing
+  `));
+  await db.execute(sql.raw(`
+    insert into teams (id, workspace_id, name)
+    values ('default-team', 'default-workspace', 'Default Team')
+    on conflict (id) do nothing
+  `));
+
   await db.execute(sql.raw("alter table approvals add column if not exists requested_payload jsonb not null default '{}'::jsonb"));
   await db.execute(sql.raw("alter table approvals add column if not exists resolution_payload jsonb not null default '{}'::jsonb"));
+  await db.execute(sql.raw("alter table approvals add column if not exists workspace_id text not null default 'default-workspace'"));
+  await db.execute(sql.raw("alter table approvals add column if not exists team_id text not null default 'default-team'"));
   await db.execute(sql.raw("alter table approvals add column if not exists resolver text"));
   await db.execute(sql.raw("alter table approvals add column if not exists resolved_at timestamptz"));
   await db.execute(sql.raw("alter table validations add column if not exists artifact_ids jsonb not null default '[]'::jsonb"));
@@ -210,10 +243,14 @@ async function main() {
   await db.execute(sql.raw("alter table sessions add column if not exists state text not null default 'active'"));
   await db.execute(sql.raw("alter table sessions add column if not exists stale_reason text"));
   await db.execute(sql.raw("alter table repositories add column if not exists provider text not null default 'other'"));
+  await db.execute(sql.raw("alter table repositories add column if not exists workspace_id text not null default 'default-workspace'"));
+  await db.execute(sql.raw("alter table repositories add column if not exists team_id text not null default 'default-team'"));
   await db.execute(sql.raw("alter table repositories add column if not exists trust_level text not null default 'trusted'"));
   await db.execute(sql.raw("alter table repositories add column if not exists approval_profile text not null default 'standard'"));
   await db.execute(sql.raw("alter table runs add column if not exists budget_tokens integer"));
   await db.execute(sql.raw("alter table runs add column if not exists budget_cost_usd_cents integer"));
+  await db.execute(sql.raw("alter table runs add column if not exists workspace_id text not null default 'default-workspace'"));
+  await db.execute(sql.raw("alter table runs add column if not exists team_id text not null default 'default-team'"));
   await db.execute(sql.raw("alter table runs add column if not exists concurrency_cap integer not null default 1"));
   await db.execute(sql.raw("alter table runs add column if not exists policy_profile text"));
   await db.execute(sql.raw("alter table runs add column if not exists published_branch text"));
@@ -223,6 +260,7 @@ async function main() {
   await db.execute(sql.raw("alter table runs add column if not exists pull_request_status text"));
   await db.execute(sql.raw("alter table runs add column if not exists handoff_status text not null default 'pending'"));
   await db.execute(sql.raw("alter table runs add column if not exists completed_at timestamptz"));
+  await db.execute(sql.raw("alter table control_plane_events add column if not exists actor jsonb default null"));
 
   await pool.end();
 }

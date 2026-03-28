@@ -6,19 +6,23 @@ import { requireValue } from "../lib/require-value.js";
 export const approvalRoutes: FastifyPluginAsync = async (app) => {
   app.get("/approvals", async (request) => {
     const { runId } = approvalsListQuerySchema.parse(request.query);
-    return app.controlPlane.listApprovals(runId);
+    return app.controlPlane.listApprovals(runId, request.authContext);
   });
 
   app.get("/approvals/:id", async (request) => {
     const { id } = idParamSchema.parse(request.params);
-    return app.controlPlane.getApproval(id);
+    return app.controlPlane.getApproval(id, request.authContext);
   });
 
   app.post("/approvals", async (request, reply) => {
     return app.observability.withTrace("api.approvals.create", async () => {
-      const input = approvalCreateSchema.parse(request.body);
+      const parsed = approvalCreateSchema.parse(request.body);
+      const input = {
+        ...parsed,
+        requestedBy: request.authContext.principal
+      };
       const approval = requireValue(
-        await app.controlPlane.createApproval(input),
+        await app.controlPlane.createApproval(input, request.authContext),
         "control plane returned no approval"
       );
 
@@ -39,9 +43,13 @@ export const approvalRoutes: FastifyPluginAsync = async (app) => {
   app.patch("/approvals/:id", async (request) => {
     return app.observability.withTrace("api.approvals.resolve", async () => {
       const { id } = idParamSchema.parse(request.params);
-      const input = approvalResolveSchema.parse(request.body);
+      const parsed = approvalResolveSchema.parse(request.body);
+      const input = {
+        ...parsed,
+        resolver: request.authContext.principal
+      };
       const approval = requireValue(
-        await app.controlPlane.resolveApproval(id, input),
+        await app.controlPlane.resolveApproval(id, input, request.authContext),
         "control plane returned no approval"
       );
 

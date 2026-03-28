@@ -1,6 +1,6 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 
-import type { ControlPlaneEvent, ControlPlaneMetrics } from "@codex-swarm/contracts";
+import type { ActorIdentity, ControlPlaneEvent, ControlPlaneMetrics } from "@codex-swarm/contracts";
 import { asc, desc, eq } from "drizzle-orm";
 import type { FastifyReply, FastifyRequest } from "fastify";
 
@@ -14,6 +14,7 @@ type RequestTraceContext = {
   requestId: string;
   method: string;
   url: string;
+  actor: ActorIdentity | null;
 };
 
 type TimelineEventInput = {
@@ -79,10 +80,37 @@ export class ObservabilityService {
       traceId,
       requestId: request.id,
       method: request.method,
-      url: request.url
+      url: request.url,
+      actor: null
     });
 
     reply.header("x-codex-trace-id", traceId);
+  }
+
+  clearActorContext() {
+    const current = this.traceContext.getStore();
+
+    if (!current) {
+      return;
+    }
+
+    this.traceContext.enterWith({
+      ...current,
+      actor: null
+    });
+  }
+
+  setActorContext(actor: ActorIdentity) {
+    const current = this.traceContext.getStore();
+
+    if (!current) {
+      return;
+    }
+
+    this.traceContext.enterWith({
+      ...current,
+      actor
+    });
   }
 
   async withTrace<T>(name: string, fn: () => Promise<T>, metadata: Record<string, unknown> = {}) {
@@ -147,6 +175,7 @@ export class ObservabilityService {
         entityId: input.entityId,
         status: input.status,
         summary: input.summary,
+        actor: this.traceContext.getStore()?.actor ?? null,
         metadata: input.metadata ?? {},
         createdAt: this.clock.now()
       }).returning();

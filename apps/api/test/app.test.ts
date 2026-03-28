@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ControlPlaneService } from "../src/services/control-plane-service.js";
 import { buildApp } from "../src/app.js";
+import { getConfig } from "../src/config.js";
 import { HttpError } from "../src/lib/http-error.js";
 
 const ids = {
@@ -15,6 +16,13 @@ const ids = {
   dispatch: "99999999-9999-4999-8999-999999999999"
 } as const;
 
+const defaultBoundary = {
+  workspaceId: "default-workspace",
+  workspaceName: "Default Workspace",
+  teamId: "codex-swarm",
+  teamName: "Codex Swarm"
+} as const;
+
 const controlPlane = {
   listRepositories: vi.fn(),
   createRepository: vi.fn(),
@@ -25,6 +33,9 @@ const controlPlane = {
   publishRunBranch: vi.fn(),
   createRunPullRequestHandoff: vi.fn(),
   exportRunAudit: vi.fn(),
+  getGovernanceAdminReport: vi.fn(),
+  reconcileGovernanceRetention: vi.fn(),
+  getRepositorySecretAccessPlan: vi.fn(),
   listTasks: vi.fn(),
   createTask: vi.fn(),
   updateTaskStatus: vi.fn(),
@@ -54,11 +65,13 @@ const controlPlane = {
 
 const observability = {
   beginRequest: vi.fn(),
+  clearActorContext: vi.fn(),
   getMetrics: vi.fn(),
   listEvents: vi.fn(),
   recordRecoverableDatabaseFallback: vi.fn(),
   recordRequestFailure: vi.fn(),
   recordTimelineEvent: vi.fn(),
+  setActorContext: vi.fn(),
   withTrace: vi.fn(async (_name: string, fn: () => Promise<unknown>) => fn())
 };
 
@@ -66,6 +79,8 @@ class FakeVerticalSliceControlPlane {
   private readonly repositories = [
     {
       id: ids.repository,
+      workspaceId: defaultBoundary.workspaceId,
+      teamId: defaultBoundary.teamId,
       name: "codex-swarm",
       url: "https://example.com/codex-swarm.git",
       provider: "github",
@@ -109,39 +124,61 @@ class FakeVerticalSliceControlPlane {
   ];
   private readonly workerDispatchAssignments: any[] = [];
 
-  async listRepositories() {
-    return this.repositories;
+  private assertBoundary(entity: { workspaceId: string; teamId: string }, access?: any) {
+    if (!access) {
+      return;
+    }
+
+    if (access.workspaceId !== entity.workspaceId || access.teamId !== entity.teamId) {
+      throw new HttpError(403, "outside caller boundary");
+    }
+  }
+
+  async listRepositories(access?: any) {
+    if (!access) {
+      return this.repositories;
+    }
+
+    return this.repositories.filter((repository) =>
+      repository.workspaceId === access.workspaceId && repository.teamId === access.teamId);
   }
 
   async createRepository() {
     throw new Error("not implemented");
   }
 
-  async listRuns(repositoryId?: string) {
+  async listRuns(repositoryId?: string, access?: any) {
     const runs = [...this.runs.values()];
-    return repositoryId ? runs.filter((run) => run.repositoryId === repositoryId) : runs;
+    return (repositoryId ? runs.filter((run) => run.repositoryId === repositoryId) : runs)
+      .filter((run) => !access || (run.workspaceId === access.workspaceId && run.teamId === access.teamId));
   }
 
-  async getRun(runId: string) {
+  async getRun(runId: string, access?: any) {
     const run = this.runs.get(runId);
 
     if (!run) {
       throw new HttpError(404, `run ${runId} not found`);
     }
 
+    this.assertBoundary(run, access);
+
     return run;
   }
 
-  async createRun(input: any, createdBy: string) {
+  async createRun(input: any, createdBy: string, access?: any) {
     const repository = this.repositories.find((candidate) => candidate.id === input.repositoryId);
 
     if (!repository) {
       throw new HttpError(404, `repository ${input.repositoryId} not found`);
     }
 
+    this.assertBoundary(repository, access);
+
     const run = {
       id: ids.run,
       repositoryId: input.repositoryId,
+      workspaceId: repository.workspaceId,
+      teamId: repository.teamId,
       goal: input.goal,
       status: "pending",
       branchName: input.branchName ?? null,
@@ -170,15 +207,15 @@ class FakeVerticalSliceControlPlane {
     return run;
   }
 
-  async updateRunStatus(runId: string, input: any) {
-    const run = await this.getRun(runId);
+  async updateRunStatus(runId: string, input: any, access?: any) {
+    const run = await this.getRun(runId, access);
     run.status = input.status;
     run.planArtifactPath = input.planArtifactPath ?? run.planArtifactPath;
     return run;
   }
 
-  async publishRunBranch(runId: string, input: any) {
-    const run = await this.getRun(runId);
+  async publishRunBranch(runId: string, input: any, access?: any) {
+    const run = await this.getRun(runId, access);
     const branchName = input.branchName ?? run.branchName;
 
     if (!branchName) {
@@ -192,8 +229,8 @@ class FakeVerticalSliceControlPlane {
     return run;
   }
 
-  async createRunPullRequestHandoff(runId: string, input: any) {
-    const run = await this.getRun(runId);
+  async createRunPullRequestHandoff(runId: string, input: any, access?: any) {
+    const run = await this.getRun(runId, access);
     run.publishedBranch = input.headBranch ?? run.publishedBranch ?? run.branchName;
     run.pullRequestUrl = input.url ?? null;
     run.pullRequestNumber = input.number ?? null;
@@ -202,13 +239,21 @@ class FakeVerticalSliceControlPlane {
     return run;
   }
 
-  async listTasks(runId?: string) {
+  async listTasks(runId?: string, access?: any) {
     const tasks = [...this.runs.values()].flatMap((run) => run.tasks);
-    return runId ? tasks.filter((task) => task.runId === runId) : tasks;
+    return (runId ? tasks.filter((task) => task.runId === runId) : tasks)
+      .filter((task) => {
+        if (!access) {
+          return true;
+        }
+
+        const run = this.runs.get(task.runId);
+        return run && run.workspaceId === access.workspaceId && run.teamId === access.teamId;
+      });
   }
 
-  async createTask(input: any) {
-    const run = await this.getRun(input.runId);
+  async createTask(input: any, access?: any) {
+    const run = await this.getRun(input.runId, access);
     const task = {
       id: run.tasks.length === 0 ? ids.taskA : ids.taskB,
       runId: input.runId,
@@ -229,12 +274,14 @@ class FakeVerticalSliceControlPlane {
     return task;
   }
 
-  async updateTaskStatus(taskId: string, input: any) {
+  async updateTaskStatus(taskId: string, input: any, access?: any) {
     const run = [...this.runs.values()].find((candidate) => candidate.tasks.some((task: any) => task.id === taskId));
 
     if (!run) {
       throw new HttpError(404, `task ${taskId} not found`);
     }
+
+    this.assertBoundary(run, access);
 
     const task = run.tasks.find((candidate: any) => candidate.id === taskId);
     task.status = input.status;
@@ -258,9 +305,17 @@ class FakeVerticalSliceControlPlane {
     return task;
   }
 
-  async listAgents(runId?: string) {
+  async listAgents(runId?: string, access?: any) {
     const agents = [...this.runs.values()].flatMap((run) => run.agents);
-    return runId ? agents.filter((agent) => agent.runId === runId) : agents;
+    return (runId ? agents.filter((agent) => agent.runId === runId) : agents)
+      .filter((agent) => {
+        if (!access) {
+          return true;
+        }
+
+        const run = this.runs.get(agent.runId);
+        return run && run.workspaceId === access.workspaceId && run.teamId === access.teamId;
+      });
   }
 
   async listWorkerNodes() {
@@ -318,8 +373,8 @@ class FakeVerticalSliceControlPlane {
     return workerNode;
   }
 
-  async createAgent(input: any) {
-    const run = await this.getRun(input.runId);
+  async createAgent(input: any, access?: any) {
+    const run = await this.getRun(input.runId, access);
     const activeAgents = run.agents.filter((candidate: any) =>
       candidate.status === "provisioning"
       || candidate.status === "idle"
@@ -560,19 +615,21 @@ class FakeVerticalSliceControlPlane {
     };
   }
 
-  async listMessages() {
+  async listMessages(_runId?: string, _access?: any) {
     return [];
   }
 
-  async createMessage() {
+  async createMessage(_input?: any, _access?: any) {
     throw new Error("not implemented");
   }
 
-  async listApprovals(runId?: string) {
+  async listApprovals(runId?: string, access?: any) {
     const approvals = [
       {
         id: "77777777-7777-4777-8777-777777777777",
         runId: ids.run,
+        workspaceId: defaultBoundary.workspaceId,
+        teamId: defaultBoundary.teamId,
         taskId: ids.taskA,
         kind: "plan",
         status: "pending",
@@ -589,6 +646,8 @@ class FakeVerticalSliceControlPlane {
       {
         id: "88888888-8888-4888-8888-888888888888",
         runId: "99999999-9999-4999-8999-999999999999",
+        workspaceId: "other-workspace",
+        teamId: "other-team",
         taskId: null,
         kind: "merge",
         status: "approved",
@@ -606,11 +665,14 @@ class FakeVerticalSliceControlPlane {
       }
     ];
 
-    return runId ? approvals.filter((approval) => approval.runId === runId) : approvals;
+    return (runId ? approvals.filter((approval) => approval.runId === runId) : approvals)
+      .filter((approval) => !access || (
+        approval.workspaceId === access.workspaceId && approval.teamId === access.teamId
+      ));
   }
 
-  async getApproval(approvalId: string) {
-    const approval = (await this.listApprovals()).find((candidate) => candidate.id === approvalId);
+  async getApproval(approvalId: string, access?: any) {
+    const approval = (await this.listApprovals(undefined, access)).find((candidate) => candidate.id === approvalId);
 
     if (!approval) {
       throw new HttpError(404, `approval ${approvalId} not found`);
@@ -619,10 +681,13 @@ class FakeVerticalSliceControlPlane {
     return approval;
   }
 
-  async createApproval(input: any) {
+  async createApproval(input: any, access?: any) {
+    const run = await this.getRun(input.runId, access);
     return {
       id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
       runId: input.runId,
+      workspaceId: run.workspaceId,
+      teamId: run.teamId,
       taskId: input.taskId ?? null,
       kind: input.kind,
       status: "pending",
@@ -636,8 +701,8 @@ class FakeVerticalSliceControlPlane {
     };
   }
 
-  async resolveApproval(approvalId: string, input: any) {
-    const approval = await this.getApproval(approvalId);
+  async resolveApproval(approvalId: string, input: any, access?: any) {
+    const approval = await this.getApproval(approvalId, access);
 
     return {
       ...approval,
@@ -652,7 +717,7 @@ class FakeVerticalSliceControlPlane {
     };
   }
 
-  async listValidations() {
+  async listValidations(_query?: any, _access?: any) {
     return [
       {
         id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
@@ -684,7 +749,8 @@ class FakeVerticalSliceControlPlane {
     ];
   }
 
-  async createValidation(input: any) {
+  async createValidation(input: any, access?: any) {
+    await this.getRun(input.runId, access);
     return {
       id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
       runId: input.runId,
@@ -710,7 +776,7 @@ class FakeVerticalSliceControlPlane {
     };
   }
 
-  async listArtifacts() {
+  async listArtifacts(_runId?: string, _access?: any) {
     return [
       {
         id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
@@ -727,7 +793,8 @@ class FakeVerticalSliceControlPlane {
     ];
   }
 
-  async createArtifact(input: any) {
+  async createArtifact(input: any, access?: any) {
+    await this.getRun(input.runId, access);
     return {
       id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
       runId: input.runId,
@@ -740,8 +807,8 @@ class FakeVerticalSliceControlPlane {
     };
   }
 
-  async exportRunAudit(runId: string) {
-    const run = await this.getRun(runId);
+  async exportRunAudit(runId: string, _exportedBy?: any, _retentionPolicy?: any, access?: any) {
+    const run = await this.getRun(runId, access);
 
     return {
       repository: this.repositories[0],
@@ -757,9 +824,9 @@ class FakeVerticalSliceControlPlane {
       workerNodes: this.workerNodes.filter((workerNode) =>
         run.sessions.some((session: any) =>
           session.workerNodeId === workerNode.id || session.stickyNodeId === workerNode.id)),
-      approvals: await this.listApprovals(runId),
-      validations: await this.listValidations(),
-      artifacts: await this.listArtifacts(),
+      approvals: await this.listApprovals(runId, access),
+      validations: await this.listValidations(runId, access),
+      artifacts: await this.listArtifacts(runId, access),
       events: [
         {
           id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
@@ -877,7 +944,75 @@ describe("buildApp", () => {
         goal: "Ship alpha"
       }
     ]);
-    expect(controlPlane.listRuns).toHaveBeenCalledWith(undefined);
+    expect(controlPlane.listRuns).toHaveBeenCalledWith(undefined, expect.objectContaining({
+      workspaceId: defaultBoundary.workspaceId,
+      teamId: defaultBoundary.teamId
+    }));
+
+    await app.close();
+  });
+
+  it("exposes the authenticated identity entrypoint", async () => {
+    const app = await buildApp({
+      controlPlane: controlPlane as unknown as ControlPlaneService
+    });
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/api/v1/me",
+      headers: {
+        authorization: "Bearer codex-swarm-dev-token",
+        "x-codex-actor-id": "oidc|alice",
+        "x-codex-email": "alice@example.com",
+        "x-codex-workspace-id": "acme",
+        "x-codex-workspace-name": "Acme",
+        "x-codex-team-id": "platform",
+        "x-codex-team-name": "Platform"
+      }
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({
+      principal: "dev-user",
+      subject: "oidc|alice",
+      email: "alice@example.com",
+      roles: ["platform-admin"],
+      workspace: {
+        id: "acme",
+        name: "Acme"
+      },
+      team: {
+        id: "platform",
+        workspaceId: "acme",
+        name: "Platform"
+      },
+      actorType: "user"
+    });
+
+    await app.close();
+  });
+
+  it("denies cross-team run access by default", async () => {
+    const app = await buildApp({
+      config: getConfig({
+        NODE_ENV: "test",
+        DEV_AUTH_TOKEN: "test-token"
+      }),
+      controlPlane: new FakeVerticalSliceControlPlane() as unknown as ControlPlaneService
+    });
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/api/v1/repositories",
+      headers: {
+        authorization: "Bearer test-token",
+        "x-codex-workspace-id": "other-workspace",
+        "x-codex-team-id": "other-team"
+      }
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual([]);
 
     await app.close();
   });
@@ -891,14 +1026,14 @@ describe("buildApp", () => {
     controlPlane.listRuns.mockRejectedValueOnce(bootstrapError);
 
     const app = await buildApp({
-      config: {
+      config: getConfig({
         NODE_ENV: "development",
         PORT: 3000,
         HOST: "127.0.0.1",
         DATABASE_URL: "postgres://unused/dev",
         DEV_AUTH_TOKEN: "test-token",
         OPENAI_TRACING_DISABLED: true
-      },
+      }),
       controlPlane: controlPlane as unknown as ControlPlaneService
     });
 
@@ -970,7 +1105,10 @@ describe("buildApp", () => {
       defaultBranch: "main",
       approvalProfile: "standard",
       trustLevel: "trusted"
-    });
+    }, expect.objectContaining({
+      workspaceId: defaultBoundary.workspaceId,
+      teamId: defaultBoundary.teamId
+    }));
 
     await app.close();
   });
@@ -1025,7 +1163,10 @@ describe("buildApp", () => {
       branchName: "runs/m3-git-provider",
       publishedBy: "tech-lead",
       remoteName: "origin"
-    });
+    }, expect.objectContaining({
+      workspaceId: defaultBoundary.workspaceId,
+      teamId: defaultBoundary.teamId
+    }));
 
     await app.close();
   });
@@ -1090,7 +1231,10 @@ describe("buildApp", () => {
       url: "https://github.com/example/codex-swarm/pull/42",
       number: 42,
       status: "open"
-    });
+    }, expect.objectContaining({
+      workspaceId: defaultBoundary.workspaceId,
+      teamId: defaultBoundary.teamId
+    }));
 
     await app.close();
   });
@@ -1447,14 +1591,14 @@ describe("buildApp", () => {
   it("rejects agent placement onto drained worker nodes", async () => {
     const verticalSlice = new FakeVerticalSliceControlPlane();
     const app = await buildApp({
-      config: {
+      config: getConfig({
         NODE_ENV: "test",
         PORT: 3000,
         HOST: "127.0.0.1",
         DATABASE_URL: "postgres://unused/test",
         DEV_AUTH_TOKEN: "test-token",
         OPENAI_TRACING_DISABLED: true
-      },
+      }),
       controlPlane: verticalSlice as unknown as ControlPlaneService
     });
 
@@ -1554,7 +1698,10 @@ describe("buildApp", () => {
         resolvedAt: null
       }
     ]);
-    expect(controlPlane.listApprovals).toHaveBeenCalledWith(ids.run);
+    expect(controlPlane.listApprovals).toHaveBeenCalledWith(ids.run, expect.objectContaining({
+      workspaceId: defaultBoundary.workspaceId,
+      teamId: defaultBoundary.teamId
+    }));
 
     await app.close();
   });
@@ -1758,6 +1905,29 @@ describe("buildApp", () => {
       validations: [],
       artifacts: [],
       events: [],
+      provenance: {
+        exportedBy: {
+          principal: "dev-user",
+          actorId: "dev-user",
+          actorType: "user",
+          role: "platform-admin",
+          teamId: "codex-swarm",
+          policyProfile: "standard"
+        },
+        approvals: [],
+        eventActors: [],
+        generatedAt: "2026-03-28T12:45:00.000Z"
+      },
+      retention: {
+        policy: {
+          runsDays: 30,
+          artifactsDays: 30,
+          eventsDays: 30
+        },
+        runs: { total: 1, expired: 0, retained: 1 },
+        artifacts: { total: 0, expired: 0, retained: 0 },
+        events: { total: 0, expired: 0, retained: 0 }
+      },
       exportedAt: "2026-03-28T12:45:00.000Z"
     });
 
@@ -1782,9 +1952,37 @@ describe("buildApp", () => {
         budgetTokens: 120000,
         concurrencyCap: 2,
         policyProfile: "standard"
+      },
+      provenance: {
+        exportedBy: {
+          role: "platform-admin"
+        }
       }
     });
-    expect(controlPlane.exportRunAudit).toHaveBeenCalledWith(ids.run);
+    expect(controlPlane.exportRunAudit).toHaveBeenCalledWith(
+      ids.run,
+      {
+        principal: "dev-user",
+        actorId: "dev-user",
+        actorType: "user",
+        email: null,
+        role: "platform-admin",
+        workspaceId: "default-workspace",
+        workspaceName: "Default Workspace",
+        teamId: "codex-swarm",
+        teamName: "Codex Swarm",
+        policyProfile: "standard"
+      },
+      {
+        runsDays: 30,
+        artifactsDays: 30,
+        eventsDays: 30
+      },
+      expect.objectContaining({
+        workspaceId: "default-workspace",
+        teamId: "codex-swarm"
+      })
+    );
 
     await app.close();
   });
@@ -1934,11 +2132,193 @@ describe("buildApp", () => {
       "77777777-7777-4777-8777-777777777777",
       {
         status: "rejected",
-        resolver: "reviewer-1",
+        resolver: "dev-user",
         feedback: "Please attach validation evidence",
         resolutionPayload: {}
-      }
+      },
+      expect.objectContaining({
+        workspaceId: defaultBoundary.workspaceId,
+        teamId: defaultBoundary.teamId
+      })
     );
+
+    await app.close();
+  });
+
+  it("serves governance admin reporting without direct database access", async () => {
+    controlPlane.getGovernanceAdminReport.mockResolvedValueOnce({
+      generatedAt: "2026-03-28T12:00:00.000Z",
+      requestedBy: {
+        principal: "dev-user",
+        actorId: "dev-user",
+        actorType: "user",
+        role: "platform-admin",
+        teamId: "codex-swarm",
+        policyProfile: "standard"
+      },
+      retention: {
+        policy: { runsDays: 30, artifactsDays: 30, eventsDays: 30 },
+        runs: { total: 1, expired: 0, retained: 1 },
+        artifacts: { total: 2, expired: 0, retained: 2 },
+        events: { total: 3, expired: 1, retained: 2 }
+      },
+      approvals: {
+        total: 1,
+        pending: 0,
+        approved: 1,
+        rejected: 0,
+        history: []
+      },
+      policies: {
+        repositoryProfiles: [{ profile: "standard", repositoryCount: 1, runCount: 1 }],
+        sensitiveRepositories: []
+      },
+      secrets: {
+        sourceMode: "environment",
+        provider: null,
+        remoteCredentialEnvNames: [],
+        allowedRepositoryTrustLevels: ["trusted"],
+        sensitivePolicyProfiles: [],
+        credentialDistribution: ["control-plane issues short-lived credentials"],
+        policyDrivenAccess: false
+      }
+    });
+
+    const app = await buildApp({
+      controlPlane: controlPlane as unknown as ControlPlaneService
+    });
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/api/v1/admin/governance-report",
+      headers: {
+        authorization: "Bearer codex-swarm-dev-token"
+      }
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(controlPlane.getGovernanceAdminReport).toHaveBeenCalledWith({
+      requestedBy: {
+        principal: "dev-user",
+        actorId: "dev-user",
+        actorType: "user",
+        email: null,
+        role: "platform-admin",
+        workspaceId: defaultBoundary.workspaceId,
+        workspaceName: defaultBoundary.workspaceName,
+        teamId: "codex-swarm",
+        teamName: defaultBoundary.teamName,
+        policyProfile: "standard"
+      },
+      retentionPolicy: {
+        runsDays: 30,
+        artifactsDays: 30,
+        eventsDays: 30
+      },
+      secrets: expect.objectContaining({
+        sourceMode: "environment"
+      }),
+      limit: 50,
+      access: expect.objectContaining({
+        workspaceId: defaultBoundary.workspaceId,
+        teamId: defaultBoundary.teamId
+      })
+    });
+
+    await app.close();
+  });
+
+  it("reconciles retention metadata through the admin route", async () => {
+    controlPlane.reconcileGovernanceRetention.mockResolvedValueOnce({
+      dryRun: false,
+      appliedAt: "2026-03-28T12:00:00.000Z",
+      requestedBy: {
+        principal: "dev-user",
+        actorId: "dev-user",
+        actorType: "user",
+        role: "platform-admin",
+        teamId: "codex-swarm",
+        policyProfile: "standard"
+      },
+      runsUpdated: 1,
+      artifactsUpdated: 2,
+      eventsUpdated: 3
+    });
+
+    const app = await buildApp({
+      controlPlane: controlPlane as unknown as ControlPlaneService
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/v1/admin/retention/reconcile",
+      headers: {
+        authorization: "Bearer codex-swarm-dev-token"
+      },
+      payload: {
+        dryRun: false,
+        runId: ids.run
+      }
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(controlPlane.reconcileGovernanceRetention).toHaveBeenCalledWith({
+      requestedBy: expect.objectContaining({
+        role: "platform-admin"
+      }),
+      retentionPolicy: {
+        runsDays: 30,
+        artifactsDays: 30,
+        eventsDays: 30
+      },
+      dryRun: false,
+      runId: ids.run,
+      access: expect.objectContaining({
+        workspaceId: defaultBoundary.workspaceId,
+        teamId: defaultBoundary.teamId
+      })
+    });
+
+    await app.close();
+  });
+
+  it("returns a governed secret access plan for a repository", async () => {
+    controlPlane.getRepositorySecretAccessPlan.mockResolvedValueOnce({
+      repositoryId: ids.repository,
+      repositoryName: "codex-swarm",
+      trustLevel: "trusted",
+      policyProfile: "standard",
+      access: "allowed",
+      sourceMode: "environment",
+      provider: null,
+      credentialEnvNames: ["OPENAI_API_KEY"],
+      distributionBoundary: ["workers get task-scoped env"],
+      reason: "repository can receive the standard environment secret path"
+    });
+
+    const app = await buildApp({
+      controlPlane: controlPlane as unknown as ControlPlaneService
+    });
+
+    const response = await app.inject({
+      method: "GET",
+      url: `/api/v1/admin/secrets/access-plan/${ids.repository}`,
+      headers: {
+        authorization: "Bearer codex-swarm-dev-token"
+      }
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(controlPlane.getRepositorySecretAccessPlan).toHaveBeenCalledWith({
+      repositoryId: ids.repository,
+      secrets: expect.objectContaining({
+        sourceMode: "environment"
+      }),
+      access: expect.objectContaining({
+        workspaceId: defaultBoundary.workspaceId,
+        teamId: defaultBoundary.teamId
+      })
+    });
 
     await app.close();
   });
@@ -2002,7 +2382,10 @@ describe("buildApp", () => {
     expect(controlPlane.listValidations).toHaveBeenCalledWith({
       runId: ids.run,
       taskId: ids.taskA
-    });
+    }, expect.objectContaining({
+      workspaceId: defaultBoundary.workspaceId,
+      teamId: defaultBoundary.teamId
+    }));
 
     await app.close();
   });
@@ -2074,7 +2457,10 @@ describe("buildApp", () => {
       summary: "Typecheck passed",
       artifactPath: "artifacts/validations/typecheck.json",
       artifactIds: ["cccccccc-cccc-4ccc-8ccc-cccccccccccc"]
-    });
+    }, expect.objectContaining({
+      workspaceId: defaultBoundary.workspaceId,
+      teamId: defaultBoundary.teamId
+    }));
 
     await app.close();
   });
@@ -2131,14 +2517,14 @@ describe("buildApp", () => {
 
   it("supports the run-task-agent-session vertical slice", async () => {
     const app = await buildApp({
-      config: {
+      config: getConfig({
         NODE_ENV: "test",
         PORT: 3000,
         HOST: "127.0.0.1",
         DATABASE_URL: "postgres://unused/test",
         DEV_AUTH_TOKEN: "test-token",
         OPENAI_TRACING_DISABLED: true
-      },
+      }),
       controlPlane: new FakeVerticalSliceControlPlane() as unknown as ControlPlaneService
     });
 
@@ -2290,14 +2676,14 @@ describe("buildApp", () => {
 
   it("supports approval cards from persisted approval rows", async () => {
     const app = await buildApp({
-      config: {
+      config: getConfig({
         NODE_ENV: "test",
         PORT: 3000,
         HOST: "127.0.0.1",
         DATABASE_URL: "postgres://unused/test",
         DEV_AUTH_TOKEN: "test-token",
         OPENAI_TRACING_DISABLED: true
-      },
+      }),
       controlPlane: new FakeVerticalSliceControlPlane() as unknown as ControlPlaneService
     });
 
@@ -2326,14 +2712,14 @@ describe("buildApp", () => {
   it("preserves distributed run visibility across two-node retry recovery", async () => {
     const verticalSlice = new FakeVerticalSliceControlPlane();
     const app = await buildApp({
-      config: {
+      config: getConfig({
         NODE_ENV: "test",
         PORT: 3000,
         HOST: "127.0.0.1",
         DATABASE_URL: "postgres://unused/test",
         DEV_AUTH_TOKEN: "test-token",
         OPENAI_TRACING_DISABLED: true
-      },
+      }),
       controlPlane: verticalSlice as unknown as ControlPlaneService
     });
 

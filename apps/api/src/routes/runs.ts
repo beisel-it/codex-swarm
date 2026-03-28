@@ -7,6 +7,7 @@ import {
   runPullRequestHandoffSchema,
   runStatusUpdateSchema
 } from "../http/schemas.js";
+import { getRetentionPolicy } from "../lib/governance-config.js";
 import { isRecoverableDatabaseError } from "../lib/database-fallback.js";
 import { requireValue } from "../lib/require-value.js";
 
@@ -17,7 +18,7 @@ export const runRoutes: FastifyPluginAsync = async (app) => {
       : undefined;
 
     try {
-      return await app.controlPlane.listRuns(repositoryId);
+        return await app.controlPlane.listRuns(repositoryId, request.authContext);
     } catch (error) {
       if (app.config.NODE_ENV !== "production" && isRecoverableDatabaseError(error)) {
         app.observability.recordRecoverableDatabaseFallback("runs.list", error);
@@ -30,14 +31,14 @@ export const runRoutes: FastifyPluginAsync = async (app) => {
 
   app.get("/runs/:id", async (request) => {
     const { id } = idParamSchema.parse(request.params);
-    return app.controlPlane.getRun(id);
+    return app.controlPlane.getRun(id, request.authContext);
   });
 
   app.get("/runs/:id/audit-export", async (request) => {
     return app.observability.withTrace("api.runs.audit-export", async () => {
       const { id } = idParamSchema.parse(request.params);
       const auditExport = requireValue(
-        await app.controlPlane.exportRunAudit(id),
+        await app.controlPlane.exportRunAudit(id, request.authContext, getRetentionPolicy(app.config), request.authContext),
         "control plane returned no audit export"
       );
 
@@ -58,7 +59,7 @@ export const runRoutes: FastifyPluginAsync = async (app) => {
     return app.observability.withTrace("api.runs.create", async () => {
       const input = runCreateSchema.parse(request.body);
       const run = requireValue(
-        await app.controlPlane.createRun(input, request.authContext.principal),
+        await app.controlPlane.createRun(input, request.authContext.principal, request.authContext),
         "control plane returned no run"
       );
 
@@ -80,7 +81,7 @@ export const runRoutes: FastifyPluginAsync = async (app) => {
       const { id } = idParamSchema.parse(request.params);
       const input = runStatusUpdateSchema.parse(request.body);
       const run = requireValue(
-        await app.controlPlane.updateRunStatus(id, input),
+        await app.controlPlane.updateRunStatus(id, input, request.authContext),
         "control plane returned no run"
       );
 
@@ -102,7 +103,7 @@ export const runRoutes: FastifyPluginAsync = async (app) => {
       const { id } = idParamSchema.parse(request.params);
       const input = runBranchPublishSchema.parse(request.body);
       const run = requireValue(
-        await app.controlPlane.publishRunBranch(id, input),
+        await app.controlPlane.publishRunBranch(id, input, request.authContext),
         "control plane returned no run"
       );
 
@@ -124,7 +125,7 @@ export const runRoutes: FastifyPluginAsync = async (app) => {
       const { id } = idParamSchema.parse(request.params);
       const input = runPullRequestHandoffSchema.parse(request.body);
       const run = requireValue(
-        await app.controlPlane.createRunPullRequestHandoff(id, input),
+        await app.controlPlane.createRunPullRequestHandoff(id, input, request.authContext),
         "control plane returned no run"
       );
 

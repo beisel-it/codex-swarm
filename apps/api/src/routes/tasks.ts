@@ -9,14 +9,14 @@ export const taskRoutes: FastifyPluginAsync = async (app) => {
       ? String(request.query.runId)
       : undefined;
 
-    return app.controlPlane.listTasks(runId);
+    return app.controlPlane.listTasks(runId, request.authContext);
   });
 
   app.post("/tasks", async (request, reply) => {
     return app.observability.withTrace("api.tasks.create", async () => {
       const input = taskCreateSchema.parse(request.body);
       const task = requireValue(
-        await app.controlPlane.createTask(input),
+        await app.controlPlane.createTask(input, request.authContext),
         "control plane returned no task"
       );
 
@@ -40,7 +40,7 @@ export const taskRoutes: FastifyPluginAsync = async (app) => {
       const { id } = idParamSchema.parse(request.params);
       const input = taskStatusUpdateSchema.parse(request.body);
       const task = requireValue(
-        await app.controlPlane.updateTaskStatus(id, input),
+        await app.controlPlane.updateTaskStatus(id, input, request.authContext),
         "control plane returned no task"
       );
 
