@@ -1271,6 +1271,18 @@ function formatLabel(input: string) {
   return input.replace(/_/g, ' ')
 }
 
+function summarizeApprovalForBoard(approval: Approval) {
+  if (approval.status === 'pending') {
+    return String(approval.requestedPayload?.summary ?? 'Awaiting reviewer decision.')
+  }
+
+  return String(approval.resolutionPayload?.feedback ?? `Resolved by ${approval.resolver ?? 'unknown reviewer'}`)
+}
+
+function summarizeValidationForBoard(validation: Validation) {
+  return validation.summary ?? validation.command
+}
+
 function formatPayload(payload?: Record<string, unknown> | null) {
   if (!payload || Object.keys(payload).length === 0) {
     return 'No structured payload recorded yet.'
@@ -1525,6 +1537,14 @@ function App() {
   const runValidations = data.validations.filter((validation) => validation.runId === selectedRun?.id)
   const runArtifacts = data.artifacts.filter((artifact) => artifact.runId === selectedRun?.id)
   const runMessages = data.messages.filter((message) => message.runId === selectedRun?.id)
+  const pendingApprovals = runApprovals.filter((approval) => approval.status === 'pending')
+  const boardValidations = [...runValidations]
+    .sort((left, right) => {
+      const leftTime = Date.parse(left.updatedAt ?? left.createdAt ?? '')
+      const rightTime = Date.parse(right.updatedAt ?? right.createdAt ?? '')
+      return rightTime - leftTime
+    })
+    .slice(0, 4)
   const activity = deriveActivity(selectedRun, runWorkerNodes, runApprovals, runValidations, runArtifacts, runMessages)
   const selectedApproval =
     runApprovals.find((approval) => approval.id === selectedApprovalId) ??
@@ -1839,6 +1859,70 @@ function App() {
                           Open pull request
                         </a>
                       ) : null}
+                    </article>
+                  </div>
+                </section>
+
+                <section className="panel panel-board-signals">
+                  <div className="panel-header">
+                    <div>
+                      <p className="panel-kicker">Board signals</p>
+                      <h2>Pending approvals and recent validations</h2>
+                    </div>
+                  </div>
+
+                  <div className="board-signal-grid">
+                    <article className="board-signal-card">
+                      <div className="task-column-header">
+                        <h3>Pending approvals</h3>
+                        <span>{pendingApprovals.length}</span>
+                      </div>
+
+                      <div className="signal-list">
+                        {pendingApprovals.map((approval) => (
+                          <article key={approval.id} className="approval-card">
+                            <div className="approval-title">
+                              <strong>{approval.kind}</strong>
+                              <span className={`tone-chip tone-${approvalStatusTone[approval.status]}`}>
+                                {approval.status}
+                              </span>
+                            </div>
+                            <p>{summarizeApprovalForBoard(approval)}</p>
+                            <div className="approval-meta">
+                              <span>{approval.requestedBy}</span>
+                              <span>{approval.taskId ? `task ${approval.taskId.slice(0, 8)}` : 'run scoped'}</span>
+                            </div>
+                          </article>
+                        ))}
+                        {pendingApprovals.length === 0 ? (
+                          <div className="empty-state">No pending approvals on this board.</div>
+                        ) : null}
+                      </div>
+                    </article>
+
+                    <article className="board-signal-card">
+                      <div className="task-column-header">
+                        <h3>Recent validations</h3>
+                        <span>{boardValidations.length}</span>
+                      </div>
+
+                      <div className="signal-list">
+                        {boardValidations.map((validation) => (
+                          <article key={validation.id} className="validation-card">
+                            <div className="validation-title">
+                              <strong>{validation.name}</strong>
+                              <span className={`tone-chip tone-${validationStatusTone[validation.status]}`}>
+                                {validation.status}
+                              </span>
+                            </div>
+                            <code>{validation.command}</code>
+                            <p>{summarizeValidationForBoard(validation)}</p>
+                          </article>
+                        ))}
+                        {boardValidations.length === 0 ? (
+                          <div className="empty-state">No validation records published yet.</div>
+                        ) : null}
+                      </div>
                     </article>
                   </div>
                 </section>

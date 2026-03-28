@@ -1,6 +1,6 @@
 # M7 Frontend Parity Review
 
-Reviewed on HEAD `0c27745` against the live frontend implementation in `frontend/src/App.tsx`, current user/admin docs, and screenshot evidence captured under `docs/assets/screenshots/`.
+Reviewed against the live frontend implementation in `frontend/src/App.tsx`, current user/admin docs, and screenshot evidence captured under `docs/assets/screenshots/`.
 
 ## Task 51
 
@@ -70,28 +70,24 @@ Reviewed on HEAD `0c27745` against the live frontend implementation in `frontend
 ## Task 54
 
 - Roadmap entry: `ROADMAP.md` UI scope, `Browser board showing: pending approvals` ([ROADMAP.md](/home/florian/codex-swarm/ROADMAP.md#L148))
-- Verdict: `gap`
+- Verdict: `parity`
 - Evidence:
-  - The board view renders fleet, provider, task lanes/DAG, and agent lanes, but no dedicated approvals panel or pending-approval list in the board surface ([frontend/src/App.tsx](/home/florian/codex-swarm/frontend/src/App.tsx#L1753))
-  - Approval data is loaded and filtered for the selected run, but the rendered approval list only appears in the `Review workspace` tab ([frontend/src/App.tsx](/home/florian/codex-swarm/frontend/src/App.tsx#L1524), [frontend/src/App.tsx](/home/florian/codex-swarm/frontend/src/App.tsx#L2222))
-  - The board overview docs mention blocked work and task lanes, while approvals are documented under the review console instead ([docs/user-guide.md](/home/florian/codex-swarm/docs/user-guide.md#L58), [docs/user-guide.md](/home/florian/codex-swarm/docs/user-guide.md#L80))
+  - Board state now derives run-scoped pending approvals directly from the live approval collection and filters them for board display ([frontend/src/App.tsx](/home/florian/codex-swarm/frontend/src/App.tsx#L1536))
+  - The board view includes a dedicated `Board signals` panel with a `Pending approvals` section, approval count, request summary, requester, and task/run scope metadata ([frontend/src/App.tsx](/home/florian/codex-swarm/frontend/src/App.tsx#L1866))
+  - The board layout and responsive styles explicitly include the new board-signal panel ([frontend/src/index.css](/home/florian/codex-swarm/frontend/src/index.css#L255))
 - Residual risk:
-  - Operators can still infer approval pressure from run status such as `awaiting_approval`, but that is not the same as explicit pending approvals on the board.
-- Follow-up:
-  - Reported to `tech-lead`; backlog follow-up requested if board-level approval visibility remains required by roadmap parity.
+  - Screenshot/user-doc evidence has not yet been refreshed to call out the new board-signal panel, so the strongest proof is in the live implementation.
 
 ## Task 55
 
 - Roadmap entry: `ROADMAP.md` UI scope, `Browser board showing: recent validations` ([ROADMAP.md](/home/florian/codex-swarm/ROADMAP.md#L149))
-- Verdict: `gap`
+- Verdict: `parity`
 - Evidence:
-  - Validation data is loaded and filtered for the selected run, but it is rendered in `Validation history` inside the `Review` tab rather than on the board surface ([frontend/src/App.tsx](/home/florian/codex-swarm/frontend/src/App.tsx#L1525), [frontend/src/App.tsx](/home/florian/codex-swarm/frontend/src/App.tsx#L2321))
-  - The board view panels do not include a validation summary card, validation timeline, or recent-checks section ([frontend/src/App.tsx](/home/florian/codex-swarm/frontend/src/App.tsx#L1753))
-  - User docs describe validations as part of the review console workflow, not the board overview ([docs/user-guide.md](/home/florian/codex-swarm/docs/user-guide.md#L80))
+  - Board state now derives recent validations from the live validation collection, sorts them by recency, and limits the board view to the newest records ([frontend/src/App.tsx](/home/florian/codex-swarm/frontend/src/App.tsx#L1537))
+  - The board view includes a dedicated `Recent validations` section with status, command, and summary/command fallback in the board-signal panel ([frontend/src/App.tsx](/home/florian/codex-swarm/frontend/src/App.tsx#L1903))
+  - The board layout and responsive styles explicitly include the new board-signal panel ([frontend/src/index.css](/home/florian/codex-swarm/frontend/src/index.css#L255))
 - Residual risk:
-  - Users must switch tabs to inspect validations, which weakens the operator signal the roadmap promised directly on the board.
-- Follow-up:
-  - Reported to `tech-lead`; backlog follow-up requested if board-level validation visibility remains required by roadmap parity.
+  - The board shows recent validation summaries, but the fuller history still lives in the review tab by design.
 
 ## Task 82
 
