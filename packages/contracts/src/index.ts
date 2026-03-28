@@ -17,6 +17,8 @@ export const workerNodeStates = ["active", "draining", "drained", "offline"] as 
 export const workerDispatchStates = ["queued", "claimed", "completed", "retrying", "failed"] as const;
 export const workerNodeStatuses = ["online", "degraded", "offline"] as const;
 export const workerNodeDrainStates = ["active", "draining", "drained"] as const;
+export const governanceRoles = ["org_admin", "workspace_admin", "team_admin", "member", "reviewer", "operator", "service", "system"] as const;
+export const governedActions = ["run.create", "run.review", "run.retry", "run.stop", "approval.request", "approval.resolve", "admin.read", "admin.write"] as const;
 
 export const repositoryCreateSchema = z.object({
   name: z.string().min(1),
@@ -309,6 +311,7 @@ export const actorIdentitySchema = z.object({
   actorType: z.enum(["system", "user", "service"]).default("user"),
   email: z.string().email().nullable().default(null),
   role: z.string().min(1),
+  roles: z.array(z.enum(governanceRoles)).default([]),
   workspaceId: z.string().min(1).nullable().default(null),
   workspaceName: z.string().min(1).nullable().default(null),
   teamId: z.string().min(1).nullable().default(null),
@@ -362,6 +365,69 @@ export const controlPlaneMetricsSchema = z.object({
     agentsFailed: z.number().int().nonnegative(),
     validationsFailed: z.number().int().nonnegative(),
     requestFailures: z.number().int().nonnegative()
+  }),
+  usage: z.object({
+    repositories: z.number().int().nonnegative(),
+    runsTotal: z.number().int().nonnegative(),
+    runsActive: z.number().int().nonnegative(),
+    runsCompleted: z.number().int().nonnegative(),
+    tasksTotal: z.number().int().nonnegative(),
+    approvalsTotal: z.number().int().nonnegative(),
+    validationsTotal: z.number().int().nonnegative(),
+    artifactsTotal: z.number().int().nonnegative(),
+    workerNodesOnline: z.number().int().nonnegative(),
+    workerNodesDraining: z.number().int().nonnegative()
+  }),
+  cost: z.object({
+    runsWithBudget: z.number().int().nonnegative(),
+    totalBudgetedRunCostUsd: z.number().nonnegative(),
+    averageBudgetedRunCostUsd: z.number().nonnegative(),
+    maxBudgetedRunCostUsd: z.number().nonnegative()
+  }),
+  performance: z.object({
+    completedRunsMeasured: z.number().int().nonnegative(),
+    approvalsMeasured: z.number().int().nonnegative(),
+    validationsMeasured: z.number().int().nonnegative(),
+    runDurationMs: z.object({
+      p50: z.number().nonnegative(),
+      p95: z.number().nonnegative(),
+      max: z.number().nonnegative()
+    }),
+    approvalResolutionMs: z.object({
+      p50: z.number().nonnegative(),
+      p95: z.number().nonnegative(),
+      max: z.number().nonnegative()
+    }),
+    validationTurnaroundMs: z.object({
+      p50: z.number().nonnegative(),
+      p95: z.number().nonnegative(),
+      max: z.number().nonnegative()
+    })
+  }),
+  slo: z.object({
+    objectives: z.object({
+      pendingApprovalMaxMinutes: z.number().int().positive(),
+      activeRunMaxMinutes: z.number().int().positive(),
+      taskQueueMax: z.number().int().positive(),
+      supportResponseHours: z.number().int().positive()
+    }),
+    support: z.object({
+      hoursUtc: z.string().min(1),
+      escalation: z.array(z.string().min(1))
+    }),
+    status: z.object({
+      pendingApprovalsWithinTarget: z.boolean(),
+      activeRunsWithinTarget: z.boolean(),
+      queueDepthWithinTarget: z.boolean(),
+      withinEnvelope: z.boolean()
+    }),
+    measurements: z.object({
+      oldestPendingApprovalAgeMinutes: z.number().nonnegative().nullable(),
+      oldestActiveRunAgeMinutes: z.number().nonnegative().nullable(),
+      pendingApprovals: z.number().int().nonnegative(),
+      activeRuns: z.number().int().nonnegative(),
+      tasksPending: z.number().int().nonnegative()
+    })
   }),
   eventsRecorded: z.number().int().nonnegative(),
   recordedAt: z.date()
@@ -705,6 +771,8 @@ export type CleanupJobItem = z.infer<typeof cleanupJobItemSchema>;
 export type CleanupJobReport = z.infer<typeof cleanupJobReportSchema>;
 export type EventsListQuery = z.infer<typeof eventsListQuerySchema>;
 export type ActorIdentity = z.infer<typeof actorIdentitySchema>;
+export type GovernanceRole = typeof governanceRoles[number];
+export type GovernedAction = typeof governedActions[number];
 export type ControlPlaneEvent = z.infer<typeof controlPlaneEventSchema>;
 export type RetentionPolicy = z.infer<typeof retentionPolicySchema>;
 export type RetentionWindowSummary = z.infer<typeof retentionWindowSummarySchema>;

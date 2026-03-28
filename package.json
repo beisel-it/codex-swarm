@@ -17,6 +17,10 @@
     "ci:lint": "node ./scripts/ci/run-stage.mjs lint",
     "ci:typecheck": "node ./scripts/ci/run-stage.mjs typecheck",
     "ci:test": "node ./scripts/ci/run-stage.mjs test",
-    "ci:build": "node ./scripts/ci/run-stage.mjs build"
+    "ci:build": "node ./scripts/ci/run-stage.mjs build",
+    "ops:backup": "node ./apps/api/scripts/ops/backup-control-plane.mjs",
+    "ops:restore": "node ./apps/api/scripts/ops/restore-control-plane.mjs",
+    "ops:drill": "node ./apps/api/scripts/ops/dr-exercise.mjs",
+    "ops:perf": "node ./apps/api/scripts/ops/perf-envelope.mjs"
   }
 }

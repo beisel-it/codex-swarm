@@ -964,6 +964,7 @@ describe("buildApp", () => {
         authorization: "Bearer codex-swarm-dev-token",
         "x-codex-actor-id": "oidc|alice",
         "x-codex-email": "alice@example.com",
+        "x-codex-roles": "reviewer,workspace_admin",
         "x-codex-workspace-id": "acme",
         "x-codex-workspace-name": "Acme",
         "x-codex-team-id": "platform",
@@ -976,7 +977,7 @@ describe("buildApp", () => {
       principal: "dev-user",
       subject: "oidc|alice",
       email: "alice@example.com",
-      roles: ["platform-admin"],
+      roles: ["reviewer", "workspace_admin"],
       workspace: {
         id: "acme",
         name: "Acme"
@@ -1758,6 +1759,35 @@ describe("buildApp", () => {
         validationsFailed: 0,
         requestFailures: 0
       },
+      usage: {
+        repositories: 0,
+        runsTotal: 0,
+        workerNodesOnline: 0
+      },
+      cost: {
+        runsWithBudget: 0,
+        totalBudgetedRunCostUsd: 0
+      },
+      performance: {
+        completedRunsMeasured: 0,
+        runDurationMs: {
+          p95: 0
+        }
+      },
+      slo: {
+        objectives: {
+          pendingApprovalMaxMinutes: 60,
+          activeRunMaxMinutes: 240,
+          taskQueueMax: 100,
+          supportResponseHours: 8
+        },
+        support: {
+          hoursUtc: "Mon-Fri 08:00-18:00 UTC"
+        },
+        status: {
+          withinEnvelope: true
+        }
+      },
       eventsRecorded: 0
     });
 
@@ -1967,6 +1997,7 @@ describe("buildApp", () => {
         actorType: "user",
         email: null,
         role: "platform-admin",
+        roles: ["platform-admin", "workspace_admin"],
         workspaceId: "default-workspace",
         workspaceName: "Default Workspace",
         teamId: "codex-swarm",
@@ -1978,10 +2009,19 @@ describe("buildApp", () => {
         artifactsDays: 30,
         eventsDays: 30
       },
-      expect.objectContaining({
+      {
+        principal: "dev-user",
+        actorId: "dev-user",
+        actorType: "user",
+        email: null,
+        role: "platform-admin",
+        roles: ["platform-admin", "workspace_admin"],
         workspaceId: "default-workspace",
-        teamId: "codex-swarm"
-      })
+        workspaceName: "Default Workspace",
+        teamId: "codex-swarm",
+        teamName: "Codex Swarm",
+        policyProfile: "standard"
+      }
     );
 
     await app.close();
@@ -2006,6 +2046,69 @@ describe("buildApp", () => {
         agentsFailed: 1,
         validationsFailed: 1,
         requestFailures: 3
+      },
+      usage: {
+        repositories: 3,
+        runsTotal: 10,
+        runsActive: 4,
+        runsCompleted: 6,
+        tasksTotal: 21,
+        approvalsTotal: 5,
+        validationsTotal: 8,
+        artifactsTotal: 9,
+        workerNodesOnline: 2,
+        workerNodesDraining: 1
+      },
+      cost: {
+        runsWithBudget: 6,
+        totalBudgetedRunCostUsd: 72.5,
+        averageBudgetedRunCostUsd: 12.08,
+        maxBudgetedRunCostUsd: 20
+      },
+      performance: {
+        completedRunsMeasured: 6,
+        approvalsMeasured: 4,
+        validationsMeasured: 7,
+        runDurationMs: {
+          p50: 120000,
+          p95: 480000,
+          max: 600000
+        },
+        approvalResolutionMs: {
+          p50: 60000,
+          p95: 180000,
+          max: 240000
+        },
+        validationTurnaroundMs: {
+          p50: 90000,
+          p95: 240000,
+          max: 360000
+        }
+      },
+      slo: {
+        objectives: {
+          pendingApprovalMaxMinutes: 60,
+          activeRunMaxMinutes: 240,
+          taskQueueMax: 100,
+          supportResponseHours: 8
+        },
+        support: {
+          hoursUtc: "Mon-Fri 08:00-18:00 UTC",
+          escalation: ["page platform admin"]
+        },
+        status: {
+          pendingApprovalsWithinTarget: true,
+          activeRunsWithinTarget: true,
+          queueDepthWithinTarget: true,
+          withinEnvelope: true
+        },
+        measurements: {
+          oldestPendingApprovalAgeMinutes: 12,
+          oldestActiveRunAgeMinutes: 45,
+          pendingApprovals: 1,
+          activeRuns: 4,
+          tasksPending: 7
+        }
       },
       eventsRecorded: 18,
       recordedAt: new Date("2026-03-28T12:15:00.000Z")
@@ -2039,6 +2142,23 @@ describe("buildApp", () => {
       },
       failures: {
         requestFailures: 3
+      },
+      usage: {
+        runsTotal: 10,
+        workerNodesDraining: 1
+      },
+      cost: {
+        totalBudgetedRunCostUsd: 72.5
+      },
+      performance: {
+        runDurationMs: {
+          p95: 480000
+        }
+      },
+      slo: {
+        status: {
+          withinEnvelope: true
+        }
       },
       eventsRecorded: 18
     });
@@ -2152,6 +2272,7 @@ describe("buildApp", () => {
         principal: "dev-user",
         actorId: "dev-user",
         actorType: "user",
+        roles: ["workspace_admin"],
         role: "platform-admin",
         teamId: "codex-swarm",
         policyProfile: "standard"
@@ -2203,6 +2324,7 @@ describe("buildApp", () => {
         actorId: "dev-user",
         actorType: "user",
         email: null,
+        roles: ["platform-admin", "workspace_admin"],
         role: "platform-admin",
         workspaceId: defaultBoundary.workspaceId,
         workspaceName: defaultBoundary.workspaceName,
@@ -2215,14 +2337,62 @@ describe("buildApp", () => {
         artifactsDays: 30,
         eventsDays: 30
       },
-      secrets: expect.objectContaining({
-        sourceMode: "environment"
-      }),
+      secrets: {
+        sourceMode: "environment",
+        provider: null,
+        remoteCredentialEnvNames: [],
+        allowedRepositoryTrustLevels: ["trusted"],
+        sensitivePolicyProfiles: [],
+        credentialDistribution: [
+          "control-plane issues short-lived credentials",
+          "workers receive only task-scoped environment variables",
+          "sensitive repositories require policy-driven secret access"
+        ],
+        policyDrivenAccess: false
+      },
       limit: 50,
-      access: expect.objectContaining({
+      access: {
+        principal: "dev-user",
+        actorId: "dev-user",
+        actorType: "user",
+        email: null,
+        role: "platform-admin",
+        roles: ["platform-admin", "workspace_admin"],
+        workspaceId: defaultBoundary.workspaceId,
+        workspaceName: defaultBoundary.workspaceName,
+        teamId: defaultBoundary.teamId,
+        teamName: defaultBoundary.teamName,
+        policyProfile: "standard"
+      }
+    });
+
+    await app.close();
+  });
+
+  it("rejects admin reads for non-admin roles with deterministic details", async () => {
+    const app = await buildApp({
+      controlPlane: controlPlane as unknown as ControlPlaneService
+    });
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/api/v1/admin/governance-report",
+      headers: {
+        authorization: "Bearer codex-swarm-dev-token",
+        "x-codex-role": "member",
+        "x-codex-roles": "member"
+      }
+    });
+
+    expect(response.statusCode).toBe(403);
+    expect(response.json()).toEqual({
+      error: "actor role is not permitted to perform admin.read",
+      details: {
+        action: "admin.read",
+        roles: ["member"],
         workspaceId: defaultBoundary.workspaceId,
         teamId: defaultBoundary.teamId
-      })
+      }
     });
 
     await app.close();

@@ -34,7 +34,7 @@ interface BuildAppOptions {
   observability?: ObservabilityService;
 }
 
-function createNoopObservability(): Pick<
+function createNoopObservability(config: ReturnType<typeof getConfig>): Pick<
   ObservabilityService,
   "beginRequest" | "clearActorContext" | "getMetrics" | "listEvents" | "recordRecoverableDatabaseFallback" | "recordRequestFailure" | "recordTimelineEvent" | "setActorContext" | "withTrace"
 > {
@@ -59,6 +59,69 @@ function createNoopObservability(): Pick<
         agentsFailed: 0,
         validationsFailed: 0,
         requestFailures: 0
+      },
+      usage: {
+        repositories: 0,
+        runsTotal: 0,
+        runsActive: 0,
+        runsCompleted: 0,
+        tasksTotal: 0,
+        approvalsTotal: 0,
+        validationsTotal: 0,
+        artifactsTotal: 0,
+        workerNodesOnline: 0,
+        workerNodesDraining: 0
+      },
+      cost: {
+        runsWithBudget: 0,
+        totalBudgetedRunCostUsd: 0,
+        averageBudgetedRunCostUsd: 0,
+        maxBudgetedRunCostUsd: 0
+      },
+      performance: {
+        completedRunsMeasured: 0,
+        approvalsMeasured: 0,
+        validationsMeasured: 0,
+        runDurationMs: {
+          p50: 0,
+          p95: 0,
+          max: 0
+        },
+        approvalResolutionMs: {
+          p50: 0,
+          p95: 0,
+          max: 0
+        },
+        validationTurnaroundMs: {
+          p50: 0,
+          p95: 0,
+          max: 0
+        }
+      },
+      slo: {
+        objectives: {
+          pendingApprovalMaxMinutes: config.SLO_PENDING_APPROVAL_MAX_MINUTES,
+          activeRunMaxMinutes: config.SLO_ACTIVE_RUN_MAX_MINUTES,
+          taskQueueMax: config.SLO_TASK_QUEUE_MAX,
+          supportResponseHours: config.SLO_SUPPORT_RESPONSE_HOURS
+        },
+        support: {
+          hoursUtc: config.SUPPORT_HOURS_UTC,
+          escalation: config.SUPPORT_ESCALATION
+        },
+        status: {
+          pendingApprovalsWithinTarget: true,
+          activeRunsWithinTarget: true,
+          queueDepthWithinTarget: true,
+          withinEnvelope: true
+        },
+        measurements: {
+          oldestPendingApprovalAgeMinutes: null,
+          oldestActiveRunAgeMinutes: null,
+          pendingApprovals: 0,
+          activeRuns: 0,
+          tasksPending: 0
+        }
       },
       eventsRecorded: 0,
       recordedAt: new Date()
@@ -113,7 +176,7 @@ export async function buildApp(options: BuildAppOptions = {}) {
   });
 
   if (options.controlPlane) {
-    app.decorate("observability", (options.observability ?? createNoopObservability()) as ObservabilityService);
+    app.decorate("observability", (options.observability ?? createNoopObservability(config)) as ObservabilityService);
     app.decorate("controlPlane", options.controlPlane);
   } else {
     await app.register(dependenciesPlugin);

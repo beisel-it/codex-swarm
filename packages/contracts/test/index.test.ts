@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  actorIdentitySchema,
   approvalCreateSchema,
   approvalResolveSchema,
   agentCreateSchema,
   cleanupJobRunSchema,
+  controlPlaneMetricsSchema,
   governanceAdminReportSchema,
   identityEntrypointSchema,
   repositoryCreateSchema,
@@ -58,6 +60,19 @@ describe("identityEntrypointSchema", () => {
 
     expect(identity.email).toBeNull();
     expect(identity.actorType).toBe("user");
+  });
+});
+
+describe("actorIdentitySchema", () => {
+  it("accepts normalized governance roles", () => {
+    const actor = actorIdentitySchema.parse({
+      principal: "alice",
+      actorId: "oidc|alice",
+      role: "workspace_admin",
+      roles: ["workspace_admin", "reviewer"]
+    });
+
+    expect(actor.roles).toEqual(["workspace_admin", "reviewer"]);
   });
 });
 
@@ -229,6 +244,99 @@ describe("cleanupJobRunSchema", () => {
 
     expect(cleanup.staleAfterMinutes).toBe(15);
     expect(cleanup.existingWorktreePaths).toEqual([]);
+  });
+});
+
+describe("controlPlaneMetricsSchema", () => {
+  it("accepts the extended M6 operator envelope", () => {
+    const metrics = controlPlaneMetricsSchema.parse({
+      queueDepth: {
+        runsPending: 1,
+        tasksPending: 2,
+        tasksBlocked: 0,
+        approvalsPending: 1,
+        busyAgents: 3
+      },
+      retries: {
+        recoverableDatabaseFallbacks: 0,
+        taskUnblocks: 4
+      },
+      failures: {
+        runsFailed: 0,
+        tasksFailed: 0,
+        agentsFailed: 0,
+        validationsFailed: 0,
+        requestFailures: 1
+      },
+      usage: {
+        repositories: 2,
+        runsTotal: 10,
+        runsActive: 3,
+        runsCompleted: 7,
+        tasksTotal: 20,
+        approvalsTotal: 5,
+        validationsTotal: 6,
+        artifactsTotal: 4,
+        workerNodesOnline: 2,
+        workerNodesDraining: 1
+      },
+      cost: {
+        runsWithBudget: 5,
+        totalBudgetedRunCostUsd: 45.5,
+        averageBudgetedRunCostUsd: 9.1,
+        maxBudgetedRunCostUsd: 18
+      },
+      performance: {
+        completedRunsMeasured: 7,
+        approvalsMeasured: 4,
+        validationsMeasured: 6,
+        runDurationMs: {
+          p50: 1000,
+          p95: 5000,
+          max: 6000
+        },
+        approvalResolutionMs: {
+          p50: 500,
+          p95: 1500,
+          max: 2000
+        },
+        validationTurnaroundMs: {
+          p50: 750,
+          p95: 1750,
+          max: 2500
+        }
+      },
+      slo: {
+        objectives: {
+          pendingApprovalMaxMinutes: 60,
+          activeRunMaxMinutes: 240,
+          taskQueueMax: 100,
+          supportResponseHours: 8
+        },
+        support: {
+          hoursUtc: "Mon-Fri 08:00-18:00 UTC",
+          escalation: ["page platform admin"]
+        },
+        status: {
+          pendingApprovalsWithinTarget: true,
+          activeRunsWithinTarget: true,
+          queueDepthWithinTarget: true,
+          withinEnvelope: true
+        },
+        measurements: {
+          oldestPendingApprovalAgeMinutes: 12,
+          oldestActiveRunAgeMinutes: 45,
+          pendingApprovals: 1,
+          activeRuns: 3,
+          tasksPending: 2
+        }
+      },
+      eventsRecorded: 11,
+      recordedAt: new Date("2026-03-28T12:15:00.000Z")
+    });
+
+    expect(metrics.slo.status.withinEnvelope).toBe(true);
+    expect(metrics.cost.totalBudgetedRunCostUsd).toBe(45.5);
   });
 });
 

@@ -27,6 +27,7 @@ describe("getConfig", () => {
       DEV_AUTH_ACTOR_ID: undefined,
       DEV_AUTH_EMAIL: undefined,
       DEV_AUTH_ROLE: undefined,
+      DEV_AUTH_ROLES: undefined,
       DEV_AUTH_WORKSPACE_ID: undefined,
       DEV_AUTH_WORKSPACE_NAME: undefined,
       DEV_AUTH_TEAM_ID: undefined,
@@ -42,6 +43,12 @@ describe("getConfig", () => {
       SENSITIVE_POLICY_PROFILES: undefined,
       SECRET_DISTRIBUTION_BOUNDARY: undefined,
       POLICY_DRIVEN_SECRET_ACCESS: undefined,
+      SLO_PENDING_APPROVAL_MAX_MINUTES: undefined,
+      SLO_ACTIVE_RUN_MAX_MINUTES: undefined,
+      SLO_TASK_QUEUE_MAX: undefined,
+      SLO_SUPPORT_RESPONSE_HOURS: undefined,
+      SUPPORT_HOURS_UTC: undefined,
+      SUPPORT_ESCALATION: undefined,
       OPENAI_TRACING_DISABLED: undefined,
       OPENAI_TRACING_EXPORT_API_KEY: undefined
     });
@@ -52,10 +59,16 @@ describe("getConfig", () => {
       HOST: "0.0.0.0",
       DEV_AUTH_TOKEN: "codex-swarm-dev-token",
       DEV_AUTH_ROLE: "platform-admin",
+      DEV_AUTH_ROLES: ["workspace_admin"],
       DEV_AUTH_WORKSPACE_ID: "default-workspace",
       DEV_AUTH_TEAM_NAME: "Codex Swarm",
       RETENTION_RUN_DAYS: 30,
-      SECRET_SOURCE_MODE: "environment"
+      SECRET_SOURCE_MODE: "environment",
+      SLO_PENDING_APPROVAL_MAX_MINUTES: 60,
+      SLO_ACTIVE_RUN_MAX_MINUTES: 240,
+      SLO_TASK_QUEUE_MAX: 100,
+      SLO_SUPPORT_RESPONSE_HOURS: 8,
+      SUPPORT_HOURS_UTC: "Mon-Fri 08:00-18:00 UTC"
     });
     expect(config.DATABASE_URL).toContain("codex_swarm");
   });
@@ -71,6 +84,7 @@ describe("getConfig", () => {
       DEV_AUTH_ACTOR_ID: "user-1",
       DEV_AUTH_EMAIL: "alice@example.com",
       DEV_AUTH_ROLE: "admin",
+      DEV_AUTH_ROLES: "workspace_admin,reviewer",
       DEV_AUTH_WORKSPACE_ID: "workspace-a",
       DEV_AUTH_WORKSPACE_NAME: "Workspace A",
       DEV_AUTH_TEAM_ID: "team-a",
@@ -86,6 +100,12 @@ describe("getConfig", () => {
       SENSITIVE_POLICY_PROFILES: "sensitive,breakglass",
       SECRET_DISTRIBUTION_BOUNDARY: "api brokers credentials,workers get task-scoped env",
       POLICY_DRIVEN_SECRET_ACCESS: "true",
+      SLO_PENDING_APPROVAL_MAX_MINUTES: "45",
+      SLO_ACTIVE_RUN_MAX_MINUTES: "180",
+      SLO_TASK_QUEUE_MAX: "50",
+      SLO_SUPPORT_RESPONSE_HOURS: "4",
+      SUPPORT_HOURS_UTC: "Mon-Fri 09:00-17:00 UTC",
+      SUPPORT_ESCALATION: "page platform admin,open DR bridge",
       OPENAI_TRACING_DISABLED: "false",
       OPENAI_TRACING_EXPORT_API_KEY: undefined
     });
@@ -100,6 +120,7 @@ describe("getConfig", () => {
       DEV_AUTH_ACTOR_ID: "user-1",
       DEV_AUTH_EMAIL: "alice@example.com",
       DEV_AUTH_ROLE: "admin",
+      DEV_AUTH_ROLES: ["workspace_admin", "reviewer"],
       DEV_AUTH_WORKSPACE_ID: "workspace-a",
       DEV_AUTH_WORKSPACE_NAME: "Workspace A",
       DEV_AUTH_TEAM_ID: "team-a",
@@ -115,6 +136,12 @@ describe("getConfig", () => {
       SENSITIVE_POLICY_PROFILES: ["sensitive", "breakglass"],
       SECRET_DISTRIBUTION_BOUNDARY: ["api brokers credentials", "workers get task-scoped env"],
       POLICY_DRIVEN_SECRET_ACCESS: true,
+      SLO_PENDING_APPROVAL_MAX_MINUTES: 45,
+      SLO_ACTIVE_RUN_MAX_MINUTES: 180,
+      SLO_TASK_QUEUE_MAX: 50,
+      SLO_SUPPORT_RESPONSE_HOURS: 4,
+      SUPPORT_HOURS_UTC: "Mon-Fri 09:00-17:00 UTC",
+      SUPPORT_ESCALATION: ["page platform admin", "open DR bridge"],
       OPENAI_TRACING_DISABLED: false,
       OPENAI_TRACING_EXPORT_API_KEY: undefined
     });

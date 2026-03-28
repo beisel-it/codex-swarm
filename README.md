@@ -41,6 +41,21 @@ Admin-oriented governance endpoints:
 - `GET /api/v1/admin/secrets/integration-boundary`
 - `GET /api/v1/admin/secrets/access-plan/:id`
 
+Operational tooling:
+
+- `GET /api/v1/metrics` exposes queue, failure, usage, cost, performance, and SLO envelope data.
+- `corepack pnpm ops:backup` writes a logical control-plane snapshot to `.ops/backups/`.
+- `corepack pnpm ops:restore` restores a snapshot from `BACKUP_FILE` into `RESTORE_DATABASE_URL` or `DATABASE_URL`.
+- `corepack pnpm ops:drill` creates a scratch Postgres database, restores a snapshot, and records counts/timings.
+- `corepack pnpm ops:perf` runs a simple concurrent HTTP latency check against a live API base URL.
+
+Operations docs:
+
+- [`docs/operations/security.md`](./docs/operations/security.md)
+- [`docs/operations/slo-support.md`](./docs/operations/slo-support.md)
+- [`docs/operations/backup-restore-dr.md`](./docs/operations/backup-restore-dr.md)
+- [`docs/operations/cost-usage-performance.md`](./docs/operations/cost-usage-performance.md)
+
 ## Productivity Packs
 
 The repository includes starter assets for the Phase 3 productivity-pack scope in the roadmap:

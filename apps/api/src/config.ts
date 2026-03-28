@@ -49,6 +49,7 @@ const configSchema = z.object({
   DEV_AUTH_ACTOR_ID: z.string().min(1).default("dev-user"),
   DEV_AUTH_EMAIL: z.string().email().optional(),
   DEV_AUTH_ROLE: z.string().min(1).default("platform-admin"),
+  DEV_AUTH_ROLES: createCsvSchema(z.string().min(1), ["workspace_admin"]),
   DEV_AUTH_WORKSPACE_ID: z.string().min(1).default("default-workspace"),
   DEV_AUTH_WORKSPACE_NAME: z.string().min(1).default("Default Workspace"),
   DEV_AUTH_TEAM_ID: z.string().min(1).default("codex-swarm"),
@@ -68,6 +69,16 @@ const configSchema = z.object({
     "sensitive repositories require policy-driven secret access"
   ]),
   POLICY_DRIVEN_SECRET_ACCESS: envBooleanSchema,
+  SLO_PENDING_APPROVAL_MAX_MINUTES: z.coerce.number().int().positive().default(60),
+  SLO_ACTIVE_RUN_MAX_MINUTES: z.coerce.number().int().positive().default(240),
+  SLO_TASK_QUEUE_MAX: z.coerce.number().int().positive().default(100),
+  SLO_SUPPORT_RESPONSE_HOURS: z.coerce.number().int().positive().default(8),
+  SUPPORT_HOURS_UTC: z.string().min(1).default("Mon-Fri 08:00-18:00 UTC"),
+  SUPPORT_ESCALATION: createCsvSchema(z.string().min(1), [
+    "service is best-effort outside support hours",
+    "database restore and DR actions require operator approval",
+    "governed secret incidents escalate through platform-admin review"
+  ]),
   OPENAI_TRACING_DISABLED: envBooleanSchema,
   OPENAI_TRACING_EXPORT_API_KEY: z.string().min(1).optional()
 });
