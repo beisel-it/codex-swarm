@@ -198,3 +198,60 @@ Evidence:
 Residual risks:
 
 - The pattern is intentionally narrow and policy-driven, not a generalized secret broker for multiple providers or arbitrary per-task credential minting.
+
+## e5292537 — Review [128] Retention controls
+
+- Roadmap entry: `ROADMAP.md` Phase 5, Scope, `Retention controls`
+- Verdict: `better`
+- Reasoning: retention is not just documented. The control plane computes retention posture, exposes it in governance reporting and audit exports, and can reconcile retention metadata onto governed runs, artifacts, and events through an admin write path.
+
+Evidence:
+
+- [apps/api/src/services/control-plane-service.ts](/home/florian/codex-swarm/apps/api/src/services/control-plane-service.ts): `getGovernanceAdminReport()` and `exportRunAudit()` compute retention summaries for runs, artifacts, and events.
+- [apps/api/src/services/control-plane-service.ts](/home/florian/codex-swarm/apps/api/src/services/control-plane-service.ts): `reconcileGovernanceRetention()` applies retention metadata with dry-run or apply semantics.
+- [apps/api/src/routes/admin.ts](/home/florian/codex-swarm/apps/api/src/routes/admin.ts): `POST /api/v1/admin/retention/reconcile` exposes the admin reconciliation path with timeline recording.
+- [packages/contracts/src/index.ts](/home/florian/codex-swarm/packages/contracts/src/index.ts): retention policy and reconcile-report contracts are defined in shared schemas.
+- [apps/api/test/app.test.ts](/home/florian/codex-swarm/apps/api/test/app.test.ts): app tests cover governance report and retention reconcile routes.
+- [apps/api/test/control-plane-service.governance.test.ts](/home/florian/codex-swarm/apps/api/test/control-plane-service.governance.test.ts): service tests cover governed retention summaries and metadata application.
+- [docs/admin-guide.md](/home/florian/codex-swarm/docs/admin-guide.md): admins are instructed to dry-run and then apply retention changes through supported surfaces.
+
+Residual risks:
+
+- The current retention flow applies metadata rather than physically deleting governed data, so downstream purge enforcement would need an additional backlog item if hard deletion becomes required.
+
+## 98b7b40f — Review [129] Secret source integrations
+
+- Roadmap entry: `ROADMAP.md` Phase 5, Scope, `Secret source integrations`
+- Verdict: `better`
+- Reasoning: the repo implements a deliberately narrow but real integration surface: environment-based defaults plus a bounded external-manager path for governed repositories, with policy-aware access planning and admin inspection routes.
+
+Evidence:
+
+- [.env.example](/home/florian/codex-swarm/.env.example): operators configure `SECRET_SOURCE_MODE`, `SECRET_PROVIDER`, `REMOTE_SECRET_ENV_NAMES`, `SECRET_ALLOWED_TRUST_LEVELS`, and `POLICY_DRIVEN_SECRET_ACCESS`.
+- [apps/api/src/lib/governance-config.ts](/home/florian/codex-swarm/apps/api/src/lib/governance-config.ts): the control plane derives secret integration boundaries and repository access plans from live config.
+- [apps/api/src/routes/admin.ts](/home/florian/codex-swarm/apps/api/src/routes/admin.ts): `GET /api/v1/admin/secrets/integration-boundary` and `GET /api/v1/admin/secrets/access-plan/:id` expose supported integration state without DB access.
+- [apps/api/src/services/control-plane-service.ts](/home/florian/codex-swarm/apps/api/src/services/control-plane-service.ts): repository secret access plans are computed as `allowed`, `brokered`, or `denied`.
+- [docs/operations/security.md](/home/florian/codex-swarm/docs/operations/security.md): the supported external-manager path is documented as `vault` for governed repositories, with explicit worker-scoped credential boundaries.
+- [docs/admin-guide.md](/home/florian/codex-swarm/docs/admin-guide.md): admins are guided to inspect integration boundary and repository access plans.
+
+Residual risks:
+
+- The supported integration path is intentionally narrow and does not attempt provider sprawl, which is a design choice rather than a feature gap.
+
+## 1e02d203 — Review [130] Admin reporting
+
+- Roadmap entry: `ROADMAP.md` Phase 5, Scope, `Admin reporting`
+- Verdict: `better`
+- Reasoning: the repo provides admin reporting as a live API and documented UI/API workflow rather than leaving it as an implied governance requirement.
+
+Evidence:
+
+- [apps/api/src/routes/admin.ts](/home/florian/codex-swarm/apps/api/src/routes/admin.ts): `GET /api/v1/admin/governance-report` serves an admin-readable governance report and records timeline events when generated.
+- [apps/api/src/services/control-plane-service.ts](/home/florian/codex-swarm/apps/api/src/services/control-plane-service.ts): `getGovernanceAdminReport()` summarizes approval totals/history, retention posture, sensitive repositories, and secret-boundary state within the caller's workspace/team boundary.
+- [apps/api/test/app.test.ts](/home/florian/codex-swarm/apps/api/test/app.test.ts): tests explicitly verify governance admin reporting without direct database access.
+- [docs/admin-guide.md](/home/florian/codex-swarm/docs/admin-guide.md): admin workflow and UI guidance treat governance reporting as a first-class support/signoff surface.
+- [docs/user-guide.md](/home/florian/codex-swarm/docs/user-guide.md): the frontend admin surface is documented for reviewing retention posture, approval provenance, and secret-boundary state.
+
+Residual risks:
+
+- The reporting surface is intentionally operational and governance-focused, not a full BI or historical analytics platform.
