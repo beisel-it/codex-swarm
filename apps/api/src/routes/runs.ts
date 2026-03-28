@@ -1,6 +1,7 @@
 import type { FastifyPluginAsync } from "fastify";
 
 import { idParamSchema, runCreateSchema, runStatusUpdateSchema } from "../http/schemas.js";
+import { isRecoverableDatabaseError } from "../lib/database-fallback.js";
 
 export const runRoutes: FastifyPluginAsync = async (app) => {
   app.get("/runs", async (request) => {
@@ -8,7 +9,15 @@ export const runRoutes: FastifyPluginAsync = async (app) => {
       ? String(request.query.repositoryId)
       : undefined;
 
-    return app.controlPlane.listRuns(repositoryId);
+    try {
+      return await app.controlPlane.listRuns(repositoryId);
+    } catch (error) {
+      if (app.config.NODE_ENV !== "production" && isRecoverableDatabaseError(error)) {
+        return [];
+      }
+
+      throw error;
+    }
   });
 
   app.get("/runs/:id", async (request) => {

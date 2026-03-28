@@ -340,6 +340,51 @@ describe("buildApp", () => {
     await app.close();
   });
 
+  it("returns empty repository and run lists during local database bootstrap failures", async () => {
+    const bootstrapError = Object.assign(new Error("connect ECONNREFUSED 127.0.0.1:5432"), {
+      code: "ECONNREFUSED"
+    });
+
+    controlPlane.listRepositories.mockRejectedValueOnce(bootstrapError);
+    controlPlane.listRuns.mockRejectedValueOnce(bootstrapError);
+
+    const app = await buildApp({
+      config: {
+        NODE_ENV: "development",
+        PORT: 3000,
+        HOST: "127.0.0.1",
+        DATABASE_URL: "postgres://unused/dev",
+        DEV_AUTH_TOKEN: "test-token"
+      },
+      controlPlane: controlPlane as unknown as ControlPlaneService
+    });
+
+    const headers = {
+      authorization: "Bearer test-token"
+    };
+
+    const repositoryResponse = await app.inject({
+      method: "GET",
+      url: "/api/v1/repositories",
+      headers
+    });
+
+    const runResponse = await app.inject({
+      method: "GET",
+      url: "/api/v1/runs",
+      headers
+    });
+
+    expect(repositoryResponse.statusCode).toBe(200);
+    expect(repositoryResponse.headers["x-codex-swarm-degraded"]).toBe("database-unavailable");
+    expect(repositoryResponse.json()).toEqual([]);
+
+    expect(runResponse.statusCode).toBe(200);
+    expect(runResponse.json()).toEqual([]);
+
+    await app.close();
+  });
+
   it("lists approvals and forwards the optional runId filter", async () => {
     controlPlane.listApprovals.mockResolvedValueOnce([
       {
