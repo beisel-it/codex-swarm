@@ -8,10 +8,8 @@
 
 ## Active
 
-- M4 distributed execution: fleet control-plane model, Redis-backed dispatch, remote worker bootstrap, and placement/recovery integration
-- multi-node board visibility and verification remain in progress
-- M5 governance: identity boundaries are in, with audit provenance, retention reconciliation, and governed secret-access controls now landing behind admin routes
-- M6 operations: SLO envelope, backup/restore/DR tooling, and cost/usage/performance reporting are now in active implementation
+- M7 parity review is active across roadmap commitments and is verifying live implementation against `ROADMAP.md`
+- devops review `09ee2cf4` identified a gap on the Phase 4 `Shared artifact store` commitment; the current runtime still permits local-only artifact uploads when no shared store URL is configured
 
 ## Current Validation
 
