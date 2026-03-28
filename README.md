@@ -54,6 +54,12 @@ Operational tooling:
 
 Operations docs:
 
+- [`docs/README.md`](./docs/README.md)
+- [`docs/user-guide.md`](./docs/user-guide.md)
+- [`docs/admin-guide.md`](./docs/admin-guide.md)
+- [`docs/operator-guide.md`](./docs/operator-guide.md)
+- [`docs/support-playbooks.md`](./docs/support-playbooks.md)
+- [`docs/reference-deployments.md`](./docs/reference-deployments.md)
 - [`docs/operations/security.md`](./docs/operations/security.md)
 - [`docs/operations/slo-support.md`](./docs/operations/slo-support.md)
 - [`docs/operations/backup-restore-dr.md`](./docs/operations/backup-restore-dr.md)
