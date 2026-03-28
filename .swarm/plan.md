@@ -38,13 +38,24 @@ M4 implementation is complete:
 
 ### M5
 
-M5 refinement and execution are now active:
+M5 implementation is complete:
 
-- `6980a1bb` Refine Phase 5 roadmap into executable M5 delivery plan
-- identity, workspace isolation, and RBAC
-- policy packs, approval delegation, and stricter repo defaults
+- identity and workspace isolation
+- RBAC, policy packs, approval delegation, and sensitive defaults
 - audit export, retention, and admin reporting
 - governance UI and multi-user verification
+
+### M6
+
+M6 refinement and execution are now active:
+
+- `7ed82e5e` Refine Phase 6 roadmap into executable M6 delivery plan
+- SLOs, support boundaries, and observability envelope
+- backup, restore, and disaster recovery evidence
+- migration and upgrade safety
+- cost, usage, and performance envelope
+- admin/developer/operator docs and reference deployments
+- GA release-candidate validation
 
 ## Dependency Order
 
