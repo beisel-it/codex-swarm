@@ -4,6 +4,7 @@ import {
   approvalCreateSchema,
   approvalResolveSchema,
   agentCreateSchema,
+  validationCreateSchema,
   repositoryCreateSchema,
   runCreateSchema,
   taskCreateSchema
@@ -89,5 +90,17 @@ describe("approvalResolveSchema", () => {
     });
 
     expect(resolution.resolutionPayload).toEqual({});
+  });
+});
+
+describe("validationCreateSchema", () => {
+  it("defaults artifactIds to an empty array", () => {
+    const validation = validationCreateSchema.parse({
+      runId: "550e8400-e29b-41d4-a716-446655440000",
+      name: "typecheck",
+      command: "pnpm typecheck"
+    });
+
+    expect(validation.artifactIds).toEqual([]);
   });
 });

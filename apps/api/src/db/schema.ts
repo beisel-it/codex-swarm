@@ -107,6 +107,7 @@ export const validations = pgTable("validations", {
   command: text("command").notNull(),
   summary: text("summary"),
   artifactPath: text("artifact_path"),
+  artifactIds: jsonb("artifact_ids").$type<string[]>().notNull().default([]),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
 });

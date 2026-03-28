@@ -292,19 +292,91 @@ class FakeVerticalSliceControlPlane {
   }
 
   async listValidations() {
-    return [];
+    return [
+      {
+        id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        runId: ids.run,
+        taskId: ids.taskA,
+        name: "typecheck",
+        status: "passed",
+        command: "pnpm typecheck",
+        summary: "Typecheck passed",
+        artifactPath: "artifacts/validations/typecheck.json",
+        artifactIds: ["cccccccc-cccc-4ccc-8ccc-cccccccccccc"],
+        artifacts: [
+          {
+            id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+            runId: ids.run,
+            taskId: ids.taskA,
+            kind: "report",
+            path: "artifacts/validations/typecheck.json",
+            contentType: "application/json",
+            metadata: {
+              suite: "typecheck"
+            },
+            createdAt: new Date()
+          }
+        ],
+        createdAt: new Date(),
+        updatedAt: new Date()
+      }
+    ];
   }
 
-  async createValidation() {
-    throw new Error("not implemented");
+  async createValidation(input: any) {
+    return {
+      id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      runId: input.runId,
+      taskId: input.taskId ?? null,
+      name: input.name,
+      status: input.status,
+      command: input.command,
+      summary: input.summary ?? null,
+      artifactPath: input.artifactPath ?? null,
+      artifactIds: input.artifactIds ?? [],
+      artifacts: (input.artifactIds ?? []).map((artifactId: string) => ({
+        id: artifactId,
+        runId: input.runId,
+        taskId: input.taskId ?? null,
+        kind: "report",
+        path: input.artifactPath ?? "artifacts/validations/report.json",
+        contentType: "application/json",
+        metadata: {},
+        createdAt: new Date()
+      })),
+      createdAt: new Date(),
+      updatedAt: new Date()
+    };
   }
 
   async listArtifacts() {
-    return [];
+    return [
+      {
+        id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+        runId: ids.run,
+        taskId: ids.taskA,
+        kind: "report",
+        path: "artifacts/validations/typecheck.json",
+        contentType: "application/json",
+        metadata: {
+          suite: "typecheck"
+        },
+        createdAt: new Date()
+      }
+    ];
   }
 
-  async createArtifact() {
-    throw new Error("not implemented");
+  async createArtifact(input: any) {
+    return {
+      id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+      runId: input.runId,
+      taskId: input.taskId ?? null,
+      kind: input.kind,
+      path: input.path,
+      contentType: input.contentType,
+      metadata: input.metadata ?? {},
+      createdAt: new Date()
+    };
   }
 }
 
@@ -626,6 +698,142 @@ describe("buildApp", () => {
         resolutionPayload: {}
       }
     );
+
+    await app.close();
+  });
+
+  it("lists validation history entries with artifact-backed reports", async () => {
+    controlPlane.listValidations.mockResolvedValueOnce([
+      {
+        id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        runId: ids.run,
+        taskId: ids.taskA,
+        name: "typecheck",
+        status: "passed",
+        command: "pnpm typecheck",
+        summary: "Typecheck passed",
+        artifactPath: "artifacts/validations/typecheck.json",
+        artifactIds: ["cccccccc-cccc-4ccc-8ccc-cccccccccccc"],
+        artifacts: [
+          {
+            id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+            runId: ids.run,
+            taskId: ids.taskA,
+            kind: "report",
+            path: "artifacts/validations/typecheck.json",
+            contentType: "application/json",
+            metadata: {
+              suite: "typecheck"
+            },
+            createdAt: "2026-03-28T12:00:00.000Z"
+          }
+        ],
+        createdAt: "2026-03-28T12:00:00.000Z",
+        updatedAt: "2026-03-28T12:05:00.000Z"
+      }
+    ]);
+
+    const app = await buildApp({
+      controlPlane: controlPlane as unknown as ControlPlaneService
+    });
+
+    const response = await app.inject({
+      method: "GET",
+      url: `/api/v1/validations?runId=${ids.run}&taskId=${ids.taskA}`,
+      headers: {
+        authorization: "Bearer codex-swarm-dev-token"
+      }
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual([
+      expect.objectContaining({
+        id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        artifactIds: ["cccccccc-cccc-4ccc-8ccc-cccccccccccc"],
+        artifacts: [
+          expect.objectContaining({
+            id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+            kind: "report"
+          })
+        ]
+      })
+    ]);
+    expect(controlPlane.listValidations).toHaveBeenCalledWith({
+      runId: ids.run,
+      taskId: ids.taskA
+    });
+
+    await app.close();
+  });
+
+  it("records validations with explicit artifact references", async () => {
+    controlPlane.createValidation.mockResolvedValueOnce({
+      id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      runId: ids.run,
+      taskId: ids.taskA,
+      name: "typecheck",
+      status: "passed",
+      command: "pnpm typecheck",
+      summary: "Typecheck passed",
+      artifactPath: "artifacts/validations/typecheck.json",
+      artifactIds: ["cccccccc-cccc-4ccc-8ccc-cccccccccccc"],
+      artifacts: [
+        {
+          id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+          runId: ids.run,
+          taskId: ids.taskA,
+          kind: "report",
+          path: "artifacts/validations/typecheck.json",
+          contentType: "application/json",
+          metadata: {},
+          createdAt: "2026-03-28T12:00:00.000Z"
+        }
+      ],
+      createdAt: "2026-03-28T12:00:00.000Z",
+      updatedAt: "2026-03-28T12:05:00.000Z"
+    });
+
+    const app = await buildApp({
+      controlPlane: controlPlane as unknown as ControlPlaneService
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/v1/validations",
+      headers: {
+        authorization: "Bearer codex-swarm-dev-token"
+      },
+      payload: {
+        runId: ids.run,
+        taskId: ids.taskA,
+        name: "typecheck",
+        status: "passed",
+        command: "pnpm typecheck",
+        summary: "Typecheck passed",
+        artifactPath: "artifacts/validations/typecheck.json",
+        artifactIds: ["cccccccc-cccc-4ccc-8ccc-cccccccccccc"]
+      }
+    });
+
+    expect(response.statusCode).toBe(201);
+    expect(response.json()).toMatchObject({
+      artifactIds: ["cccccccc-cccc-4ccc-8ccc-cccccccccccc"],
+      artifacts: [
+        expect.objectContaining({
+          kind: "report"
+        })
+      ]
+    });
+    expect(controlPlane.createValidation).toHaveBeenCalledWith({
+      runId: ids.run,
+      taskId: ids.taskA,
+      name: "typecheck",
+      status: "passed",
+      command: "pnpm typecheck",
+      summary: "Typecheck passed",
+      artifactPath: "artifacts/validations/typecheck.json",
+      artifactIds: ["cccccccc-cccc-4ccc-8ccc-cccccccccccc"]
+    });
 
     await app.close();
   });

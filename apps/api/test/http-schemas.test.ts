@@ -27,7 +27,7 @@ describe("messageCreateSchema", () => {
 });
 
 describe("validationCreateSchema", () => {
-  it("defaults validation status to pending", () => {
+  it("defaults validation status and artifactIds", () => {
     const validation = validationCreateSchema.parse({
       runId: "550e8400-e29b-41d4-a716-446655440000",
       name: "unit",
@@ -35,6 +35,7 @@ describe("validationCreateSchema", () => {
     });
 
     expect(validation.status).toBe("pending");
+    expect(validation.artifactIds).toEqual([]);
   });
 });
 

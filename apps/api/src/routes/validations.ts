@@ -1,17 +1,12 @@
 import type { FastifyPluginAsync } from "fastify";
-import { z } from "zod";
 
-import { validationCreateSchema } from "../http/schemas.js";
+import { validationCreateSchema, validationsListQuerySchema } from "../http/schemas.js";
 import { requireValue } from "../lib/require-value.js";
-
-const querySchema = z.object({
-  runId: z.uuid()
-});
 
 export const validationRoutes: FastifyPluginAsync = async (app) => {
   app.get("/validations", async (request) => {
-    const { runId } = querySchema.parse(request.query);
-    return app.controlPlane.listValidations(runId);
+    const query = validationsListQuerySchema.parse(request.query);
+    return app.controlPlane.listValidations(query);
   });
 
   app.post("/validations", async (request, reply) => {

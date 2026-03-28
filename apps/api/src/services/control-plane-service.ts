@@ -1,5 +1,7 @@
 import { and, asc, eq, inArray } from "drizzle-orm";
 import {
+  type Artifact,
+  type ArtifactCreateInput,
   type Run,
   type Agent,
   type AgentCreateInput,
@@ -12,7 +14,9 @@ import {
   type Session,
   type Task,
   type TaskCreateInput,
-  type TaskStatusUpdateInput
+  type TaskStatusUpdateInput,
+  type ValidationCreateInput,
+  type ValidationHistoryEntry
 } from "@codex-swarm/contracts";
 import { resolveInitialTaskStatus } from "@codex-swarm/orchestration";
 
@@ -32,9 +36,8 @@ import type { Clock } from "../lib/clock.js";
 import { HttpError } from "../lib/http-error.js";
 import type {
   approvalCreateSchema,
-  artifactCreateSchema,
   messageCreateSchema,
-  validationCreateSchema
+  validationsListQuerySchema
 } from "../http/schemas.js";
 import { z } from "zod";
 
@@ -47,8 +50,9 @@ type AgentCreate = AgentCreateInput;
 type MessageCreate = z.infer<typeof messageCreateSchema>;
 type ApprovalCreate = ApprovalCreateInput;
 type ApprovalResolve = ApprovalResolveInput;
-type ValidationCreate = z.infer<typeof validationCreateSchema>;
-type ArtifactCreate = z.infer<typeof artifactCreateSchema>;
+type ValidationCreate = ValidationCreateInput;
+type ArtifactCreate = ArtifactCreateInput;
+type ValidationListQuery = z.infer<typeof validationsListQuerySchema>;
 
 function expectPersistedRecord<T>(record: T | undefined, entity: string): T {
   if (!record) {
@@ -388,6 +392,12 @@ export class ControlPlaneService {
       await this.assertTaskExists(input.taskId);
     }
 
+    const artifactIds = await this.resolveValidationArtifactIds(
+      input.runId,
+      input.taskId ?? null,
+      input.artifactIds,
+      input.artifactPath ?? null
+    );
     const now = this.clock.now();
     const [validation] = await this.db.insert(validations).values({
       id: crypto.randomUUID(),
@@ -398,16 +408,34 @@ export class ControlPlaneService {
       command: input.command,
       summary: input.summary ?? null,
       artifactPath: input.artifactPath ?? null,
+      artifactIds,
       createdAt: now,
       updatedAt: now
     }).returning();
 
-    return expectPersistedRecord(validation, "validation");
+    return this.hydrateValidationHistoryEntry(expectPersistedRecord(validation, "validation"));
   }
 
-  async listValidations(runId: string) {
+  async listValidations(query: ValidationListQuery | string): Promise<ValidationHistoryEntry[]> {
+    const { runId, taskId } = typeof query === "string"
+      ? { runId: query, taskId: undefined }
+      : query;
+
     await this.assertRunExists(runId);
-    return this.db.select().from(validations).where(eq(validations.runId, runId)).orderBy(asc(validations.createdAt));
+
+    const clauses = [eq(validations.runId, runId)];
+
+    if (taskId) {
+      clauses.push(eq(validations.taskId, taskId));
+    }
+
+    const rows = await this.db
+      .select()
+      .from(validations)
+      .where(and(...clauses))
+      .orderBy(asc(validations.createdAt));
+
+    return this.hydrateValidationHistory(rows);
   }
 
   async createArtifact(input: ArtifactCreate) {
@@ -434,6 +462,36 @@ export class ControlPlaneService {
   async listArtifacts(runId: string) {
     await this.assertRunExists(runId);
     return this.db.select().from(artifacts).where(eq(artifacts.runId, runId)).orderBy(asc(artifacts.createdAt));
+  }
+
+  private async resolveValidationArtifactIds(
+    runId: string,
+    taskId: string | null,
+    artifactIds: string[],
+    artifactPath: string | null
+  ) {
+    if (artifactIds.length > 0) {
+      await this.assertArtifactsBelongToRun(runId, artifactIds);
+      return artifactIds;
+    }
+
+    if (!artifactPath) {
+      return [];
+    }
+
+    const clauses = [eq(artifacts.runId, runId), eq(artifacts.path, artifactPath)];
+
+    if (taskId) {
+      clauses.push(eq(artifacts.taskId, taskId));
+    }
+
+    const [artifact] = await this.db
+      .select({ id: artifacts.id })
+      .from(artifacts)
+      .where(and(...clauses))
+      .orderBy(asc(artifacts.createdAt));
+
+    return artifact ? [artifact.id] : [];
   }
 
   private async assertRepositoryExists(repositoryId: string) {
@@ -472,6 +530,64 @@ export class ControlPlaneService {
     }
 
     return agent;
+  }
+
+  private async assertArtifactsBelongToRun(runId: string, artifactIds: string[]) {
+    if (artifactIds.length === 0) {
+      return;
+    }
+
+    const rows = await this.db
+      .select({ id: artifacts.id, runId: artifacts.runId })
+      .from(artifacts)
+      .where(inArray(artifacts.id, artifactIds));
+
+    if (rows.length !== artifactIds.length) {
+      throw new HttpError(404, "one or more validation artifacts were not found");
+    }
+
+    if (rows.some((artifact) => artifact.runId !== runId)) {
+      throw new HttpError(409, "validation artifacts must belong to the same run");
+    }
+  }
+
+  private async hydrateValidationHistory(rows: typeof validations.$inferSelect[]): Promise<ValidationHistoryEntry[]> {
+    if (rows.length === 0) {
+      return [];
+    }
+
+    const artifactIds = [...new Set(rows.flatMap((row) => row.artifactIds))];
+    const linkedArtifacts = artifactIds.length === 0
+      ? []
+      : await this.db
+        .select()
+        .from(artifacts)
+        .where(inArray(artifacts.id, artifactIds))
+        .orderBy(asc(artifacts.createdAt));
+
+    const artifactsById = new Map<string, Artifact>(
+      linkedArtifacts.map((artifact) => {
+        const normalizedArtifact: Artifact = {
+          ...artifact,
+          kind: artifact.kind as Artifact["kind"]
+        };
+
+        return [artifact.id, normalizedArtifact] as const;
+      })
+    );
+
+    return rows.map((row) => ({
+      ...row,
+      status: row.status as ValidationHistoryEntry["status"],
+      artifacts: row.artifactIds
+        .map((artifactId) => artifactsById.get(artifactId))
+        .filter((artifact): artifact is Artifact => artifact !== undefined)
+    }));
+  }
+
+  private async hydrateValidationHistoryEntry(row: typeof validations.$inferSelect): Promise<ValidationHistoryEntry> {
+    const [validation] = await this.hydrateValidationHistory([row]);
+    return expectPersistedRecord(validation, "validation");
   }
 
   private async assertDependenciesBelongToRun(runId: string, dependencyIds: string[]) {

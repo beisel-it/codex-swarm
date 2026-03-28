@@ -136,6 +136,60 @@ export const approvalsListQuerySchema = z.object({
   runId: z.uuid().optional()
 });
 
+export const artifactSchema = z.object({
+  id: z.uuid(),
+  runId: z.uuid(),
+  taskId: z.uuid().nullable(),
+  kind: z.enum(artifactKinds),
+  path: z.string().min(1),
+  contentType: z.string().min(1),
+  metadata: z.record(z.string(), z.unknown()).default({}),
+  createdAt: z.date()
+});
+
+export const artifactCreateSchema = z.object({
+  runId: z.uuid(),
+  taskId: z.uuid().optional(),
+  kind: z.enum(artifactKinds),
+  path: z.string().min(1),
+  contentType: z.string().min(1),
+  metadata: z.record(z.string(), z.unknown()).default({})
+});
+
+export const validationSchema = z.object({
+  id: z.uuid(),
+  runId: z.uuid(),
+  taskId: z.uuid().nullable(),
+  name: z.string().min(1),
+  status: z.enum(validationStatuses),
+  command: z.string().min(1),
+  summary: z.string().min(1).nullable(),
+  artifactPath: z.string().min(1).nullable(),
+  artifactIds: z.array(z.uuid()).default([]),
+  createdAt: z.date(),
+  updatedAt: z.date()
+});
+
+export const validationHistoryEntrySchema = validationSchema.extend({
+  artifacts: z.array(artifactSchema)
+});
+
+export const validationCreateSchema = z.object({
+  runId: z.uuid(),
+  taskId: z.uuid().optional(),
+  name: z.string().min(1),
+  status: z.enum(validationStatuses).default("pending"),
+  command: z.string().min(1),
+  summary: z.string().min(1).optional(),
+  artifactPath: z.string().min(1).optional(),
+  artifactIds: z.array(z.uuid()).default([])
+});
+
+export const validationsListQuerySchema = z.object({
+  runId: z.uuid(),
+  taskId: z.uuid().optional()
+});
+
 export const eventsListQuerySchema = z.object({
   runId: z.uuid().optional(),
   limit: z.coerce.number().int().positive().max(200).default(100)
@@ -212,10 +266,16 @@ export type Task = z.infer<typeof taskSchema>;
 export type Agent = z.infer<typeof agentSchema>;
 export type Session = z.infer<typeof sessionSchema>;
 export type Approval = z.infer<typeof approvalSchema>;
+export type Artifact = z.infer<typeof artifactSchema>;
 export type RunDetail = z.infer<typeof runDetailSchema>;
 export type ApprovalsListQuery = z.infer<typeof approvalsListQuerySchema>;
 export type ApprovalCreateInput = z.infer<typeof approvalCreateSchema>;
 export type ApprovalResolveInput = z.infer<typeof approvalResolveSchema>;
+export type ArtifactCreateInput = z.infer<typeof artifactCreateSchema>;
+export type Validation = z.infer<typeof validationSchema>;
+export type ValidationHistoryEntry = z.infer<typeof validationHistoryEntrySchema>;
+export type ValidationCreateInput = z.infer<typeof validationCreateSchema>;
+export type ValidationsListQuery = z.infer<typeof validationsListQuerySchema>;
 export type EventsListQuery = z.infer<typeof eventsListQuerySchema>;
 export type ControlPlaneEvent = z.infer<typeof controlPlaneEventSchema>;
 export type ControlPlaneMetrics = z.infer<typeof controlPlaneMetricsSchema>;
