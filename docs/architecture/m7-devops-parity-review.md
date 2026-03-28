@@ -52,3 +52,77 @@ Residual risks:
 Backlog follow-up:
 
 - Create a backlog item for a concrete MCP-over-HTTP transport implementation and operator runbook for remote/shared services, or narrow the roadmap wording to match the current stdio-only runtime.
+
+## 42381f59 — Review [010] Confirm security defaults
+
+- Roadmap entry: `ROADMAP.md` Phase 0, Scope, `Confirm security defaults: sandbox, approvals, secret scope`
+- Verdict: `better`
+- Reasoning: the repo does not just note these defaults architecturally. It encodes worker sandbox and approval defaults in the runtime helpers, publishes operator-facing secret-boundary configuration, and exposes governed secret-scope inspection routes for admins.
+
+Evidence:
+
+- [apps/worker/src/index.ts](/home/florian/codex-swarm/apps/worker/src/index.ts): the runnable worker example uses `sandbox: "workspace-write"` and `approvalPolicy: "on-request"` as explicit defaults for Codex sessions.
+- [apps/worker/src/runtime.ts](/home/florian/codex-swarm/apps/worker/src/runtime.ts): `buildCodexServerCommand()` and session request builders carry sandbox and approval-policy values into worker execution.
+- [apps/worker/test/runtime.test.ts](/home/florian/codex-swarm/apps/worker/test/runtime.test.ts): tests cover the stdio command shape with explicit sandbox and approval-policy arguments.
+- [apps/api/src/lib/governance-config.ts](/home/florian/codex-swarm/apps/api/src/lib/governance-config.ts): the control plane computes a secret-integration boundary and repository-specific access plan rather than leaving secret scope informal.
+- [.env.example](/home/florian/codex-swarm/.env.example): operators get explicit secret-scope controls through `REMOTE_SECRET_ENV_NAMES`, `SECRET_ALLOWED_TRUST_LEVELS`, `SENSITIVE_POLICY_PROFILES`, and `SECRET_DISTRIBUTION_BOUNDARY`.
+- [docs/operations/security.md](/home/florian/codex-swarm/docs/operations/security.md): the distribution boundary states that remote workers only receive task-scoped secret env vars and that sensitive repositories must use the brokered path.
+- [README.md](/home/florian/codex-swarm/README.md): admin-facing secret boundary endpoints are documented for inspection and operations.
+
+Residual risks:
+
+- Sandbox and approval defaults are explicit, but repo-specific overrides and stricter profiles rely on higher-level orchestration paths that are reviewed in separate roadmap items.
+
+## 363f9807 — Review [069] OpenAI tracing integration
+
+- Roadmap entry: `ROADMAP.md` Phase 2, Observability, `Integrate OpenAI tracing`
+- Verdict: `better`
+- Reasoning: the implementation does more than a thin provider hook. It maintains local request trace context, emits stable trace headers, and forwards request metadata into the OpenAI tracing integration when the tracing module and export key are available.
+
+Evidence:
+
+- [apps/api/src/lib/observability.ts](/home/florian/codex-swarm/apps/api/src/lib/observability.ts): `loadTracingModule()` imports `@openai/agents`, `configureTracing()` sets the export API key and disabled state, and `withTrace()` forwards request metadata into `tracing.withTrace(...)`.
+- [apps/api/src/lib/observability.ts](/home/florian/codex-swarm/apps/api/src/lib/observability.ts): `beginRequest()` creates or accepts `x-codex-trace-id` and returns it on the response for request correlation.
+- [apps/api/src/db/schema.ts](/home/florian/codex-swarm/apps/api/src/db/schema.ts): control-plane events persist `traceId` durably.
+- [apps/api/test/app.test.ts](/home/florian/codex-swarm/apps/api/test/app.test.ts): app tests exercise event and metrics surfaces that depend on the observability service wiring.
+
+Residual risks:
+
+- The repo proves integration wiring and trace propagation, but it does not include an end-to-end assertion against a live OpenAI tracing backend.
+
+## 4bd84a60 — Review [070] Control-plane event timeline
+
+- Roadmap entry: `ROADMAP.md` Phase 2, Observability, `Add control-plane event timeline`
+- Verdict: `better`
+- Reasoning: the repo includes a persisted event model, a queryable API route, trace and actor metadata on events, and documentation that carries the timeline into operator workflows.
+
+Evidence:
+
+- [apps/api/src/lib/observability.ts](/home/florian/codex-swarm/apps/api/src/lib/observability.ts): `recordTimelineEvent()` persists control-plane events with `traceId`, actor context, entity metadata, and timestamps, and `listEvents()` returns them in chronological order.
+- [apps/api/src/routes/events.ts](/home/florian/codex-swarm/apps/api/src/routes/events.ts): `GET /api/v1/events` exposes the live event timeline.
+- [apps/api/src/db/schema.ts](/home/florian/codex-swarm/apps/api/src/db/schema.ts): the `controlPlaneEvents` table provides durable storage for the timeline.
+- [apps/api/test/app.test.ts](/home/florian/codex-swarm/apps/api/test/app.test.ts): tests cover the empty timeline fallback and delegated event timeline queries.
+- [docs/operator-guide.md](/home/florian/codex-swarm/docs/operator-guide.md): operators are directed to use the observability surfaces, including `/api/v1/metrics`, in the operating loop; event evidence is also captured in audit and governance routes.
+
+Residual risks:
+
+- Operator docs emphasize metrics more directly than `/api/v1/events`, so event-timeline usage is currently stronger in API/test evidence than in runbook narrative.
+
+## 72e17c2f — Review [071] Metrics for retries, failures, queue depth
+
+- Roadmap entry: `ROADMAP.md` Phase 2, Observability, `Add metrics for retries, failures, queue depth`
+- Verdict: `better`
+- Reasoning: the required metrics exist and are exposed through `GET /api/v1/metrics`, and the implementation goes further by adding usage, cost, performance, and SLO envelope reporting on the same surface.
+
+Evidence:
+
+- [apps/api/src/lib/observability.ts](/home/florian/codex-swarm/apps/api/src/lib/observability.ts): `getMetrics()` returns `queueDepth`, `retries`, and `failures` directly from persisted control-plane state.
+- [apps/api/src/routes/metrics.ts](/home/florian/codex-swarm/apps/api/src/routes/metrics.ts): `GET /api/v1/metrics` exposes the observability payload.
+- [apps/api/test/app.test.ts](/home/florian/codex-swarm/apps/api/test/app.test.ts): tests cover the zeroed metrics fallback and injected live metrics payload, including queue depth, retry counts, and failures.
+- [README.md](/home/florian/codex-swarm/README.md): the metrics route is documented as an operator-facing surface.
+- [docs/operations/cost-usage-performance.md](/home/florian/codex-swarm/docs/operations/cost-usage-performance.md): runbook documents the expanded metrics contract.
+- [docs/operations/slo-support.md](/home/florian/codex-swarm/docs/operations/slo-support.md): SLO operations are explicitly tied to `GET /api/v1/metrics`.
+
+Residual risks:
+
+- The metrics surface is operator-oriented rather than Prometheus-native, so external scraping/export compatibility is out of scope unless a later backlog item adds it.
