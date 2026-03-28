@@ -552,3 +552,25 @@ Evidence:
 Residual risks:
 
 - Utilization is based on reported node metadata rather than an independently sampled telemetry pipeline, but that still satisfies the roadmap deliverable for a visible node-level health/utilization view.
+
+## Task `b7b83d64`
+
+Roadmap entry:
+
+- Phase 5 deliverable: `Approval and audit trail export`
+
+Verdict:
+
+- parity
+
+Evidence:
+
+- The API exposes a dedicated run audit-export route at `GET /api/v1/runs/:id/audit-export` in `apps/api/src/routes/runs.ts`.
+- `ControlPlaneService.exportRunAudit` assembles repository, run, task, agent, session, worker-node, approval, validation, artifact, event, retention, and provenance data into one export shape in `apps/api/src/services/control-plane-service.ts`.
+- Approval provenance is normalized through `buildApprovalAuditEntry(...)`, which includes requested-by actor context, resolver actor context, delegation data, resolved-by-delegate status, payloads, and policy profile in `apps/api/src/services/control-plane-service.ts`.
+- Integration coverage verifies the audit-export route and provenance payload shape in `apps/api/test/app.test.ts`, and governance service tests verify persisted approval/event history export behavior in `apps/api/test/control-plane-service.governance.test.ts`.
+- The admin UI hydrates the audit export and approval provenance into the browser surface in `frontend/src/App.tsx`, and both `docs/admin-guide.md` and `docs/user-guide.md` document audit/provenance review as a supported workflow.
+
+Residual risks:
+
+- This verdict covers run-scoped audit export and approval provenance. It does not imply organization-wide external archival or compliance-system delivery beyond the exported payload the repo currently defines.
