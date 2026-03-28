@@ -410,3 +410,25 @@ Residual risks:
 Backlog follow-up:
 
 - Add real load and soak test assets plus runnable acceptance guidance, or explicitly narrow the roadmap wording to the current bounded HTTP concurrency probe.
+
+## Task `e2815a2a`
+
+Roadmap entry:
+
+- Phase 3 deliverable: `Reusable role and skill starter packs`
+
+Verdict:
+
+- parity
+
+Evidence:
+
+- The repo ships a checked-in role pack under `.codex/agents/` with distinct leader, architect, implementer, reviewer, and tester profiles expressed as reusable TOML assets.
+- `.codex/config.toml` wires the starter-pack directories for agents, skills, and repo profiles into one reusable workspace configuration surface.
+- The reusable workflow skill pack is checked in under `.agents/skills/` with `plan-from-spec`, `create-task-dag`, `validate-milestone`, and `prepare-pr` skills.
+- Stack-specific starter defaults are checked in under `templates/repo-profiles/` for Node, Python, JVM, and Go repositories.
+- `README.md` documents these assets together under the `Productivity Packs` section as the shipped starter-pack surface.
+
+Residual risks:
+
+- This verdict covers the existence and wiring of reusable starter-pack assets. Separate roadmap item `[102]` remains a gap because the repo does not prove these packs measurably reduce prompt/setup overhead.
