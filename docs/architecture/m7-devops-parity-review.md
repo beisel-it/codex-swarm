@@ -27,3 +27,28 @@ Residual risks:
 Backlog follow-up:
 
 - Create a new backlog item to implement a real shared artifact store path for remote workers, including upload and retrieval semantics, or explicitly narrow the roadmap/deployment claim to metadata-only artifact tracking.
+
+## 186ffaf5 — Review [115] MCP transport evolution
+
+- Roadmap entry: `ROADMAP.md` Phase 4, Distributed execution, MCP transport evolution, `prefer stdio locally and streamable HTTP for remote/shared services`
+- Verdict: `gap`
+- Reasoning: the live worker runtime implements only local stdio `codex mcp-server` command construction and request payload builders. There is no remote HTTP MCP transport implementation, no streamable HTTP client/server path for shared services, and no operator doc that shows such a transport being deployed.
+
+Evidence:
+
+- [ROADMAP.md](/home/florian/codex-swarm/ROADMAP.md): the Phase 4 MCP transport entry explicitly calls for `prefer stdio locally and streamable HTTP for remote/shared services`.
+- [apps/worker/src/runtime.ts](/home/florian/codex-swarm/apps/worker/src/runtime.ts): `buildCodexServerCommand()` only constructs a local `codex mcp-server` process invocation and does not model an HTTP transport.
+- [apps/worker/src/runtime.ts](/home/florian/codex-swarm/apps/worker/src/runtime.ts): `buildCodexSessionStartRequest()` and `buildCodexSessionReplyRequest()` build local tool invocation payloads, not remote transport envelopes.
+- [apps/worker/test/runtime.test.ts](/home/florian/codex-swarm/apps/worker/test/runtime.test.ts): tests verify the stdio command shape and local request payloads only.
+- [docs/reference-deployments.md](/home/florian/codex-swarm/docs/reference-deployments.md): the multi-node deployment reference documents shared Postgres, Redis, and artifact access, but does not describe any remote MCP HTTP transport path.
+- Repo-wide search for `streamable`, `SSE`, and MCP-over-HTTP transport terms finds the roadmap/review text and stdio-oriented worker runtime code, but no remote implementation surface.
+
+Residual risks:
+
+- Remote workers currently rely on ad hoc runtime assumptions rather than a documented or implemented MCP-over-HTTP transport boundary.
+- The roadmap claim suggests transport evolution away from stdio-only local execution, but operators cannot validate or deploy that split from the current repo.
+- Distributed debugging and compatibility expectations may be overstated until a remote/shared MCP transport exists.
+
+Backlog follow-up:
+
+- Create a backlog item for a concrete MCP-over-HTTP transport implementation and operator runbook for remote/shared services, or narrow the roadmap wording to match the current stdio-only runtime.
