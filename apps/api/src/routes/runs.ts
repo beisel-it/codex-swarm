@@ -1,6 +1,12 @@
 import type { FastifyPluginAsync } from "fastify";
 
-import { idParamSchema, runCreateSchema, runStatusUpdateSchema } from "../http/schemas.js";
+import {
+  idParamSchema,
+  runBranchPublishSchema,
+  runCreateSchema,
+  runPullRequestHandoffSchema,
+  runStatusUpdateSchema
+} from "../http/schemas.js";
 import { isRecoverableDatabaseError } from "../lib/database-fallback.js";
 import { requireValue } from "../lib/require-value.js";
 
@@ -68,5 +74,51 @@ export const runRoutes: FastifyPluginAsync = async (app) => {
 
       return run;
     }, { route: "runs.update-status" });
+  });
+
+  app.post("/runs/:id/publish-branch", async (request) => {
+    return app.observability.withTrace("api.runs.publish-branch", async () => {
+      const { id } = idParamSchema.parse(request.params);
+      const input = runBranchPublishSchema.parse(request.body);
+      const run = requireValue(
+        await app.controlPlane.publishRunBranch(id, input),
+        "control plane returned no run"
+      );
+
+      await app.observability.recordTimelineEvent({
+        runId: run.id,
+        eventType: "run.branch_published",
+        entityType: "run",
+        entityId: run.id,
+        status: run.handoffStatus,
+        summary: `Branch ${run.publishedBranch ?? run.branchName ?? "unknown"} published`
+      });
+
+      return run;
+    }, { route: "runs.publish-branch" });
+  });
+
+  app.post("/runs/:id/pull-request-handoff", async (request) => {
+    return app.observability.withTrace("api.runs.pull-request-handoff", async () => {
+      const { id } = idParamSchema.parse(request.params);
+      const input = runPullRequestHandoffSchema.parse(request.body);
+      const run = requireValue(
+        await app.controlPlane.createRunPullRequestHandoff(id, input),
+        "control plane returned no run"
+      );
+
+      await app.observability.recordTimelineEvent({
+        runId: run.id,
+        eventType: "run.pull_request_handoff_created",
+        entityType: "run",
+        entityId: run.id,
+        status: run.handoffStatus,
+        summary: run.pullRequestUrl
+          ? `Pull request handoff created at ${run.pullRequestUrl}`
+          : "Manual pull request handoff prepared"
+      });
+
+      return run;
+    }, { route: "runs.pull-request-handoff" });
   });
 };

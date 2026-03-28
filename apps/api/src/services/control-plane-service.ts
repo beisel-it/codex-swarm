@@ -7,9 +7,12 @@ import {
   type AgentCreateInput,
   type ApprovalCreateInput,
   type ApprovalResolveInput,
+  type Repository,
   type RepositoryCreateInput,
+  type RunBranchPublishInput,
   type RunCreateInput,
   type RunDetail,
+  type RunPullRequestHandoffInput,
   type RunStatusUpdateInput,
   type Session,
   type Task,
@@ -37,6 +40,8 @@ import { HttpError } from "../lib/http-error.js";
 import type {
   approvalCreateSchema,
   messageCreateSchema,
+  runBranchPublishSchema,
+  runPullRequestHandoffSchema,
   validationsListQuerySchema
 } from "../http/schemas.js";
 import { z } from "zod";
@@ -53,6 +58,34 @@ type ApprovalResolve = ApprovalResolveInput;
 type ValidationCreate = ValidationCreateInput;
 type ArtifactCreate = ArtifactCreateInput;
 type ValidationListQuery = z.infer<typeof validationsListQuerySchema>;
+type RunBranchPublish = z.infer<typeof runBranchPublishSchema>;
+type RunPullRequestHandoff = z.infer<typeof runPullRequestHandoffSchema>;
+
+function inferRepositoryProvider(url: string): Repository["provider"] {
+  const normalizedUrl = url.toLowerCase();
+
+  if (normalizedUrl.includes("github.com")) {
+    return "github";
+  }
+
+  if (normalizedUrl.includes("gitlab")) {
+    return "gitlab";
+  }
+
+  if (normalizedUrl.startsWith("file://") || normalizedUrl.includes("localhost")) {
+    return "local";
+  }
+
+  return "other";
+}
+
+function dollarsToCents(value: number | undefined) {
+  return value === undefined ? null : Math.round(value * 100);
+}
+
+function centsToDollars(value: number | null) {
+  return value === null ? null : value / 100;
+}
 
 function expectPersistedRecord<T>(record: T | undefined, entity: string): T {
   if (!record) {
@@ -69,7 +102,8 @@ export class ControlPlaneService {
   ) {}
 
   async listRepositories() {
-    return this.db.select().from(repositories).orderBy(asc(repositories.createdAt));
+    const rows = await this.db.select().from(repositories).orderBy(asc(repositories.createdAt));
+    return rows.map((repository) => this.mapRepository(repository));
   }
 
   async createRepository(input: RepositoryCreate) {
@@ -80,21 +114,25 @@ export class ControlPlaneService {
       id,
       name: input.name,
       url: input.url,
+      provider: input.provider ?? inferRepositoryProvider(input.url),
       defaultBranch: input.defaultBranch,
       localPath: input.localPath ?? null,
+      trustLevel: input.trustLevel,
       createdAt: now,
       updatedAt: now
     }).returning();
 
-    return expectPersistedRecord(repository, "repository");
+    return this.mapRepository(expectPersistedRecord(repository, "repository"));
   }
 
   async listRuns(repositoryId?: string) {
     if (repositoryId) {
-      return this.db.select().from(runs).where(eq(runs.repositoryId, repositoryId)).orderBy(asc(runs.createdAt));
+      const rows = await this.db.select().from(runs).where(eq(runs.repositoryId, repositoryId)).orderBy(asc(runs.createdAt));
+      return rows.map((run) => this.mapRun(run));
     }
 
-    return this.db.select().from(runs).orderBy(asc(runs.createdAt));
+    const rows = await this.db.select().from(runs).orderBy(asc(runs.createdAt));
+    return rows.map((run) => this.mapRun(run));
   }
 
   async getRun(runId: string): Promise<RunDetail> {
@@ -116,10 +154,7 @@ export class ControlPlaneService {
     ]);
 
     return {
-      ...run,
-      status: run.status as Run["status"],
-      handoffStatus: run.handoffStatus as Run["handoffStatus"],
-      pullRequestStatus: run.pullRequestStatus as Run["pullRequestStatus"],
+      ...this.mapRun(run),
       tasks: runTasks.map((task): Task => ({
         ...task,
         status: task.status as Task["status"]
@@ -145,13 +180,24 @@ export class ControlPlaneService {
       status: "pending",
       branchName: input.branchName ?? null,
       planArtifactPath: input.planArtifactPath ?? null,
+      budgetTokens: input.budgetTokens ?? null,
+      budgetCostUsd: dollarsToCents(input.budgetCostUsd),
+      concurrencyCap: input.concurrencyCap,
+      policyProfile: input.policyProfile ?? null,
+      publishedBranch: null,
+      branchPublishedAt: null,
+      pullRequestUrl: null,
+      pullRequestNumber: null,
+      pullRequestStatus: null,
+      handoffStatus: "pending",
+      completedAt: null,
       metadata: input.metadata,
       createdBy,
       createdAt: now,
       updatedAt: now
     }).returning();
 
-    return expectPersistedRecord(run, "run");
+    return this.mapRun(expectPersistedRecord(run, "run"));
   }
 
   async updateRunStatus(runId: string, input: RunStatusUpdate) {
@@ -161,10 +207,86 @@ export class ControlPlaneService {
     const [run] = await this.db.update(runs).set({
       status: input.status,
       planArtifactPath: input.planArtifactPath ?? null,
+      completedAt: input.status === "completed" ? now : null,
       updatedAt: now
     }).where(eq(runs.id, runId)).returning();
 
-    return expectPersistedRecord(run, "run");
+    return this.mapRun(expectPersistedRecord(run, "run"));
+  }
+
+  async publishRunBranch(runId: string, input: RunBranchPublish) {
+    const existingRun = await this.assertRunExists(runId);
+    const now = this.clock.now();
+    const branchName = input.branchName ?? existingRun.branchName;
+
+    if (!branchName) {
+      throw new HttpError(409, "run does not have a branch to publish");
+    }
+
+    const [run] = await this.db.update(runs).set({
+      branchName,
+      publishedBranch: branchName,
+      branchPublishedAt: now,
+      handoffStatus: "branch_published",
+      updatedAt: now
+    }).where(eq(runs.id, runId)).returning();
+
+    return this.mapRun(expectPersistedRecord(run, "run"));
+  }
+
+  async createRunPullRequestHandoff(runId: string, input: RunPullRequestHandoff) {
+    const now = this.clock.now();
+    const run = await this.assertRunExists(runId);
+    const repository = await this.assertRepositoryExists(run.repositoryId);
+    const headBranch = input.headBranch ?? run.publishedBranch ?? run.branchName;
+
+    if (!headBranch) {
+      throw new HttpError(409, "run must publish a branch before PR handoff");
+    }
+
+    const baseBranch = input.baseBranch ?? repository.defaultBranch;
+    const handoffStatus = input.url
+      ? input.status === "merged"
+        ? "merged"
+        : input.status === "closed"
+          ? "closed"
+          : "pr_open"
+      : "manual_handoff";
+
+    const [updatedRun] = await this.db.transaction(async (tx) => {
+      const [persistedRun] = await tx.update(runs).set({
+        publishedBranch: headBranch,
+        pullRequestUrl: input.url ?? null,
+        pullRequestNumber: input.number ?? null,
+        pullRequestStatus: input.url ? input.status : null,
+        handoffStatus,
+        updatedAt: now
+      }).where(eq(runs.id, runId)).returning();
+
+      await tx.insert(artifacts).values({
+        id: crypto.randomUUID(),
+        runId,
+        taskId: null,
+        kind: input.url ? "pr_link" : "report",
+        path: input.url ?? `.swarm/handoffs/${runId}/pull-request.json`,
+        contentType: input.url ? "text/uri-list" : "application/json",
+        metadata: {
+          provider: input.provider ?? repository.provider,
+          title: input.title,
+          body: input.body,
+          baseBranch,
+          headBranch,
+          pullRequestNumber: input.number ?? null,
+          pullRequestStatus: input.url ? input.status : "manual_handoff",
+          createdBy: input.createdBy
+        },
+        createdAt: now
+      });
+
+      return [persistedRun];
+    });
+
+    return this.mapRun(expectPersistedRecord(updatedRun, "run"));
   }
 
   async listTasks(runId?: string) {
@@ -497,11 +619,13 @@ export class ControlPlaneService {
   }
 
   private async assertRepositoryExists(repositoryId: string) {
-    const [repository] = await this.db.select({ id: repositories.id }).from(repositories).where(eq(repositories.id, repositoryId));
+    const [repository] = await this.db.select().from(repositories).where(eq(repositories.id, repositoryId));
 
     if (!repository) {
       throw new HttpError(404, `repository ${repositoryId} not found`);
     }
+
+    return repository;
   }
 
   private async assertRunExists(runId: string) {
@@ -590,6 +714,24 @@ export class ControlPlaneService {
   private async hydrateValidationHistoryEntry(row: typeof validations.$inferSelect): Promise<ValidationHistoryEntry> {
     const [validation] = await this.hydrateValidationHistory([row]);
     return expectPersistedRecord(validation, "validation");
+  }
+
+  private mapRepository(repository: typeof repositories.$inferSelect): Repository {
+    return {
+      ...repository,
+      provider: repository.provider as Repository["provider"],
+      trustLevel: repository.trustLevel as Repository["trustLevel"]
+    };
+  }
+
+  private mapRun(run: typeof runs.$inferSelect): Run {
+    return {
+      ...run,
+      status: run.status as Run["status"],
+      budgetCostUsd: centsToDollars(run.budgetCostUsd),
+      pullRequestStatus: run.pullRequestStatus as Run["pullRequestStatus"],
+      handoffStatus: run.handoffStatus as Run["handoffStatus"]
+    };
   }
 
   private async assertDependenciesBelongToRun(runId: string, dependencyIds: string[]) {

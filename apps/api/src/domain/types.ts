@@ -1,7 +1,7 @@
 export const runStatuses = ["pending", "planning", "in_progress", "awaiting_approval", "completed", "failed", "cancelled"] as const;
 export const taskStatuses = ["pending", "blocked", "in_progress", "awaiting_review", "completed", "failed", "cancelled"] as const;
 export const approvalStatuses = ["pending", "approved", "rejected"] as const;
-export const artifactKinds = ["plan", "patch", "log", "report", "diff", "screenshot", "other"] as const;
+export const artifactKinds = ["plan", "patch", "log", "report", "diff", "screenshot", "pr_link", "other"] as const;
 export const validationStatuses = ["pending", "passed", "failed"] as const;
 export const agentStatuses = ["provisioning", "idle", "busy", "paused", "stopped", "failed"] as const;
 export const messageKinds = ["direct", "broadcast", "system"] as const;

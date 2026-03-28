@@ -5,15 +5,21 @@ export const taskStatuses = ["pending", "blocked", "in_progress", "awaiting_revi
 export const agentStatuses = ["provisioning", "idle", "busy", "paused", "stopped", "failed"] as const;
 export const approvalStatuses = ["pending", "approved", "rejected"] as const;
 export const approvalKinds = ["plan", "patch", "merge", "network", "policy_exception"] as const;
-export const artifactKinds = ["plan", "patch", "log", "report", "diff", "screenshot", "other"] as const;
+export const artifactKinds = ["plan", "patch", "log", "report", "diff", "screenshot", "pr_link", "other"] as const;
 export const validationStatuses = ["pending", "passed", "failed"] as const;
 export const messageKinds = ["direct", "broadcast", "system"] as const;
+export const repositoryProviders = ["github", "gitlab", "local", "other"] as const;
+export const repositoryTrustLevels = ["trusted", "sandboxed", "restricted"] as const;
+export const pullRequestStatuses = ["draft", "open", "merged", "closed"] as const;
+export const handoffStatuses = ["pending", "branch_published", "pr_open", "manual_handoff", "merged", "closed"] as const;
 
 export const repositoryCreateSchema = z.object({
   name: z.string().min(1),
   url: z.string().url(),
+  provider: z.enum(repositoryProviders).optional(),
   defaultBranch: z.string().min(1).default("main"),
-  localPath: z.string().min(1).optional()
+  localPath: z.string().min(1).optional(),
+  trustLevel: z.enum(repositoryTrustLevels).default("trusted")
 });
 
 export const runCreateSchema = z.object({
@@ -21,6 +27,10 @@ export const runCreateSchema = z.object({
   goal: z.string().min(1),
   branchName: z.string().min(1).optional(),
   planArtifactPath: z.string().min(1).optional(),
+  budgetTokens: z.number().int().positive().optional(),
+  budgetCostUsd: z.number().nonnegative().optional(),
+  concurrencyCap: z.number().int().positive().default(1),
+  policyProfile: z.string().min(1).optional(),
   metadata: z.record(z.string(), z.unknown()).default({})
 });
 
@@ -70,7 +80,9 @@ export const idParamSchema = z.object({
 
 export const repositorySchema = repositoryCreateSchema.extend({
   id: z.uuid(),
+  provider: z.enum(repositoryProviders),
   localPath: z.string().min(1).nullable(),
+  trustLevel: z.enum(repositoryTrustLevels),
   createdAt: z.date(),
   updatedAt: z.date()
 });
@@ -80,6 +92,17 @@ export const runSchema = runCreateSchema.extend({
   status: z.enum(runStatuses),
   branchName: z.string().min(1).nullable(),
   planArtifactPath: z.string().min(1).nullable(),
+  budgetTokens: z.number().int().positive().nullable(),
+  budgetCostUsd: z.number().nonnegative().nullable(),
+  concurrencyCap: z.number().int().positive(),
+  policyProfile: z.string().min(1).nullable(),
+  publishedBranch: z.string().min(1).nullable(),
+  branchPublishedAt: z.date().nullable(),
+  pullRequestUrl: z.string().url().nullable(),
+  pullRequestNumber: z.number().int().positive().nullable(),
+  pullRequestStatus: z.enum(pullRequestStatuses).nullable(),
+  handoffStatus: z.enum(handoffStatuses),
+  completedAt: z.date().nullable(),
   createdBy: z.string().min(1),
   createdAt: z.date(),
   updatedAt: z.date()
@@ -248,6 +271,26 @@ export const approvalResolveSchema = z.object({
   resolutionPayload: z.record(z.string(), z.unknown()).default({})
 });
 
+export const runBranchPublishSchema = z.object({
+  branchName: z.string().min(1).optional(),
+  publishedBy: z.string().min(1),
+  remoteName: z.string().min(1).default("origin"),
+  commitSha: z.string().min(1).optional(),
+  notes: z.string().min(1).optional()
+});
+
+export const runPullRequestHandoffSchema = z.object({
+  title: z.string().min(1),
+  body: z.string().min(1),
+  createdBy: z.string().min(1),
+  provider: z.enum(repositoryProviders).optional(),
+  baseBranch: z.string().min(1).optional(),
+  headBranch: z.string().min(1).optional(),
+  url: z.string().url().optional(),
+  number: z.number().int().positive().optional(),
+  status: z.enum(pullRequestStatuses).default("draft")
+});
+
 export const runDetailSchema = runSchema.extend({
   tasks: z.array(taskSchema),
   agents: z.array(agentSchema),
@@ -276,6 +319,8 @@ export type Validation = z.infer<typeof validationSchema>;
 export type ValidationHistoryEntry = z.infer<typeof validationHistoryEntrySchema>;
 export type ValidationCreateInput = z.infer<typeof validationCreateSchema>;
 export type ValidationsListQuery = z.infer<typeof validationsListQuerySchema>;
+export type RunBranchPublishInput = z.infer<typeof runBranchPublishSchema>;
+export type RunPullRequestHandoffInput = z.infer<typeof runPullRequestHandoffSchema>;
 export type EventsListQuery = z.infer<typeof eventsListQuerySchema>;
 export type ControlPlaneEvent = z.infer<typeof controlPlaneEventSchema>;
 export type ControlPlaneMetrics = z.infer<typeof controlPlaneMetricsSchema>;

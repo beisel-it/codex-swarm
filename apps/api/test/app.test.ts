@@ -19,6 +19,8 @@ const controlPlane = {
   getRun: vi.fn(),
   createRun: vi.fn(),
   updateRunStatus: vi.fn(),
+  publishRunBranch: vi.fn(),
+  createRunPullRequestHandoff: vi.fn(),
   listTasks: vi.fn(),
   createTask: vi.fn(),
   updateTaskStatus: vi.fn(),
@@ -52,8 +54,10 @@ class FakeVerticalSliceControlPlane {
       id: ids.repository,
       name: "codex-swarm",
       url: "https://example.com/codex-swarm.git",
+      provider: "github",
       defaultBranch: "main",
       localPath: null,
+      trustLevel: "trusted",
       createdAt: new Date("2026-03-28T00:00:00.000Z"),
       updatedAt: new Date("2026-03-28T00:00:00.000Z")
     }
@@ -92,6 +96,17 @@ class FakeVerticalSliceControlPlane {
       status: "pending",
       branchName: input.branchName ?? null,
       planArtifactPath: input.planArtifactPath ?? null,
+      budgetTokens: input.budgetTokens ?? null,
+      budgetCostUsd: input.budgetCostUsd ?? null,
+      concurrencyCap: input.concurrencyCap ?? 1,
+      policyProfile: input.policyProfile ?? null,
+      publishedBranch: null,
+      branchPublishedAt: null,
+      pullRequestUrl: null,
+      pullRequestNumber: null,
+      pullRequestStatus: null,
+      handoffStatus: "pending",
+      completedAt: null,
       metadata: input.metadata,
       createdBy,
       createdAt: new Date("2026-03-28T00:00:00.000Z"),
@@ -109,6 +124,31 @@ class FakeVerticalSliceControlPlane {
     const run = await this.getRun(runId);
     run.status = input.status;
     run.planArtifactPath = input.planArtifactPath ?? run.planArtifactPath;
+    return run;
+  }
+
+  async publishRunBranch(runId: string, input: any) {
+    const run = await this.getRun(runId);
+    const branchName = input.branchName ?? run.branchName;
+
+    if (!branchName) {
+      throw new HttpError(409, "run does not have a branch to publish");
+    }
+
+    run.branchName = branchName;
+    run.publishedBranch = branchName;
+    run.branchPublishedAt = new Date();
+    run.handoffStatus = "branch_published";
+    return run;
+  }
+
+  async createRunPullRequestHandoff(runId: string, input: any) {
+    const run = await this.getRun(runId);
+    run.publishedBranch = input.headBranch ?? run.publishedBranch ?? run.branchName;
+    run.pullRequestUrl = input.url ?? null;
+    run.pullRequestNumber = input.number ?? null;
+    run.pullRequestStatus = input.url ? input.status : null;
+    run.handoffStatus = input.url ? "pr_open" : "manual_handoff";
     return run;
   }
 
@@ -533,6 +573,170 @@ describe("buildApp", () => {
 
     expect(runResponse.statusCode).toBe(200);
     expect(runResponse.json()).toEqual([]);
+
+    await app.close();
+  });
+
+  it("creates repositories with provider onboarding metadata", async () => {
+    controlPlane.createRepository.mockResolvedValueOnce({
+      id: ids.repository,
+      name: "codex-swarm",
+      url: "https://github.com/example/codex-swarm",
+      provider: "github",
+      defaultBranch: "main",
+      localPath: null,
+      trustLevel: "trusted"
+    });
+
+    const app = await buildApp({
+      controlPlane: controlPlane as unknown as ControlPlaneService
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/v1/repositories",
+      headers: {
+        authorization: "Bearer codex-swarm-dev-token"
+      },
+      payload: {
+        name: "codex-swarm",
+        url: "https://github.com/example/codex-swarm",
+        provider: "github"
+      }
+    });
+
+    expect(response.statusCode).toBe(201);
+    expect(response.json()).toMatchObject({
+      provider: "github",
+      trustLevel: "trusted"
+    });
+    expect(controlPlane.createRepository).toHaveBeenCalledWith({
+      name: "codex-swarm",
+      url: "https://github.com/example/codex-swarm",
+      provider: "github",
+      defaultBranch: "main",
+      trustLevel: "trusted"
+    });
+
+    await app.close();
+  });
+
+  it("publishes the run branch for provider handoff", async () => {
+    controlPlane.publishRunBranch.mockResolvedValueOnce({
+      id: ids.run,
+      repositoryId: ids.repository,
+      goal: "Ship alpha",
+      status: "in_progress",
+      branchName: "runs/m3-git-provider",
+      planArtifactPath: null,
+      budgetTokens: null,
+      budgetCostUsd: null,
+      concurrencyCap: 1,
+      policyProfile: null,
+      publishedBranch: "runs/m3-git-provider",
+      branchPublishedAt: "2026-03-28T12:00:00.000Z",
+      pullRequestUrl: null,
+      pullRequestNumber: null,
+      pullRequestStatus: null,
+      handoffStatus: "branch_published",
+      completedAt: null,
+      metadata: {},
+      createdBy: "tech-lead",
+      createdAt: "2026-03-28T10:00:00.000Z",
+      updatedAt: "2026-03-28T12:00:00.000Z"
+    });
+
+    const app = await buildApp({
+      controlPlane: controlPlane as unknown as ControlPlaneService
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: `/api/v1/runs/${ids.run}/publish-branch`,
+      headers: {
+        authorization: "Bearer codex-swarm-dev-token"
+      },
+      payload: {
+        branchName: "runs/m3-git-provider",
+        publishedBy: "tech-lead"
+      }
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      publishedBranch: "runs/m3-git-provider",
+      handoffStatus: "branch_published"
+    });
+    expect(controlPlane.publishRunBranch).toHaveBeenCalledWith(ids.run, {
+      branchName: "runs/m3-git-provider",
+      publishedBy: "tech-lead",
+      remoteName: "origin"
+    });
+
+    await app.close();
+  });
+
+  it("records pull request handoff for a published run", async () => {
+    controlPlane.createRunPullRequestHandoff.mockResolvedValueOnce({
+      id: ids.run,
+      repositoryId: ids.repository,
+      goal: "Ship alpha",
+      status: "in_progress",
+      branchName: "runs/m3-git-provider",
+      planArtifactPath: null,
+      budgetTokens: null,
+      budgetCostUsd: null,
+      concurrencyCap: 1,
+      policyProfile: null,
+      publishedBranch: "runs/m3-git-provider",
+      branchPublishedAt: "2026-03-28T12:00:00.000Z",
+      pullRequestUrl: "https://github.com/example/codex-swarm/pull/42",
+      pullRequestNumber: 42,
+      pullRequestStatus: "open",
+      handoffStatus: "pr_open",
+      completedAt: null,
+      metadata: {},
+      createdBy: "tech-lead",
+      createdAt: "2026-03-28T10:00:00.000Z",
+      updatedAt: "2026-03-28T12:15:00.000Z"
+    });
+
+    const app = await buildApp({
+      controlPlane: controlPlane as unknown as ControlPlaneService
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: `/api/v1/runs/${ids.run}/pull-request-handoff`,
+      headers: {
+        authorization: "Bearer codex-swarm-dev-token"
+      },
+      payload: {
+        title: "M3 Git provider handoff",
+        body: "Validation evidence attached.",
+        createdBy: "tech-lead",
+        provider: "github",
+        url: "https://github.com/example/codex-swarm/pull/42",
+        number: 42,
+        status: "open"
+      }
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      pullRequestUrl: "https://github.com/example/codex-swarm/pull/42",
+      pullRequestNumber: 42,
+      handoffStatus: "pr_open"
+    });
+    expect(controlPlane.createRunPullRequestHandoff).toHaveBeenCalledWith(ids.run, {
+      title: "M3 Git provider handoff",
+      body: "Validation evidence attached.",
+      createdBy: "tech-lead",
+      provider: "github",
+      url: "https://github.com/example/codex-swarm/pull/42",
+      number: 42,
+      status: "open"
+    });
 
     await app.close();
   });

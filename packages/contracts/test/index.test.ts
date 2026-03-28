@@ -4,9 +4,11 @@ import {
   approvalCreateSchema,
   approvalResolveSchema,
   agentCreateSchema,
-  validationCreateSchema,
   repositoryCreateSchema,
+  runBranchPublishSchema,
   runCreateSchema,
+  runPullRequestHandoffSchema,
+  validationCreateSchema,
   taskCreateSchema
 } from "../src/index.js";
 
@@ -102,5 +104,50 @@ describe("validationCreateSchema", () => {
     });
 
     expect(validation.artifactIds).toEqual([]);
+  });
+});
+
+describe("repositoryCreateSchema", () => {
+  it("defaults trust level for onboarded repositories", () => {
+    const repository = repositoryCreateSchema.parse({
+      name: "codex-swarm",
+      url: "https://github.com/example/codex-swarm",
+      provider: "github"
+    });
+
+    expect(repository.trustLevel).toBe("trusted");
+  });
+});
+
+describe("runCreateSchema", () => {
+  it("defaults concurrency cap for new runs", () => {
+    const run = runCreateSchema.parse({
+      repositoryId: "550e8400-e29b-41d4-a716-446655440000",
+      goal: "Ship M3"
+    });
+
+    expect(run.concurrencyCap).toBe(1);
+  });
+});
+
+describe("runBranchPublishSchema", () => {
+  it("defaults the remote for branch publish", () => {
+    const publish = runBranchPublishSchema.parse({
+      publishedBy: "tech-lead"
+    });
+
+    expect(publish.remoteName).toBe("origin");
+  });
+});
+
+describe("runPullRequestHandoffSchema", () => {
+  it("defaults handoff status to draft", () => {
+    const handoff = runPullRequestHandoffSchema.parse({
+      title: "Open PR",
+      body: "Validation evidence attached",
+      createdBy: "tech-lead"
+    });
+
+    expect(handoff.status).toBe("draft");
   });
 });

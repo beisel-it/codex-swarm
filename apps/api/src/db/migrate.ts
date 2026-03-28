@@ -7,8 +7,10 @@ const statements = [
     id text primary key,
     name text not null,
     url text not null,
+    provider text not null default 'other',
     default_branch text not null,
     local_path text,
+    trust_level text not null default 'trusted',
     created_at timestamptz not null default now(),
     updated_at timestamptz not null default now()
   )`,
@@ -19,6 +21,17 @@ const statements = [
     status text not null,
     branch_name text,
     plan_artifact_path text,
+    budget_tokens integer,
+    budget_cost_usd_cents integer,
+    concurrency_cap integer not null default 1,
+    policy_profile text,
+    published_branch text,
+    branch_published_at timestamptz,
+    pull_request_url text,
+    pull_request_number integer,
+    pull_request_status text,
+    handoff_status text not null default 'pending',
+    completed_at timestamptz,
     metadata jsonb not null default '{}'::jsonb,
     created_by text not null,
     created_at timestamptz not null default now(),
@@ -139,6 +152,19 @@ async function main() {
   await db.execute(sql.raw("alter table approvals add column if not exists resolver text"));
   await db.execute(sql.raw("alter table approvals add column if not exists resolved_at timestamptz"));
   await db.execute(sql.raw("alter table validations add column if not exists artifact_ids jsonb not null default '[]'::jsonb"));
+  await db.execute(sql.raw("alter table repositories add column if not exists provider text not null default 'other'"));
+  await db.execute(sql.raw("alter table repositories add column if not exists trust_level text not null default 'trusted'"));
+  await db.execute(sql.raw("alter table runs add column if not exists budget_tokens integer"));
+  await db.execute(sql.raw("alter table runs add column if not exists budget_cost_usd_cents integer"));
+  await db.execute(sql.raw("alter table runs add column if not exists concurrency_cap integer not null default 1"));
+  await db.execute(sql.raw("alter table runs add column if not exists policy_profile text"));
+  await db.execute(sql.raw("alter table runs add column if not exists published_branch text"));
+  await db.execute(sql.raw("alter table runs add column if not exists branch_published_at timestamptz"));
+  await db.execute(sql.raw("alter table runs add column if not exists pull_request_url text"));
+  await db.execute(sql.raw("alter table runs add column if not exists pull_request_number integer"));
+  await db.execute(sql.raw("alter table runs add column if not exists pull_request_status text"));
+  await db.execute(sql.raw("alter table runs add column if not exists handoff_status text not null default 'pending'"));
+  await db.execute(sql.raw("alter table runs add column if not exists completed_at timestamptz"));
 
   await pool.end();
 }
