@@ -92,3 +92,75 @@ Evidence:
 Residual risks:
 
 - This verifies persistence and restart/recovery decision logic around `threadId`; it does not prove an actual external Codex backend resumed a live conversation during the test run.
+
+## Task `ebeb116b`
+
+Roadmap entry:
+
+- Phase 1 deliverable: `Minimal CLI or admin script for smoke testing`
+
+Verdict:
+
+- gap
+
+Evidence:
+
+- The repo does contain operational scripts under `apps/api/scripts/ops/`, but they target backup, restore, DR, performance, and snapshot workflows rather than a Phase 1 orchestration smoke path.
+- The root package scripts expose CI and operational commands in `package.json`, but no dedicated smoke command that creates a run, spawns workers, or exercises the single-host orchestration slice.
+- The architecture freeze note in `docs/architecture/m0-m1-architecture.md` explicitly called for at least one runnable smoke test command, but the live repo evidence points only to generic CI and later ops scripts.
+
+Residual risks:
+
+- Reviewers and operators do not have a simple runnable command that proves the Phase 1 orchestration slice is healthy without stitching together API calls manually.
+
+Backlog follow-up:
+
+- Add a checked-in smoke command or admin script that exercises the supported single-host orchestration path and records success/failure clearly.
+
+## Task `ed4377c2`
+
+Roadmap entry:
+
+- Phase 1 exit criterion: `one run can complete at least one multi-task coding workflow end-to-end`
+
+Verdict:
+
+- gap
+
+Evidence:
+
+- The strongest live acceptance check is the control-plane vertical-slice integration in `apps/api/test/app.test.ts`, which creates a run, tasks, an agent, and a session, but stops short of proving a completed coding workflow.
+- The repo does not contain an end-to-end test or smoke command that shows leader planning, worker execution, validation, artifact generation, and task completion through a full coding flow.
+- The worker package exposes command builders, dispatch primitives, and recovery logic, but not a verified coding workflow runner in `apps/worker/src/runtime.ts`, `apps/worker/src/index.ts`, and `apps/worker/test/dispatch.test.ts`.
+
+Residual risks:
+
+- The project has durable orchestration primitives, but there is still no supportable evidence that a single run completes a real multi-task coding workflow from start to finish.
+
+Backlog follow-up:
+
+- Add an executable end-to-end acceptance path for one multi-task coding run, with durable artifacts or validation outputs proving completion.
+
+## Task `2b929600`
+
+Roadmap entry:
+
+- Phase 1 exit criterion: `each worker executes in an isolated worktree`
+
+Verdict:
+
+- gap
+
+Evidence:
+
+- Worker runtime code currently covers worktree path generation and recovery decisions in `apps/worker/src/runtime.ts`, but not actual worktree creation, attachment, or execution inside a checked-out worktree.
+- Session and dispatch payloads carry `worktreePath` fields through contracts and tests (`packages/contracts/src/index.ts`, `apps/worker/test/runtime.test.ts`, `apps/worker/test/dispatch.test.ts`), but the repo does not implement `git worktree` or equivalent checkout/mount behavior.
+- A repo-wide search under `apps/` and `packages/` shows no worktree provisioning command path beyond unrelated migration spawning in `apps/api/scripts/ops/control-plane-snapshot.mjs`.
+
+Residual risks:
+
+- The system tracks where a worker should run, but it does not yet provide supportable evidence that workers actually execute inside isolated worktrees.
+
+Backlog follow-up:
+
+- Add a real worktree provisioner and an acceptance test or smoke path that proves workers execute in separate checked-out worktrees.
