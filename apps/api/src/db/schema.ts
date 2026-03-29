@@ -61,6 +61,12 @@ export const tasks = pgTable("tasks", {
   ownerAgentId: text("owner_agent_id"),
   dependencyIds: jsonb("dependency_ids").$type<string[]>().notNull().default([]),
   acceptanceCriteria: jsonb("acceptance_criteria").$type<string[]>().notNull().default([]),
+  validationTemplates: jsonb("validation_templates").$type<Array<{
+    name: string;
+    command: string;
+    summary?: string;
+    artifactPath?: string;
+  }>>().notNull().default([]),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
 });

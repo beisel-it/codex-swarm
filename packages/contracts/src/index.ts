@@ -63,6 +63,13 @@ export const controlPlaneEventEntityTypes = [
   "worker_node"
 ] as const;
 
+export const validationTemplateSchema = z.object({
+  name: z.string().min(1),
+  command: z.string().min(1),
+  summary: z.string().min(1).optional(),
+  artifactPath: z.string().min(1).optional()
+});
+
 export const repositoryCreateSchema = z.object({
   name: z.string().min(1),
   url: z.string().url(),
@@ -132,7 +139,8 @@ export const taskCreateSchema = z.object({
   priority: z.number().int().min(1).max(5).default(3),
   ownerAgentId: z.uuid().optional(),
   dependencyIds: z.array(z.uuid()).default([]),
-  acceptanceCriteria: z.array(z.string().min(1)).default([])
+  acceptanceCriteria: z.array(z.string().min(1)).default([]),
+  validationTemplates: z.array(validationTemplateSchema).default([])
 });
 
 export const taskStatusUpdateSchema = z.object({
@@ -338,12 +346,29 @@ export const validationHistoryEntrySchema = validationSchema.extend({
 export const validationCreateSchema = z.object({
   runId: z.uuid(),
   taskId: z.uuid().optional(),
-  name: z.string().min(1),
+  templateName: z.string().min(1).optional(),
+  name: z.string().min(1).optional(),
   status: z.enum(validationStatuses).default("pending"),
-  command: z.string().min(1),
+  command: z.string().min(1).optional(),
   summary: z.string().min(1).optional(),
   artifactPath: z.string().min(1).optional(),
   artifactIds: z.array(z.uuid()).default([])
+}).superRefine((value, ctx) => {
+  if (!value.templateName && !value.name) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["name"],
+      message: "name is required when templateName is not provided"
+    });
+  }
+
+  if (!value.templateName && !value.command) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["command"],
+      message: "command is required when templateName is not provided"
+    });
+  }
 });
 
 export const validationsListQuerySchema = z.object({

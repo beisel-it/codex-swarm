@@ -46,6 +46,7 @@ model Task {
   ownerAgentId       String?
   dependencyIds      Json
   acceptanceCriteria Json
+  validationTemplates Json
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
   run                Run      @relation(fields: [runId], references: [id])

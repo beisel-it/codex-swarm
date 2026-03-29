@@ -290,6 +290,7 @@ class FakeVerticalSliceControlPlane {
       ownerAgentId: input.ownerAgentId ?? null,
       dependencyIds: input.dependencyIds,
       acceptanceCriteria: input.acceptanceCriteria,
+      validationTemplates: input.validationTemplates ?? [],
       createdAt: new Date(),
       updatedAt: new Date()
     };
@@ -783,16 +784,22 @@ class FakeVerticalSliceControlPlane {
   }
 
   async createValidation(input: any, access?: any) {
-    await this.getRun(input.runId, access);
+    const run = await this.getRun(input.runId, access);
+    const task = input.taskId
+      ? run.tasks.find((candidate: any) => candidate.id === input.taskId) ?? null
+      : null;
+    const template = input.templateName
+      ? task?.validationTemplates?.find((candidate: any) => candidate.name === input.templateName) ?? null
+      : null;
     return {
       id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
       runId: input.runId,
       taskId: input.taskId ?? null,
-      name: input.name,
+      name: input.name ?? template?.name,
       status: input.status,
-      command: input.command,
-      summary: input.summary ?? null,
-      artifactPath: input.artifactPath ?? null,
+      command: input.command ?? template?.command,
+      summary: input.summary ?? template?.summary ?? null,
+      artifactPath: input.artifactPath ?? template?.artifactPath ?? null,
       artifactIds: input.artifactIds ?? [],
       artifacts: (input.artifactIds ?? []).map((artifactId: string) => ({
         id: artifactId,
@@ -2741,6 +2748,54 @@ describe("buildApp", () => {
       summary: "Typecheck passed",
       artifactPath: "artifacts/validations/typecheck.json",
       artifactIds: ["cccccccc-cccc-4ccc-8ccc-cccccccccccc"]
+    }, expect.objectContaining({
+      workspaceId: defaultBoundary.workspaceId,
+      teamId: defaultBoundary.teamId
+    }));
+
+    await app.close();
+  });
+
+  it("accepts template-based validation requests without inline command fields", async () => {
+    controlPlane.createValidation.mockResolvedValueOnce({
+      id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      runId: ids.run,
+      taskId: ids.taskA,
+      name: "unit",
+      status: "pending",
+      command: "pnpm test --filter api",
+      summary: "Run the API test slice",
+      artifactPath: ".swarm/validations/unit.json",
+      artifactIds: [],
+      artifacts: [],
+      createdAt: "2026-03-28T12:00:00.000Z",
+      updatedAt: "2026-03-28T12:05:00.000Z"
+    });
+
+    const app = await buildApp({
+      controlPlane: controlPlane as unknown as ControlPlaneService
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/v1/validations",
+      headers: {
+        authorization: "Bearer codex-swarm-dev-token"
+      },
+      payload: {
+        runId: ids.run,
+        taskId: ids.taskA,
+        templateName: "unit"
+      }
+    });
+
+    expect(response.statusCode).toBe(201);
+    expect(controlPlane.createValidation).toHaveBeenCalledWith({
+      runId: ids.run,
+      taskId: ids.taskA,
+      templateName: "unit",
+      status: "pending",
+      artifactIds: []
     }, expect.objectContaining({
       workspaceId: defaultBoundary.workspaceId,
       teamId: defaultBoundary.teamId

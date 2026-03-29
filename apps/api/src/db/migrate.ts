@@ -75,6 +75,7 @@ const statements = [
     owner_agent_id text,
     dependency_ids jsonb not null default '[]'::jsonb,
     acceptance_criteria jsonb not null default '[]'::jsonb,
+    validation_templates jsonb not null default '[]'::jsonb,
     created_at timestamptz not null default now(),
     updated_at timestamptz not null default now()
   )`,
@@ -249,6 +250,7 @@ async function main() {
   await db.execute(sql.raw("alter table approvals add column if not exists delegated_by text"));
   await db.execute(sql.raw("alter table approvals add column if not exists delegated_at timestamptz"));
   await db.execute(sql.raw("alter table approvals add column if not exists delegation_reason text"));
+  await db.execute(sql.raw("alter table tasks add column if not exists validation_templates jsonb not null default '[]'::jsonb"));
   await db.execute(sql.raw("alter table validations add column if not exists artifact_ids jsonb not null default '[]'::jsonb"));
   await db.execute(sql.raw("alter table worker_dispatch_assignments add column if not exists claimed_at timestamptz"));
   await db.execute(sql.raw("alter table worker_dispatch_assignments add column if not exists completed_at timestamptz"));

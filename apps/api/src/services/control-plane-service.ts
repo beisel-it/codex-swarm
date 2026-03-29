@@ -200,6 +200,15 @@ function dedupeActors(actors: Array<ActorIdentity | null | undefined>) {
   return result;
 }
 
+function normalizeValidationTemplates(templates: TaskCreate["validationTemplates"]) {
+  return templates.map((template) => ({
+    name: template.name,
+    command: template.command,
+    ...(template.summary ? { summary: template.summary } : {}),
+    ...(template.artifactPath ? { artifactPath: template.artifactPath } : {})
+  }));
+}
+
 function inferRepositoryProvider(url: string): Repository["provider"] {
   const normalizedUrl = url.toLowerCase();
 
@@ -560,6 +569,7 @@ export class ControlPlaneService {
       ownerAgentId: tasks.ownerAgentId,
       dependencyIds: tasks.dependencyIds,
       acceptanceCriteria: tasks.acceptanceCriteria,
+      validationTemplates: tasks.validationTemplates,
       createdAt: tasks.createdAt,
       updatedAt: tasks.updatedAt
     })
@@ -598,6 +608,7 @@ export class ControlPlaneService {
       ownerAgentId: input.ownerAgentId ?? null,
       dependencyIds: input.dependencyIds,
       acceptanceCriteria: input.acceptanceCriteria,
+      validationTemplates: normalizeValidationTemplates(input.validationTemplates),
       createdAt: now,
       updatedAt: now
     }).returning();
@@ -864,8 +875,26 @@ export class ControlPlaneService {
   async createValidation(input: ValidationCreate, access?: AccessBoundary) {
     await this.assertRunExists(input.runId, access);
 
-    if (input.taskId) {
-      await this.assertTaskExists(input.taskId, access);
+    const task = input.taskId
+      ? await this.assertTaskExists(input.taskId, access)
+      : null;
+    const template = input.templateName
+      ? task?.validationTemplates.find((candidate) => candidate.name === input.templateName) ?? null
+      : null;
+
+    if (input.templateName && !task) {
+      throw new HttpError(400, "taskId is required when templateName is provided");
+    }
+
+    if (input.templateName && !template) {
+      throw new HttpError(404, `validation template ${input.templateName} not found`);
+    }
+
+    const name = input.name ?? template?.name;
+    const command = input.command ?? template?.command;
+
+    if (!name || !command) {
+      throw new HttpError(400, "validation name and command are required");
     }
 
     const artifactIds = await this.resolveValidationArtifactIds(
@@ -879,11 +908,11 @@ export class ControlPlaneService {
       id: crypto.randomUUID(),
       runId: input.runId,
       taskId: input.taskId ?? null,
-      name: input.name,
+      name,
       status: input.status,
-      command: input.command,
-      summary: input.summary ?? null,
-      artifactPath: input.artifactPath ?? null,
+      command,
+      summary: input.summary ?? template?.summary ?? null,
+      artifactPath: input.artifactPath ?? template?.artifactPath ?? null,
       artifactIds,
       createdAt: now,
       updatedAt: now
