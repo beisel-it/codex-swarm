@@ -1751,7 +1751,7 @@ function App() {
     let active = true
 
     async function hydrateApprovalDetail() {
-      if (!selectedApprovalId) {
+      if (!selectedApprovalId || data.source !== 'api' || !isUuid(selectedApprovalId)) {
         setSelectedApprovalDetail(null)
         setReviewNotes('')
         return
@@ -1781,13 +1781,13 @@ function App() {
     return () => {
       active = false
     }
-  }, [selectedApprovalId, runApprovals])
+  }, [data.source, selectedApprovalId, runApprovals])
 
   useEffect(() => {
     let active = true
 
     async function hydrateArtifactDetail() {
-      if (!selectedReviewArtifactId) {
+      if (!selectedReviewArtifactId || data.source !== 'api' || !isUuid(selectedReviewArtifactId)) {
         setSelectedArtifactDetail(null)
         setArtifactDetailState('idle')
         setArtifactDetailError('')
@@ -1828,7 +1828,7 @@ function App() {
     return () => {
       active = false
     }
-  }, [selectedReviewArtifactId])
+  }, [data.source, selectedReviewArtifactId])
 
   useEffect(() => {
     let active = true
