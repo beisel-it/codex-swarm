@@ -17,96 +17,85 @@ Acceptance target:
 
 ## Verdict
 
-- gap
+- parity
 
 ## Summary
 
-The current repo still ships the older internal productivity pack rather than
-the codex-swarm-specific external-operator library described in the delivery
-plan. The checked-in assets are not yet sufficient for an external Codex
-operator to discover, understand, and run real Codex Swarm operational
-workflows from docs and skills alone. Generic ClawTeam guidance would not be a
-passing substitute for this gate.
+The repo now ships a codex-swarm-specific external-operator skill library that
+is discoverable from checked-in docs, grounded in real codex-swarm control
+surfaces, and documented well enough for an external Codex session to operate
+the workspace without relying on hidden prompt lore. Generic ClawTeam guidance
+is no longer the primary path; the checked-in pack is explicitly scoped to
+codex-swarm operator capability.
 
 ## Evidence
 
-### 1. Discoverability is incomplete
+### 1. Discoverability is now explicit
 
-- `README.md` mentions `.agents/skills` and `.codex/agents`, but it does not
-  provide an M8 entry doc or operator-facing walkthrough that explains how an
-  external Codex session should use the skill pack against this workspace.
-- `docs/architecture/m8-delivery-plan.md` requires `Repo-facing entry docs that
-  explain how external Codex should use the skill pack against this workspace`,
-  but the repo does not currently include such an operator guide.
-- The only docs file found for M8 is the delivery plan itself:
-  `docs/architecture/m8-delivery-plan.md`.
+- `docs/operator-skill-library.md` is now the repo-facing M8 entry doc for an
+  external Codex session operating `codex-swarm`.
+- `.agents/skills/README.md` provides a checked-in skill index, distinguishes
+  external-operator skills from the older workflow-execution skills, and spells
+  out what belongs in the codex-swarm skill library.
+- `docs/operator-guide.md` now explicitly frames itself as an external Codex
+  operator entry point rather than only a human operator runbook.
+- `README.md` and `.codex/config.toml` still provide the discovery wiring for
+  checked-in agents, skills, and workspace context files.
 
-### 2. Skill coverage does not match the required operator workflows
+### 2. Skill coverage matches the required operator workflows
 
-- The current checked-in skill set under `.agents/skills/` contains only:
-  `plan-from-spec`, `create-task-dag`, `validate-milestone`, and `prepare-pr`.
-- `docs/architecture/m8-delivery-plan.md` requires explicit codex-swarm
-  operator skills for:
-  board triage, task DAG creation and maintenance, agent coordination and loop
-  management, run diagnostics and recovery investigation, and skill/agent
-  extension workflows.
-- A repo-wide search across `.agents`, `.codex`, `README.md`, and `docs/`
-  found no checked-in codex-swarm operator skills that walk an external Codex
-  session through board triage, inbox inspection, task updates, loop
-  management, recovery commands, or agent/skill authoring for this repo.
+- The checked-in skill set now includes codex-swarm-specific operator skills
+  for board triage, inbox inspection, task control, agent coordination,
+  diagnostics, and recovery under `.agents/skills/`.
+- `docs/operator-skill-library.md` maps those exact skills to the M8 operator
+  workflows required by `docs/architecture/m8-delivery-plan.md`.
+- `docs/agent-skill-authoring.md` closes the authoring-pack requirement with
+  codex-swarm-specific guidance for extending `.codex/agents`,
+  `.agents/skills`, and `.codex/config.toml`.
 
-### 3. Individual skill files are under-specified for M8
+### 3. Individual skill files now meet the M8 shape
 
-- The current skill files provide `Purpose`, `Inputs`, `Outputs`, and a generic
-  `Workflow`, but they do not consistently include the M8-required fields:
-  trigger conditions, concrete commands or workflow steps, and expected outputs
-  tied to real codex-swarm operator actions.
-- None of the current skill files include concrete codex-swarm operator command
-  sequences for board or inbox inspection, task creation or reassignment,
-  recovery diagnostics, or loop management.
+- The codex-swarm operator skills consistently include purpose, trigger
+  conditions, required inputs, concrete commands, expected outputs, workflow,
+  and guardrails.
+- The skills are grounded in real codex-swarm commands and product surfaces,
+  including `clawteam` board and inbox control, task mutation, workspace
+  checkpointing, session save, cost reporting, health and metrics inspection,
+  cleanup jobs, worker reconciliation, and restore or DR commands.
+- The operator skills also include grounded examples or observed repo context
+  rather than abstract generic advice.
 
-### 4. Example workflows are missing
+### 4. Example workflows are documented and grounded
 
-- `docs/architecture/m8-delivery-plan.md` requires documented and exercised
-  example workflows for a codex-swarm triage pass, task-board planning pass,
-  execution monitoring pass, and recovery or diagnostic pass.
-- A docs-wide search found no checked-in example workflow docs for those flows.
-- Because the examples are missing, QA cannot verify the no-hidden-lore
-  requirement from repo evidence alone.
+- `docs/operator-guide.md` now includes four codex-swarm-specific walkthroughs:
+  board triage, planning and control, diagnostics and recovery, and execution
+  monitoring plus review handoff.
+- `docs/operator-skill-library.md` includes grounded repo examples tied to the
+  live board, task queue, inbox, and task-detail surfaces.
+- The individual operator skills include command-level examples and expected
+  outputs, which makes the pack usable without hidden prompt lore.
 
-## What Is Already Present
+## Acceptance Evidence
 
-These existing assets are useful inputs, but they do not satisfy the M8 gate on
-their own:
+The M8 gate is satisfied by the combined checked-in pack:
 
 - `.codex/config.toml` wires the workspace plan, agents, skills, and profiles
-- `.codex/agents/*.toml` provides starter role prompts
-- `.agents/skills/*/SKILL.md` provides the earlier four reusable workflow
-  skills
-- `docs/qa/diff-review-acceptance.md` and the broader docs set show that the
-  repo has rich operator workflows, but they are not yet translated into an
-  external-operator Codex skill library
+- `.codex/agents/*.toml` provides the checked-in role pack
+- `.agents/skills/README.md` indexes both the external-operator and workflow
+  execution skills
+- `.agents/skills/codex-swarm-*/SKILL.md` provides the codex-swarm-specific
+  operator pack
+- `docs/operator-skill-library.md` provides the M8 entry point and selection
+  guide
+- `docs/agent-skill-authoring.md` provides the repeatable authoring and
+  extension workflow
+- `docs/operator-guide.md` provides grounded operator walkthroughs over real
+  product surfaces
 
-## Blocking Gaps
+## Residual Risks
 
-M8 should remain open until the repo includes all of the following:
-
-1. A repo-facing operator entry doc for external Codex usage.
-2. Explicit codex-swarm skills for board triage, inbox handling, task control,
-   run diagnostics, recovery investigation, and skill/agent authoring.
-3. Skill files with trigger conditions, required inputs, concrete command
-   sequences, and expected outputs.
-4. At least three documented example workflows grounded in real `clawteam` and
-   repo operations.
-5. Enough checked-in evidence that QA can follow the pack without hidden prompt
-   lore.
-
-## Recommended Follow-Up
-
-- Add the missing operator-facing entry documentation.
-- Expand the skill library from the older productivity pack into the full M8
-  external-operator set.
-- Add workflow examples that explicitly exercise codex-swarm board, inbox,
-  planning, monitoring, and recovery loops rather than generic team
-  coordination examples.
-- Re-run QA acceptance after those docs and skills land.
+- Some grounded examples cite the current live board wave and task IDs, so they
+  may need refresh as the board evolves.
+- The acceptance pass verifies discoverability, coherence, and sufficiency of
+  the shipped operator pack; it does not claim every future codex-swarm workflow
+  already has a dedicated skill.
