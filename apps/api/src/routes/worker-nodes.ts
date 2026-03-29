@@ -7,6 +7,7 @@ import {
   workerNodeReconcileSchema,
   workerNodeRegisterSchema
 } from "../http/schemas.js";
+import { controlPlaneEvents, timelineEvent } from "../lib/control-plane-events.js";
 import { requireValue } from "../lib/require-value.js";
 
 export const workerNodeRoutes: FastifyPluginAsync = async (app) => {
@@ -22,13 +23,11 @@ export const workerNodeRoutes: FastifyPluginAsync = async (app) => {
         "control plane returned no worker node"
       );
 
-      await app.observability.recordTimelineEvent({
-        eventType: "worker_node.registered",
-        entityType: "worker_node",
+      await app.observability.recordTimelineEvent(timelineEvent(controlPlaneEvents.workerNodeRegistered, {
         entityId: workerNode.id,
         status: workerNode.status,
         summary: `Worker node ${workerNode.name} registered`
-      });
+      }));
 
       return reply.code(201).send(workerNode);
     }, { route: "worker-nodes.register" });
@@ -43,13 +42,11 @@ export const workerNodeRoutes: FastifyPluginAsync = async (app) => {
         "control plane returned no worker node"
       );
 
-      await app.observability.recordTimelineEvent({
-        eventType: "worker_node.heartbeat_recorded",
-        entityType: "worker_node",
+      await app.observability.recordTimelineEvent(timelineEvent(controlPlaneEvents.workerNodeHeartbeatRecorded, {
         entityId: workerNode.id,
         status: workerNode.status,
         summary: `Worker node ${workerNode.name} heartbeat recorded`
-      });
+      }));
 
       return workerNode;
     }, { route: "worker-nodes.heartbeat" });
@@ -64,14 +61,12 @@ export const workerNodeRoutes: FastifyPluginAsync = async (app) => {
         "control plane returned no worker node"
       );
 
-      await app.observability.recordTimelineEvent({
-        eventType: "worker_node.drain_state_updated",
-        entityType: "worker_node",
+      await app.observability.recordTimelineEvent(timelineEvent(controlPlaneEvents.workerNodeDrainStateUpdated, {
         entityId: workerNode.id,
         status: workerNode.drainState,
         summary: `Worker node ${workerNode.name} drain state updated to ${workerNode.drainState}`,
         metadata: input.reason ? { reason: input.reason } : {}
-      });
+      }));
 
       return workerNode;
     }, { route: "worker-nodes.drain" });
@@ -86,16 +81,14 @@ export const workerNodeRoutes: FastifyPluginAsync = async (app) => {
         return null;
       }
 
-      await app.observability.recordTimelineEvent({
+      await app.observability.recordTimelineEvent(timelineEvent(controlPlaneEvents.workerDispatchAssignmentClaimed, {
         runId: assignment.runId,
         taskId: assignment.taskId,
         agentId: assignment.agentId,
-        eventType: "worker_dispatch_assignment.claimed",
-        entityType: "worker_dispatch_assignment",
         entityId: assignment.id,
         status: assignment.state,
         summary: `Worker node ${id} claimed dispatch assignment ${assignment.id}`
-      });
+      }));
 
       return assignment;
     }, { route: "worker-nodes.claim-dispatch" });
@@ -110,9 +103,7 @@ export const workerNodeRoutes: FastifyPluginAsync = async (app) => {
         "control plane returned no worker node reconciliation report"
       );
 
-      await app.observability.recordTimelineEvent({
-        eventType: "worker_node.reconciled",
-        entityType: "worker_node",
+      await app.observability.recordTimelineEvent(timelineEvent(controlPlaneEvents.workerNodeReconciled, {
         entityId: id,
         status: "completed",
         summary: `Worker node ${id} reconciled after ${input.reason}`,
@@ -121,7 +112,7 @@ export const workerNodeRoutes: FastifyPluginAsync = async (app) => {
           failedAssignments: report.failedAssignments,
           staleSessions: report.staleSessions
         }
-      });
+      }));
 
       return report;
     }, { route: "worker-nodes.reconcile" });

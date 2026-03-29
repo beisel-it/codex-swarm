@@ -19,6 +19,49 @@ export const workerNodeStatuses = ["online", "degraded", "offline"] as const;
 export const workerNodeDrainStates = ["active", "draining", "drained"] as const;
 export const governanceRoles = ["org_admin", "workspace_admin", "team_admin", "member", "reviewer", "operator", "service", "system"] as const;
 export const governedActions = ["run.create", "run.review", "run.retry", "run.stop", "approval.request", "approval.resolve", "admin.read", "admin.write"] as const;
+export const controlPlaneEventTypes = [
+  "admin.governance_report_generated",
+  "admin.retention_reconciled",
+  "agent.created",
+  "approval.created",
+  "approval.resolved",
+  "artifact.created",
+  "maintenance.cleanup_completed",
+  "message.created",
+  "repository.created",
+  "run.audit_exported",
+  "run.branch_published",
+  "run.completed",
+  "run.created",
+  "run.pull_request_handoff_created",
+  "run.status_updated",
+  "task.created",
+  "task.status_updated",
+  "task.unblocked",
+  "validation.created",
+  "worker_dispatch_assignment.claimed",
+  "worker_dispatch_assignment.created",
+  "worker_dispatch_assignment.updated",
+  "worker_node.drain_state_updated",
+  "worker_node.heartbeat_recorded",
+  "worker_node.reconciled",
+  "worker_node.registered"
+] as const;
+export const controlPlaneEventEntityTypes = [
+  "admin_report",
+  "agent",
+  "approval",
+  "artifact",
+  "cleanup_job",
+  "message",
+  "repository",
+  "retention_policy",
+  "run",
+  "task",
+  "validation",
+  "worker_dispatch_assignment",
+  "worker_node"
+] as const;
 
 export const repositoryCreateSchema = z.object({
   name: z.string().min(1),
@@ -333,8 +376,8 @@ export const controlPlaneEventSchema = z.object({
   taskId: z.string().nullable(),
   agentId: z.string().nullable(),
   traceId: z.string().min(1),
-  eventType: z.string().min(1),
-  entityType: z.string().min(1),
+  eventType: z.enum(controlPlaneEventTypes),
+  entityType: z.enum(controlPlaneEventEntityTypes),
   entityId: z.string().min(1),
   status: z.string().min(1),
   summary: z.string().min(1),
@@ -792,6 +835,8 @@ export type EventsListQuery = z.infer<typeof eventsListQuerySchema>;
 export type ActorIdentity = z.infer<typeof actorIdentitySchema>;
 export type GovernanceRole = typeof governanceRoles[number];
 export type GovernedAction = typeof governedActions[number];
+export type ControlPlaneEventType = typeof controlPlaneEventTypes[number];
+export type ControlPlaneEventEntityType = typeof controlPlaneEventEntityTypes[number];
 export type ControlPlaneEvent = z.infer<typeof controlPlaneEventSchema>;
 export type RetentionPolicy = z.infer<typeof retentionPolicySchema>;
 export type RetentionWindowSummary = z.infer<typeof retentionWindowSummarySchema>;

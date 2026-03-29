@@ -1,6 +1,7 @@
 import type { FastifyPluginAsync } from "fastify";
 
 import { repositoryCreateSchema } from "../http/schemas.js";
+import { controlPlaneEvents, timelineEvent } from "../lib/control-plane-events.js";
 import { isRecoverableDatabaseError } from "../lib/database-fallback.js";
 import { requireValue } from "../lib/require-value.js";
 
@@ -27,13 +28,11 @@ export const repositoryRoutes: FastifyPluginAsync = async (app) => {
         "control plane returned no repository"
       );
 
-      await app.observability.recordTimelineEvent({
-        eventType: "repository.created",
-        entityType: "repository",
+      await app.observability.recordTimelineEvent(timelineEvent(controlPlaneEvents.repositoryCreated, {
         entityId: repository.id,
         status: "completed",
         summary: `Repository ${repository.name} created`
-      });
+      }));
 
       return reply.code(201).send(repository);
     }, { route: "repositories.create" });

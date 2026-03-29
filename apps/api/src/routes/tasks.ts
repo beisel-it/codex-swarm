@@ -1,6 +1,7 @@
 import type { FastifyPluginAsync } from "fastify";
 
 import { idParamSchema, taskCreateSchema, taskStatusUpdateSchema } from "../http/schemas.js";
+import { controlPlaneEvents, timelineEvent } from "../lib/control-plane-events.js";
 import { requireValue } from "../lib/require-value.js";
 
 export const taskRoutes: FastifyPluginAsync = async (app) => {
@@ -20,16 +21,14 @@ export const taskRoutes: FastifyPluginAsync = async (app) => {
         "control plane returned no task"
       );
 
-      await app.observability.recordTimelineEvent({
+      await app.observability.recordTimelineEvent(timelineEvent(controlPlaneEvents.taskCreated, {
         runId: task.runId,
         taskId: task.id,
         agentId: task.ownerAgentId,
-        eventType: "task.created",
-        entityType: "task",
         entityId: task.id,
         status: task.status,
         summary: `Task ${task.title} created`
-      });
+      }));
 
       return reply.code(201).send(task);
     }, { route: "tasks.create" });
@@ -44,16 +43,14 @@ export const taskRoutes: FastifyPluginAsync = async (app) => {
         "control plane returned no task"
       );
 
-      await app.observability.recordTimelineEvent({
+      await app.observability.recordTimelineEvent(timelineEvent(controlPlaneEvents.taskStatusUpdated, {
         runId: task.runId,
         taskId: task.id,
         agentId: task.ownerAgentId,
-        eventType: "task.status_updated",
-        entityType: "task",
         entityId: task.id,
         status: task.status,
         summary: `Task ${task.title} status updated to ${task.status}`
-      });
+      }));
 
       return task;
     }, { route: "tasks.update-status" });

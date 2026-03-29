@@ -1,6 +1,7 @@
 import type { FastifyPluginAsync } from "fastify";
 
 import { validationCreateSchema, validationsListQuerySchema } from "../http/schemas.js";
+import { controlPlaneEvents, timelineEvent } from "../lib/control-plane-events.js";
 import { requireValue } from "../lib/require-value.js";
 
 export const validationRoutes: FastifyPluginAsync = async (app) => {
@@ -17,15 +18,13 @@ export const validationRoutes: FastifyPluginAsync = async (app) => {
         "control plane returned no validation"
       );
 
-      await app.observability.recordTimelineEvent({
+      await app.observability.recordTimelineEvent(timelineEvent(controlPlaneEvents.validationCreated, {
         runId: validation.runId,
         taskId: validation.taskId,
-        eventType: "validation.created",
-        entityType: "validation",
         entityId: validation.id,
         status: validation.status,
         summary: `Validation ${validation.name} recorded`
-      });
+      }));
 
       return reply.code(201).send(validation);
     }, { route: "validations.create" });

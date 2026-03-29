@@ -2,6 +2,7 @@ import type { FastifyPluginAsync } from "fastify";
 
 import { approvalCreateSchema, approvalResolveSchema, approvalsListQuerySchema, idParamSchema } from "../http/schemas.js";
 import { requireAuthorizedAction } from "../lib/authorization.js";
+import { controlPlaneEvents, timelineEvent } from "../lib/control-plane-events.js";
 import { requireValue } from "../lib/require-value.js";
 
 export const approvalRoutes: FastifyPluginAsync = async (app) => {
@@ -28,15 +29,13 @@ export const approvalRoutes: FastifyPluginAsync = async (app) => {
         "control plane returned no approval"
       );
 
-      await app.observability.recordTimelineEvent({
+      await app.observability.recordTimelineEvent(timelineEvent(controlPlaneEvents.approvalCreated, {
         runId: approval.runId,
         taskId: approval.taskId,
-        eventType: "approval.created",
-        entityType: "approval",
         entityId: approval.id,
         status: approval.status,
         summary: `Approval ${approval.kind} requested`
-      });
+      }));
 
       return reply.code(201).send(approval);
     }, { route: "approvals.create" });
@@ -56,15 +55,13 @@ export const approvalRoutes: FastifyPluginAsync = async (app) => {
         "control plane returned no approval"
       );
 
-      await app.observability.recordTimelineEvent({
+      await app.observability.recordTimelineEvent(timelineEvent(controlPlaneEvents.approvalResolved, {
         runId: approval.runId,
         taskId: approval.taskId,
-        eventType: "approval.resolved",
-        entityType: "approval",
         entityId: approval.id,
         status: approval.status,
         summary: `Approval resolved as ${approval.status}`
-      });
+      }));
 
       return approval;
     }, { route: "approvals.resolve" });

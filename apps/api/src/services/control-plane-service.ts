@@ -1,5 +1,6 @@
 import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import {
+  controlPlaneEventSchema,
   type ActorIdentity,
   type Approval,
   type ApprovalAuditEntry,
@@ -1155,7 +1156,7 @@ export class ControlPlaneService {
     ]);
     const repository = await this.assertRepositoryExists(runDetail.repositoryId, access);
     const now = this.clock.now();
-    const mappedEvents = events.map((event): ControlPlaneEvent => event);
+    const mappedEvents = events.map((event) => controlPlaneEventSchema.parse(event));
     const approvalAuditEntries = this.buildApprovalAuditEntries(
       approvalsList,
       runDetail,
@@ -1253,7 +1254,7 @@ export class ControlPlaneService {
           approval,
           run,
           repository,
-          eventRows.map((event): ControlPlaneEvent => event)
+          eventRows.map((event) => controlPlaneEventSchema.parse(event))
         );
       });
 

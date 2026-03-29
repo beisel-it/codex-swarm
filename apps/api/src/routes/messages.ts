@@ -2,6 +2,7 @@ import type { FastifyPluginAsync } from "fastify";
 import { z } from "zod";
 
 import { messageCreateSchema } from "../http/schemas.js";
+import { controlPlaneEvents, timelineEvent } from "../lib/control-plane-events.js";
 import { requireValue } from "../lib/require-value.js";
 
 const querySchema = z.object({
@@ -22,10 +23,8 @@ export const messageRoutes: FastifyPluginAsync = async (app) => {
         "control plane returned no message"
       );
 
-      await app.observability.recordTimelineEvent({
+      await app.observability.recordTimelineEvent(timelineEvent(controlPlaneEvents.messageCreated, {
         runId: message.runId,
-        eventType: "message.created",
-        entityType: "message",
         entityId: message.id,
         status: message.kind,
         summary: `Message ${message.kind} created`,
@@ -33,7 +32,7 @@ export const messageRoutes: FastifyPluginAsync = async (app) => {
           senderAgentId: message.senderAgentId,
           recipientAgentId: message.recipientAgentId
         }
-      });
+      }));
 
       return reply.code(201).send(message);
     }, { route: "messages.create" });

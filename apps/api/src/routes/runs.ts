@@ -8,6 +8,7 @@ import {
   runStatusUpdateSchema
 } from "../http/schemas.js";
 import { requireAuthorizedAction, resolveRunStatusAction } from "../lib/authorization.js";
+import { controlPlaneEvents, timelineEvent } from "../lib/control-plane-events.js";
 import { getRetentionPolicy } from "../lib/governance-config.js";
 import { isRecoverableDatabaseError } from "../lib/database-fallback.js";
 import { requireValue } from "../lib/require-value.js";
@@ -43,14 +44,12 @@ export const runRoutes: FastifyPluginAsync = async (app) => {
         "control plane returned no audit export"
       );
 
-      await app.observability.recordTimelineEvent({
+      await app.observability.recordTimelineEvent(timelineEvent(controlPlaneEvents.runAuditExported, {
         runId: id,
-        eventType: "run.audit_exported",
-        entityType: "run",
         entityId: id,
         status: auditExport.run.status,
         summary: `Audit export generated for run ${id}`
-      });
+      }));
 
       return auditExport;
     }, { route: "runs.audit-export" });
@@ -65,14 +64,12 @@ export const runRoutes: FastifyPluginAsync = async (app) => {
         "control plane returned no run"
       );
 
-      await app.observability.recordTimelineEvent({
+      await app.observability.recordTimelineEvent(timelineEvent(controlPlaneEvents.runCreated, {
         runId: run.id,
-        eventType: "run.created",
-        entityType: "run",
         entityId: run.id,
         status: run.status,
         summary: `Run created for repository ${run.repositoryId}`
-      });
+      }));
 
       return reply.code(201).send(run);
     }, { route: "runs.create" });
@@ -88,14 +85,14 @@ export const runRoutes: FastifyPluginAsync = async (app) => {
         "control plane returned no run"
       );
 
-      await app.observability.recordTimelineEvent({
+      await app.observability.recordTimelineEvent(timelineEvent(
+        input.status === "completed" ? controlPlaneEvents.runCompleted : controlPlaneEvents.runStatusUpdated,
+        {
         runId: run.id,
-        eventType: "run.status_updated",
-        entityType: "run",
         entityId: run.id,
         status: run.status,
         summary: `Run status updated to ${run.status}`
-      });
+      }));
 
       return run;
     }, { route: "runs.update-status" });
@@ -110,14 +107,12 @@ export const runRoutes: FastifyPluginAsync = async (app) => {
         "control plane returned no run"
       );
 
-      await app.observability.recordTimelineEvent({
+      await app.observability.recordTimelineEvent(timelineEvent(controlPlaneEvents.runBranchPublished, {
         runId: run.id,
-        eventType: "run.branch_published",
-        entityType: "run",
         entityId: run.id,
         status: run.handoffStatus,
         summary: `Branch ${run.publishedBranch ?? run.branchName ?? "unknown"} published`
-      });
+      }));
 
       return run;
     }, { route: "runs.publish-branch" });
@@ -132,16 +127,14 @@ export const runRoutes: FastifyPluginAsync = async (app) => {
         "control plane returned no run"
       );
 
-      await app.observability.recordTimelineEvent({
+      await app.observability.recordTimelineEvent(timelineEvent(controlPlaneEvents.runPullRequestHandoffCreated, {
         runId: run.id,
-        eventType: "run.pull_request_handoff_created",
-        entityType: "run",
         entityId: run.id,
         status: run.handoffStatus,
         summary: run.pullRequestUrl
           ? `Pull request handoff created at ${run.pullRequestUrl}`
           : "Manual pull request handoff prepared"
-      });
+      }));
 
       return run;
     }, { route: "runs.pull-request-handoff" });

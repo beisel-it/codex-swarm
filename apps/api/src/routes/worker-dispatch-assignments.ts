@@ -6,6 +6,7 @@ import {
   workerDispatchCreateSchema,
   workerDispatchListQuerySchema
 } from "../http/schemas.js";
+import { controlPlaneEvents, timelineEvent } from "../lib/control-plane-events.js";
 import { requireValue } from "../lib/require-value.js";
 
 export const workerDispatchAssignmentRoutes: FastifyPluginAsync = async (app) => {
@@ -22,16 +23,14 @@ export const workerDispatchAssignmentRoutes: FastifyPluginAsync = async (app) =>
         "control plane returned no worker dispatch assignment"
       );
 
-      await app.observability.recordTimelineEvent({
+      await app.observability.recordTimelineEvent(timelineEvent(controlPlaneEvents.workerDispatchAssignmentCreated, {
         runId: assignment.runId,
         taskId: assignment.taskId,
         agentId: assignment.agentId,
-        eventType: "worker_dispatch_assignment.created",
-        entityType: "worker_dispatch_assignment",
         entityId: assignment.id,
         status: assignment.state,
         summary: `Worker dispatch assignment ${assignment.id} created`
-      });
+      }));
 
       return reply.code(201).send(assignment);
     }, { route: "worker-dispatch-assignments.create" });
@@ -46,16 +45,14 @@ export const workerDispatchAssignmentRoutes: FastifyPluginAsync = async (app) =>
         "control plane returned no worker dispatch assignment"
       );
 
-      await app.observability.recordTimelineEvent({
+      await app.observability.recordTimelineEvent(timelineEvent(controlPlaneEvents.workerDispatchAssignmentUpdated, {
         runId: assignment.runId,
         taskId: assignment.taskId,
         agentId: assignment.agentId,
-        eventType: "worker_dispatch_assignment.updated",
-        entityType: "worker_dispatch_assignment",
         entityId: assignment.id,
         status: assignment.state,
         summary: `Worker dispatch assignment ${assignment.id} updated to ${assignment.state}`
-      });
+      }));
 
       return assignment;
     }, { route: "worker-dispatch-assignments.complete" });

@@ -3,6 +3,7 @@ import { z } from "zod";
 
 import { getRetentionPolicy, getSecretIntegrationBoundary } from "../lib/governance-config.js";
 import { requireAuthorizedAction } from "../lib/authorization.js";
+import { controlPlaneEvents, timelineEvent } from "../lib/control-plane-events.js";
 
 const governanceReportQuerySchema = z.object({
   runId: z.uuid().optional(),
@@ -32,16 +33,14 @@ export const adminRoutes: FastifyPluginAsync = async (app) => {
         ...(query.runId ? { runId: query.runId } : {})
       });
 
-      await app.observability.recordTimelineEvent({
+      await app.observability.recordTimelineEvent(timelineEvent(controlPlaneEvents.adminGovernanceReportGenerated, {
         runId: query.runId ?? null,
-        eventType: "admin.governance_report_generated",
-        entityType: "admin_report",
         entityId: query.runId ?? "global",
         status: "completed",
         summary: query.runId
           ? `Governance report generated for run ${query.runId}`
           : "Global governance report generated"
-      });
+      }));
 
       return report;
     }, { route: "admin.governance-report" });
@@ -78,10 +77,8 @@ export const adminRoutes: FastifyPluginAsync = async (app) => {
         ...(input.runId ? { runId: input.runId } : {})
       });
 
-      await app.observability.recordTimelineEvent({
+      await app.observability.recordTimelineEvent(timelineEvent(controlPlaneEvents.adminRetentionReconciled, {
         runId: input.runId ?? null,
-        eventType: "admin.retention_reconciled",
-        entityType: "retention_policy",
         entityId: input.runId ?? "global",
         status: input.dryRun ? "dry_run" : "applied",
         summary: input.dryRun
@@ -92,7 +89,7 @@ export const adminRoutes: FastifyPluginAsync = async (app) => {
           artifactsUpdated: report.artifactsUpdated,
           eventsUpdated: report.eventsUpdated
         }
-      });
+      }));
 
       return report;
     }, { route: "admin.retention-reconcile" });

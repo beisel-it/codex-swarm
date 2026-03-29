@@ -1,6 +1,13 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 
-import type { ActorIdentity, ControlPlaneEvent, ControlPlaneMetrics } from "@codex-swarm/contracts";
+import {
+  controlPlaneEventSchema,
+  type ActorIdentity,
+  type ControlPlaneEvent,
+  type ControlPlaneEventEntityType,
+  type ControlPlaneEventType,
+  type ControlPlaneMetrics
+} from "@codex-swarm/contracts";
 import { asc, desc, eq } from "drizzle-orm";
 import type { FastifyReply, FastifyRequest } from "fastify";
 
@@ -21,8 +28,8 @@ type TimelineEventInput = {
   runId?: string | null;
   taskId?: string | null;
   agentId?: string | null;
-  eventType: string;
-  entityType: string;
+  eventType: ControlPlaneEventType;
+  entityType: ControlPlaneEventEntityType;
   entityId: string;
   status: string;
   summary: string;
@@ -206,7 +213,7 @@ export class ObservabilityService {
         return null;
       }
 
-      return event satisfies ControlPlaneEvent;
+      return controlPlaneEventSchema.parse(event);
     } catch (error) {
       console.error("[observability] timeline event persistence failed", error);
       return null;

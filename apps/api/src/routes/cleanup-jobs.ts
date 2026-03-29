@@ -1,6 +1,7 @@
 import type { FastifyPluginAsync } from "fastify";
 
 import { cleanupJobRunSchema } from "../http/schemas.js";
+import { controlPlaneEvents, timelineEvent } from "../lib/control-plane-events.js";
 import { requireValue } from "../lib/require-value.js";
 
 export const cleanupJobRoutes: FastifyPluginAsync = async (app) => {
@@ -12,10 +13,8 @@ export const cleanupJobRoutes: FastifyPluginAsync = async (app) => {
         "control plane returned no cleanup report"
       );
 
-      await app.observability.recordTimelineEvent({
+      await app.observability.recordTimelineEvent(timelineEvent(controlPlaneEvents.maintenanceCleanupCompleted, {
         runId: input.runId ?? null,
-        eventType: "maintenance.cleanup_completed",
-        entityType: "cleanup_job",
         entityId: `cleanup-${report.completedAt.toISOString()}`,
         status: "completed",
         summary: `Cleanup scanned ${report.scannedSessions} sessions`,
@@ -25,7 +24,7 @@ export const cleanupJobRoutes: FastifyPluginAsync = async (app) => {
           markedStale: report.markedStale,
           archived: report.archived
         }
-      });
+      }));
 
       return report;
     }, { route: "cleanup-jobs.run" });

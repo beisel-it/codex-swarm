@@ -1,6 +1,7 @@
 import type { FastifyPluginAsync } from "fastify";
 
 import { agentCreateSchema } from "../http/schemas.js";
+import { controlPlaneEvents, timelineEvent } from "../lib/control-plane-events.js";
 import { requireValue } from "../lib/require-value.js";
 
 export const agentRoutes: FastifyPluginAsync = async (app) => {
@@ -20,16 +21,14 @@ export const agentRoutes: FastifyPluginAsync = async (app) => {
         "control plane returned no agent"
       );
 
-      await app.observability.recordTimelineEvent({
+      await app.observability.recordTimelineEvent(timelineEvent(controlPlaneEvents.agentCreated, {
         runId: agent.runId,
         taskId: agent.currentTaskId,
         agentId: agent.id,
-        eventType: "agent.created",
-        entityType: "agent",
         entityId: agent.id,
         status: agent.status,
         summary: `Agent ${agent.name} created`
-      });
+      }));
 
       return reply.code(201).send(agent);
     }, { route: "agents.create" });

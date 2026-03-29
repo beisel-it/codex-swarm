@@ -2,6 +2,7 @@ import type { FastifyPluginAsync } from "fastify";
 import { z } from "zod";
 
 import { artifactCreateSchema } from "../http/schemas.js";
+import { controlPlaneEvents, timelineEvent } from "../lib/control-plane-events.js";
 import { requireValue } from "../lib/require-value.js";
 
 const querySchema = z.object({
@@ -22,15 +23,13 @@ export const artifactRoutes: FastifyPluginAsync = async (app) => {
         "control plane returned no artifact"
       );
 
-      await app.observability.recordTimelineEvent({
+      await app.observability.recordTimelineEvent(timelineEvent(controlPlaneEvents.artifactCreated, {
         runId: artifact.runId,
         taskId: artifact.taskId,
-        eventType: "artifact.created",
-        entityType: "artifact",
         entityId: artifact.id,
         status: artifact.kind,
         summary: `Artifact ${artifact.kind} published`
-      });
+      }));
 
       return reply.code(201).send(artifact);
     }, { route: "artifacts.create" });
