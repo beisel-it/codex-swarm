@@ -162,6 +162,141 @@ function workerDispatchRank(nodeId: string, assignment: Pick<WorkerDispatchAssig
   return 3;
 }
 
+function coerceNonNegativeNumber(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null;
+}
+
+function readWorkerNodeMetric(metadata: Record<string, unknown>, keys: string[]) {
+  for (const key of keys) {
+    const directValue = coerceNonNegativeNumber(metadata[key]);
+
+    if (directValue !== null) {
+      return directValue;
+    }
+
+    const nested = metadata[key];
+
+    if (nested && typeof nested === "object") {
+      const nestedRecord = nested as Record<string, unknown>;
+
+      for (const nestedKey of ["pending", "tasksPending", "assignments", "active", "count", "value", "cpu", "memory"]) {
+        const nestedValue = coerceNonNegativeNumber(nestedRecord[nestedKey]);
+
+        if (nestedValue !== null) {
+          return nestedValue;
+        }
+      }
+    }
+  }
+
+  return null;
+}
+
+function normalizeUtilizationMetric(value: number | null) {
+  if (value === null) {
+    return Number.POSITIVE_INFINITY;
+  }
+
+  if (value <= 1) {
+    return value * 100;
+  }
+
+  return value;
+}
+
+function workerNodeLoadTuple(
+  workerNode: Pick<WorkerNode, "metadata" | "lastHeartbeatAt" | "id">,
+  now: Date
+) {
+  const metadata = workerNode.metadata ?? {};
+  const rawQueueDepth = readWorkerNodeMetric(metadata, ["queueDepth", "queue", "queue_depth"]);
+  const rawActiveClaims = readWorkerNodeMetric(metadata, ["activeClaims", "claimedAssignments", "activeAssignments"]);
+  const rawCpuUtilization = readWorkerNodeMetric(metadata, ["cpuUtilization", "utilizationCpu", "cpu", "utilization", "load"]);
+  const rawMemoryUtilization = readWorkerNodeMetric(metadata, ["memoryUtilization", "utilizationMemory", "memory"]);
+  const hasExplicitLoadSignals = [rawQueueDepth, rawActiveClaims, rawCpuUtilization, rawMemoryUtilization]
+    .some((value) => value !== null);
+  const queueDepth = rawQueueDepth ?? 0;
+  const activeClaims = rawActiveClaims ?? 0;
+  const cpuUtilization = normalizeUtilizationMetric(rawCpuUtilization);
+  const memoryUtilization = normalizeUtilizationMetric(rawMemoryUtilization);
+  const heartbeatLagMs = hasExplicitLoadSignals
+    ? workerNode.lastHeartbeatAt
+      ? Math.max(0, now.getTime() - workerNode.lastHeartbeatAt.getTime())
+      : Number.POSITIVE_INFINITY
+    : 0;
+
+  return [
+    queueDepth,
+    activeClaims,
+    cpuUtilization,
+    memoryUtilization,
+    heartbeatLagMs,
+    workerNode.id
+  ] as const;
+}
+
+function compareWorkerNodesForAssignment(
+  left: Pick<WorkerNode, "id" | "metadata" | "lastHeartbeatAt">,
+  right: Pick<WorkerNode, "id" | "metadata" | "lastHeartbeatAt">,
+  assignment: Pick<WorkerDispatchAssignment, "stickyNodeId" | "preferredNodeId">,
+  now: Date
+) {
+  if (assignment.stickyNodeId) {
+    if (left.id === assignment.stickyNodeId && right.id !== assignment.stickyNodeId) {
+      return -1;
+    }
+
+    if (right.id === assignment.stickyNodeId && left.id !== assignment.stickyNodeId) {
+      return 1;
+    }
+  }
+
+  if (assignment.preferredNodeId) {
+    if (left.id === assignment.preferredNodeId && right.id !== assignment.preferredNodeId) {
+      return -1;
+    }
+
+    if (right.id === assignment.preferredNodeId && left.id !== assignment.preferredNodeId) {
+      return 1;
+    }
+  }
+
+  const leftTuple = workerNodeLoadTuple(left, now);
+  const rightTuple = workerNodeLoadTuple(right, now);
+  const [leftQueueDepth, leftActiveClaims, leftCpu, leftMemory, leftHeartbeatLag, leftId] = leftTuple;
+  const [rightQueueDepth, rightActiveClaims, rightCpu, rightMemory, rightHeartbeatLag, rightId] = rightTuple;
+
+  if (leftQueueDepth !== rightQueueDepth) {
+    return leftQueueDepth - rightQueueDepth;
+  }
+
+  if (leftActiveClaims !== rightActiveClaims) {
+    return leftActiveClaims - rightActiveClaims;
+  }
+
+  if (leftCpu !== rightCpu) {
+    return leftCpu - rightCpu;
+  }
+
+  if (leftMemory !== rightMemory) {
+    return leftMemory - rightMemory;
+  }
+
+  if (leftHeartbeatLag !== rightHeartbeatLag) {
+    return leftHeartbeatLag - rightHeartbeatLag;
+  }
+
+  if (leftId < rightId) {
+    return -1;
+  }
+
+  if (leftId > rightId) {
+    return 1;
+  }
+
+  return 0;
+}
+
 function isWorkerNodeEligible(workerNode: Pick<WorkerNode, "status" | "drainState">) {
   return workerNode.status === "online" && workerNode.drainState === "active";
 }
@@ -1233,6 +1368,7 @@ export class ControlPlaneService {
 
   async claimNextWorkerDispatch(nodeId: string) {
     const workerNode = this.mapWorkerNode(await this.assertWorkerNodeExists(nodeId));
+    const now = this.clock.now();
 
     if (!isWorkerNodeEligible(workerNode)) {
       throw new HttpError(409, `worker node ${workerNode.id} is not eligible for scheduling`);
@@ -1243,10 +1379,27 @@ export class ControlPlaneService {
       .from(workerDispatchAssignments)
       .where(inArray(workerDispatchAssignments.state, ["queued", "retrying"]))
       .orderBy(asc(workerDispatchAssignments.createdAt));
+    const workerNodeRows = await this.db
+      .select()
+      .from(workerNodes)
+      .orderBy(asc(workerNodes.createdAt));
+    const availableWorkerNodes = workerNodeRows
+      .map((row) => this.mapWorkerNode(row))
+      .filter((candidate) => isWorkerNodeEligible(candidate));
 
     const candidates = rows
       .map((assignment) => this.mapWorkerDispatchAssignment(assignment))
-      .filter((assignment) => workerNodeSupportsAssignment(workerNode, assignment))
+      .filter((assignment) => {
+        if (!workerNodeSupportsAssignment(workerNode, assignment)) {
+          return false;
+        }
+
+        const preferredWorkerNode = availableWorkerNodes
+          .filter((candidate) => workerNodeSupportsAssignment(candidate, assignment))
+          .sort((left, right) => compareWorkerNodesForAssignment(left, right, assignment, now))[0];
+
+        return !preferredWorkerNode || preferredWorkerNode.id === nodeId;
+      })
       .sort((left, right) => {
         const leftRank = workerDispatchRank(nodeId, left);
         const rightRank = workerDispatchRank(nodeId, right);
@@ -1264,7 +1417,6 @@ export class ControlPlaneService {
       return null;
     }
 
-    const now = this.clock.now();
     const [updatedAssignment] = await this.db.update(workerDispatchAssignments).set({
       state: "claimed",
       stickyNodeId: nextAssignment.stickyNodeId ?? nodeId,

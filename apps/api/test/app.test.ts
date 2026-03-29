@@ -93,6 +93,152 @@ const observability = {
   withTrace: vi.fn(async (_name: string, fn: () => Promise<unknown>) => fn())
 };
 
+function coerceNonNegativeNumber(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null;
+}
+
+function readWorkerNodeMetric(metadata: Record<string, unknown>, keys: string[]) {
+  for (const key of keys) {
+    const directValue = coerceNonNegativeNumber(metadata[key]);
+
+    if (directValue !== null) {
+      return directValue;
+    }
+
+    const nested = metadata[key];
+
+    if (nested && typeof nested === "object") {
+      const nestedRecord = nested as Record<string, unknown>;
+
+      for (const nestedKey of ["pending", "tasksPending", "assignments", "active", "count", "value", "cpu", "memory"]) {
+        const nestedValue = coerceNonNegativeNumber(nestedRecord[nestedKey]);
+
+        if (nestedValue !== null) {
+          return nestedValue;
+        }
+      }
+    }
+  }
+
+  return null;
+}
+
+function normalizeUtilizationMetric(value: number | null) {
+  if (value === null) {
+    return Number.POSITIVE_INFINITY;
+  }
+
+  if (value <= 1) {
+    return value * 100;
+  }
+
+  return value;
+}
+
+function workerNodeLoadTuple(workerNode: {
+  id: string;
+  metadata?: Record<string, unknown>;
+  lastHeartbeatAt?: Date | null;
+}) {
+  const metadata = workerNode.metadata ?? {};
+  const rawQueueDepth = readWorkerNodeMetric(metadata, ["queueDepth", "queue", "queue_depth"]);
+  const rawActiveClaims = readWorkerNodeMetric(metadata, ["activeClaims", "claimedAssignments", "activeAssignments"]);
+  const rawCpuUtilization = readWorkerNodeMetric(metadata, ["cpuUtilization", "utilizationCpu", "cpu", "utilization", "load"]);
+  const rawMemoryUtilization = readWorkerNodeMetric(metadata, ["memoryUtilization", "utilizationMemory", "memory"]);
+  const hasExplicitLoadSignals = [rawQueueDepth, rawActiveClaims, rawCpuUtilization, rawMemoryUtilization]
+    .some((value) => value !== null);
+  const queueDepth = rawQueueDepth ?? 0;
+  const activeClaims = rawActiveClaims ?? 0;
+  const cpuUtilization = normalizeUtilizationMetric(rawCpuUtilization);
+  const memoryUtilization = normalizeUtilizationMetric(rawMemoryUtilization);
+  const heartbeatLagMs = hasExplicitLoadSignals
+    ? workerNode.lastHeartbeatAt
+      ? Math.max(0, new Date("2026-03-28T12:05:00.000Z").getTime() - workerNode.lastHeartbeatAt.getTime())
+      : Number.POSITIVE_INFINITY
+    : 0;
+
+  return [
+    queueDepth,
+    activeClaims,
+    cpuUtilization,
+    memoryUtilization,
+    heartbeatLagMs,
+    workerNode.id
+  ] as const;
+}
+
+function compareWorkerNodesForAssignment(
+  left: {
+    id: string;
+    metadata?: Record<string, unknown>;
+    lastHeartbeatAt?: Date | null;
+  },
+  right: {
+    id: string;
+    metadata?: Record<string, unknown>;
+    lastHeartbeatAt?: Date | null;
+  },
+  assignment: {
+    stickyNodeId?: string | null;
+    preferredNodeId?: string | null;
+  }
+) {
+  if (assignment.stickyNodeId) {
+    if (left.id === assignment.stickyNodeId && right.id !== assignment.stickyNodeId) {
+      return -1;
+    }
+
+    if (right.id === assignment.stickyNodeId && left.id !== assignment.stickyNodeId) {
+      return 1;
+    }
+  }
+
+  if (assignment.preferredNodeId) {
+    if (left.id === assignment.preferredNodeId && right.id !== assignment.preferredNodeId) {
+      return -1;
+    }
+
+    if (right.id === assignment.preferredNodeId && left.id !== assignment.preferredNodeId) {
+      return 1;
+    }
+  }
+
+  const leftTuple = workerNodeLoadTuple(left);
+  const rightTuple = workerNodeLoadTuple(right);
+  const [leftQueueDepth, leftActiveClaims, leftCpu, leftMemory, leftHeartbeatLag, leftId] = leftTuple;
+  const [rightQueueDepth, rightActiveClaims, rightCpu, rightMemory, rightHeartbeatLag, rightId] = rightTuple;
+
+  if (leftQueueDepth !== rightQueueDepth) {
+    return leftQueueDepth - rightQueueDepth;
+  }
+
+  if (leftActiveClaims !== rightActiveClaims) {
+    return leftActiveClaims - rightActiveClaims;
+  }
+
+  if (leftCpu !== rightCpu) {
+    return leftCpu - rightCpu;
+  }
+
+  if (leftMemory !== rightMemory) {
+    return leftMemory - rightMemory;
+  }
+
+  if (leftHeartbeatLag !== rightHeartbeatLag) {
+    return leftHeartbeatLag - rightHeartbeatLag;
+  }
+
+  if (leftId < rightId) {
+    return -1;
+  }
+
+  if (leftId > rightId) {
+    return 1;
+  }
+
+  return 0;
+}
+
 class FakeVerticalSliceControlPlane {
   private readonly repositories: any[] = [
     {
@@ -477,7 +623,9 @@ class FakeVerticalSliceControlPlane {
     }
 
     workerNode.status = input.status;
-    workerNode.capabilityLabels = input.capabilityLabels ?? [];
+    workerNode.capabilityLabels = input.capabilityLabels && input.capabilityLabels.length > 0
+      ? input.capabilityLabels
+      : workerNode.capabilityLabels;
     workerNode.metadata = input.metadata ?? {};
     workerNode.lastHeartbeatAt = new Date();
     workerNode.updatedAt = new Date();
@@ -626,10 +774,28 @@ class FakeVerticalSliceControlPlane {
       throw new HttpError(409, `worker node ${nodeId} is not eligible for scheduling`);
     }
 
-    const candidate = this.workerDispatchAssignments.find((assignment) =>
-      (assignment.state === "queued" || assignment.state === "retrying")
-      && (!assignment.stickyNodeId || assignment.stickyNodeId === nodeId)
-      && assignment.requiredCapabilities.every((capability: string) => workerNode.capabilityLabels.includes(capability)));
+    const candidate = this.workerDispatchAssignments.find((assignment) => {
+      if (!(assignment.state === "queued" || assignment.state === "retrying")) {
+        return false;
+      }
+
+      if (assignment.stickyNodeId && assignment.stickyNodeId !== nodeId) {
+        return false;
+      }
+
+      if (!assignment.requiredCapabilities.every((capability: string) => workerNode.capabilityLabels.includes(capability))) {
+        return false;
+      }
+
+      const preferredWorkerNode = this.workerNodes
+        .filter((candidateNode) => candidateNode.eligibleForScheduling)
+        .filter((candidateNode) => (!assignment.stickyNodeId || assignment.stickyNodeId === candidateNode.id))
+        .filter((candidateNode) =>
+          assignment.requiredCapabilities.every((capability: string) => candidateNode.capabilityLabels.includes(capability)))
+        .sort((left, right) => compareWorkerNodesForAssignment(left, right, assignment))[0];
+
+      return !preferredWorkerNode || preferredWorkerNode.id === nodeId;
+    });
 
     if (!candidate) {
       return null;
@@ -4403,6 +4569,93 @@ describe("buildApp", () => {
           staleReason: null
         }
       ]
+    });
+
+    await app.close();
+  });
+
+  it("prefers the lowest-load eligible node when claiming generic dispatch work", async () => {
+    const app = await buildApp({
+      controlPlane: new FakeVerticalSliceControlPlane() as unknown as ControlPlaneService
+    });
+    const headers = {
+      authorization: "Bearer codex-swarm-dev-token"
+    };
+
+    const nodeAHeartbeatResponse = await app.inject({
+      method: "PATCH",
+      url: `/api/v1/worker-nodes/${ids.workerNode}/heartbeat`,
+      headers,
+      payload: {
+        metadata: {
+          queueDepth: 6,
+          activeClaims: 2,
+          utilization: {
+            cpu: 0.9
+          }
+        }
+      }
+    });
+    const nodeBHeartbeatResponse = await app.inject({
+      method: "PATCH",
+      url: `/api/v1/worker-nodes/${ids.workerNodeB}/heartbeat`,
+      headers,
+      payload: {
+        metadata: {
+          queueDepth: 1,
+          activeClaims: 0,
+          utilization: {
+            cpu: 0.2
+          }
+        }
+      }
+    });
+
+    expect(nodeAHeartbeatResponse.statusCode).toBe(200);
+    expect(nodeBHeartbeatResponse.statusCode).toBe(200);
+
+    const dispatchCreateResponse = await app.inject({
+      method: "POST",
+      url: "/api/v1/worker-dispatch-assignments",
+      headers,
+      payload: {
+        runId: ids.run,
+        taskId: ids.taskA,
+        agentId: ids.agent,
+        repositoryId: ids.repository,
+        repositoryName: "codex-swarm",
+        requiredCapabilities: ["remote"],
+        worktreePath: "/tmp/codex-swarm/run-1/worker-1",
+        prompt: "Claim the healthiest eligible worker",
+        profile: "default",
+        sandbox: "workspace-write",
+        approvalPolicy: "on-request"
+      }
+    });
+
+    expect(dispatchCreateResponse.statusCode).toBe(201);
+
+    const overloadedClaimResponse = await app.inject({
+      method: "POST",
+      url: `/api/v1/worker-nodes/${ids.workerNode}/claim-dispatch`,
+      headers
+    });
+
+    expect(overloadedClaimResponse.statusCode).toBe(200);
+    expect(overloadedClaimResponse.json()).toBeNull();
+
+    const healthyClaimResponse = await app.inject({
+      method: "POST",
+      url: `/api/v1/worker-nodes/${ids.workerNodeB}/claim-dispatch`,
+      headers
+    });
+
+    expect(healthyClaimResponse.statusCode).toBe(200);
+    expect(healthyClaimResponse.json()).toMatchObject({
+      claimedByNodeId: ids.workerNodeB,
+      stickyNodeId: ids.workerNodeB,
+      preferredNodeId: ids.workerNodeB,
+      state: "claimed"
     });
 
     await app.close();
