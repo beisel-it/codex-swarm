@@ -21,6 +21,7 @@ This directory contains the release-facing documentation set for Codex Swarm.
 - [Security](./operations/security.md)
 - [SLO and Support Envelope](./operations/slo-support.md)
 - [Backup, Restore, and DR](./operations/backup-restore-dr.md)
+- [M9 Readiness Runbook](./operations/m9-readiness.md)
 - [Upgrade Path](./operations/upgrade-path.md)
 - [Cost, Usage, and Performance](./operations/cost-usage-performance.md)
 

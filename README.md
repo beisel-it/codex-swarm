@@ -58,6 +58,7 @@ Operational tooling:
 - `corepack pnpm ops:backup` writes a logical control-plane snapshot to `.ops/backups/`.
 - `corepack pnpm ops:restore` restores a snapshot from `BACKUP_FILE` into `RESTORE_DATABASE_URL` or `DATABASE_URL`.
 - `corepack pnpm ops:drill` creates a scratch Postgres database, restores a snapshot, and records counts/timings.
+- `corepack pnpm ops:m9:prepare` creates the isolated directory layout and manifest for the M9 fresh-workdir exercise without starting the scenario.
 - `corepack pnpm ops:perf` runs a simple concurrent HTTP latency check against a live API base URL.
 - `corepack pnpm ops:smoke` drives a live single-host smoke flow against `SMOKE_BASE_URL`, starting a real leader session, continuing it on the persisted `threadId`, materializing `.swarm/plan.md`, persisting the task DAG, and emitting operator-visible verification output.
 - `POST /api/v1/cleanup-jobs/run` can optionally delete stale or terminal worktree directories when `deleteStaleWorktrees=true`.
@@ -94,6 +95,7 @@ Operations docs:
 - [`docs/operations/security.md`](./docs/operations/security.md)
 - [`docs/operations/slo-support.md`](./docs/operations/slo-support.md)
 - [`docs/operations/backup-restore-dr.md`](./docs/operations/backup-restore-dr.md)
+- [`docs/operations/m9-readiness.md`](./docs/operations/m9-readiness.md)
 - [`docs/operations/upgrade-path.md`](./docs/operations/upgrade-path.md)
 - [`docs/operations/cost-usage-performance.md`](./docs/operations/cost-usage-performance.md)
 
