@@ -3933,7 +3933,9 @@ describe("buildApp", () => {
           profile: "default",
           sandbox: "workspace-write",
           approvalPolicy: "on-request",
-          includePlanTool: true
+          includePlanTool: true,
+          workerNodeId: ids.workerNode,
+          placementConstraintLabels: ["remote"]
         },
         supervisorCommand: [
           process.execPath,
@@ -3975,7 +3977,32 @@ describe("buildApp", () => {
         })
       });
 
+      const workerAgentResponse = await app.inject({
+        method: "POST",
+        url: "/api/v1/agents",
+        headers,
+        payload: {
+          runId: ids.run,
+          name: "worker-distributed",
+          role: "backend-developer",
+          status: "idle",
+          session: {
+            threadId: "thread-worker-distributed",
+            cwd: workspaceRoot,
+            sandbox: "workspace-write",
+            approvalPolicy: "on-request",
+            includePlanTool: false,
+            workerNodeId: ids.workerNodeB,
+            placementConstraintLabels: ["remote"],
+            metadata: {
+              source: "leader-worker-placement-test"
+            }
+          }
+        }
+      });
+
       expect(result.threadId).toBe("thread-leader-plan");
+      expect(workerAgentResponse.statusCode).toBe(201);
       expect(result.tasks.map((task) => task.title)).toEqual([
         "Draft the leader plan",
         "Implement the hello-world backend slice"
@@ -4001,7 +4028,14 @@ describe("buildApp", () => {
         planArtifactPath: result.planArtifactPath,
         sessions: [
           {
-            threadId: "thread-leader-plan"
+            threadId: "thread-leader-plan",
+            workerNodeId: ids.workerNode,
+            stickyNodeId: ids.workerNode
+          },
+          {
+            threadId: "thread-worker-distributed",
+            workerNodeId: ids.workerNodeB,
+            stickyNodeId: ids.workerNodeB
           }
         ],
         tasks: [

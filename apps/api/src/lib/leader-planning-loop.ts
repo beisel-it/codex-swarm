@@ -28,6 +28,8 @@ export interface LeaderPlanningLoopInput {
     sandbox: string;
     approvalPolicy: string;
     includePlanTool?: boolean;
+    workerNodeId?: string;
+    placementConstraintLabels?: string[];
   };
   executeTool: (request: unknown) => Promise<{
     threadId: string;
@@ -107,6 +109,8 @@ export async function runLeaderPlanningLoop(input: LeaderPlanningLoopInput): Pro
         sandbox: input.runtimeConfig.sandbox,
         approvalPolicy: input.runtimeConfig.approvalPolicy,
         includePlanTool: input.runtimeConfig.includePlanTool ?? false,
+        workerNodeId: input.runtimeConfig.workerNodeId,
+        placementConstraintLabels: input.runtimeConfig.placementConstraintLabels ?? [],
         metadata: {
           source: "leader-planning-loop",
           actorId: input.actorId
