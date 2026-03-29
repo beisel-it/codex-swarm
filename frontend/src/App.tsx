@@ -406,7 +406,7 @@ const API_BASE_URL = (
   import.meta.env.VITE_API_BASE_URL
   ?? `${window.location.protocol}//${window.location.hostname}:4300`
 ).replace(/\/$/, '')
-const API_TOKEN = import.meta.env.VITE_API_TOKEN ?? 'codex-swarm-dev-token'
+const API_TOKEN = import.meta.env.VITE_API_TOKEN ?? ''
 const APPROVAL_RESOLVER = import.meta.env.VITE_APPROVAL_RESOLVER ?? 'frontend-dev'
 const MOCK_FALLBACK_ENABLED = import.meta.env.VITE_ENABLE_MOCK_FALLBACK === 'true'
 const REFRESH_MS = 15_000
