@@ -686,3 +686,24 @@ Evidence:
 Residual risks:
 
 - The repo still emits JSON for backup snapshots and some transport payloads, but those are support utilities and wire formats rather than the control plane’s authoritative state store.
+
+## Task `66a28a85`
+
+Roadmap entry:
+
+- Phase 2 deliverable: `Human approve/reject flow`
+
+Verdict:
+
+- parity
+
+Evidence:
+
+- The API exposes approval list, detail, create, and resolve routes in `apps/api/src/routes/approvals.ts`, with explicit authorization on request and resolve actions.
+- The frontend `Review workspace` provides an approval list, requested context, resolution notes, and browser buttons for `Approve request` and `Reject with feedback` in `frontend/src/App.tsx`.
+- Integration coverage verifies approval creation and structured reject-with-feedback resolution through the live API shape in `apps/api/test/app.test.ts`.
+- The user guide documents the browser review console as the supported human approve/reject flow in `docs/user-guide.md`.
+
+Residual risks:
+
+- The delivered flow centers on approval records linked to runs/tasks rather than a broader generalized review workflow, but it satisfies the roadmap’s approve/reject deliverable.
