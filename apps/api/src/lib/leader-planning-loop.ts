@@ -95,6 +95,17 @@ function toDate(value: Date | string | null | undefined) {
   return value instanceof Date ? value : new Date(value);
 }
 
+function buildLeaderStartPrompt(runId: string) {
+  return [
+    "Initialize the leader orchestration session.",
+    `Run ID: ${runId}`,
+    "",
+    "Do not inspect the repository, edit files, or perform planning work in this step.",
+    "Reply with exactly one compact JSON object and nothing else.",
+    'Schema: {"status":"ready","runId":"string","summary":"string"}'
+  ].join("\n");
+}
+
 export async function runLeaderPlanningLoop(input: LeaderPlanningLoopInput): Promise<LeaderPlanningLoopResult> {
   const registry = new SessionRegistry();
   registry.seed({
@@ -116,7 +127,7 @@ export async function runLeaderPlanningLoop(input: LeaderPlanningLoopInput): Pro
 
   try {
     const startPrompt = input.startPrompt
-      ?? `Start the leader orchestration session for run ${input.runId}.`;
+      ?? buildLeaderStartPrompt(input.runId);
     const started = await runtime.startSession(`bootstrap-${input.runId}`, startPrompt);
     const startBudgetState = await checkpointRunBudget(
       input.request,
