@@ -782,7 +782,9 @@ export function buildCodexSessionReplyRequest(input: CodexSessionReplyInput) {
     input: {
       threadId: input.threadId,
       prompt: input.prompt,
-      cwd: input.config?.cwd
+      cwd: input.config?.cwd,
+      sandbox: input.config?.sandbox,
+      approvalPolicy: input.config?.approvalPolicy
     }
   } as const;
 }
@@ -958,12 +960,15 @@ export function createLocalCodexCliExecutor(options: LocalCodexCliExecutorOption
         throw new Error("codex-reply request requires input");
       }
 
+      const bypass = input.sandbox === "danger-full-access" || input.approvalPolicy === "never";
+
       args = [
         ...baseArgs,
         "exec",
         "resume",
+        "--skip-git-repo-check",
         "--json",
-        "--full-auto",
+        ...(bypass ? ["--dangerously-bypass-approvals-and-sandbox"] : ["--full-auto"]),
         input.threadId,
         input.prompt
       ];
@@ -975,16 +980,18 @@ export function createLocalCodexCliExecutor(options: LocalCodexCliExecutorOption
         throw new Error("codex request requires input");
       }
 
+      const bypass = input.sandbox === "danger-full-access" || input.approvalPolicy === "never";
+
       args = [
         ...baseArgs,
         "exec",
+        "--skip-git-repo-check",
         "--json",
-        "--full-auto",
+        ...(bypass ? ["--dangerously-bypass-approvals-and-sandbox"] : ["--full-auto"]),
         "-C",
         input.cwd,
         ...(input.profile && input.profile !== "default" ? ["-p", input.profile] : []),
-        "-s",
-        input.sandbox,
+        ...(bypass ? [] : ["-s", input.sandbox]),
         input.prompt
       ];
       cwd = input.cwd;

@@ -793,6 +793,7 @@ describe("worker runtime helpers", () => {
     expect(calls[0]?.command).toBe(process.execPath);
     expect(calls[0]?.args).toEqual([
       "exec",
+      "--skip-git-repo-check",
       "--json",
       "--full-auto",
       "-C",
@@ -853,6 +854,7 @@ describe("worker runtime helpers", () => {
     expect(calls[0]?.args).toEqual([
       "exec",
       "resume",
+      "--skip-git-repo-check",
       "--json",
       "--full-auto",
       "thread-cli-001",

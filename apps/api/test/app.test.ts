@@ -297,6 +297,7 @@ class FakeVerticalSliceControlPlane {
     }
   ];
   private readonly workerDispatchAssignments: any[] = [];
+  private readonly messages: any[] = [];
   private readonly artifacts: any[] = [
     {
       id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
@@ -529,8 +530,13 @@ class FakeVerticalSliceControlPlane {
 
   async createTask(input: any, access?: any) {
     const run = await this.getRun(input.runId, access);
+    const taskId = run.tasks.length === 0
+      ? ids.taskA
+      : run.tasks.length === 1
+        ? ids.taskB
+        : crypto.randomUUID();
     const task = {
-      id: run.tasks.length === 0 ? ids.taskA : ids.taskB,
+      id: taskId,
       runId: input.runId,
       parentTaskId: input.parentTaskId ?? null,
       title: input.title,
@@ -654,10 +660,11 @@ class FakeVerticalSliceControlPlane {
   async createAgent(input: any, access?: any) {
     const run = await this.getRun(input.runId, access);
     const activeAgents = run.agents.filter((candidate: any) =>
+      candidate.role !== "tech-lead" && (
       candidate.status === "provisioning"
       || candidate.status === "idle"
       || candidate.status === "busy"
-      || candidate.status === "paused");
+      || candidate.status === "paused"));
 
     if (activeAgents.length >= run.concurrencyCap) {
       throw new HttpError(409, `run concurrency cap of ${run.concurrencyCap} active agents reached`);
@@ -682,8 +689,9 @@ class FakeVerticalSliceControlPlane {
       }
     }
 
+    const agentId = run.agents.length === 0 ? ids.agent : crypto.randomUUID();
     const agent = {
-      id: ids.agent,
+      id: agentId,
       runId: input.runId,
       name: input.name,
       role: input.role,
@@ -699,9 +707,10 @@ class FakeVerticalSliceControlPlane {
     run.agents.push(agent);
 
     if (input.session) {
+      const sessionId = run.sessions.length === 0 ? ids.session : crypto.randomUUID();
       run.sessions.push({
-        id: ids.session,
-        agentId: ids.agent,
+        id: sessionId,
+        agentId,
         threadId: input.session.threadId,
         cwd: input.session.cwd,
         sandbox: input.session.sandbox,
@@ -761,8 +770,9 @@ class FakeVerticalSliceControlPlane {
   }
 
   async createWorkerDispatchAssignment(input: any) {
+    const assignmentId = this.workerDispatchAssignments.length === 0 ? ids.dispatch : crypto.randomUUID();
     const assignment = {
-      id: ids.dispatch,
+      id: assignmentId,
       runId: input.runId,
       taskId: input.taskId,
       agentId: input.agentId,
@@ -968,12 +978,37 @@ class FakeVerticalSliceControlPlane {
     };
   }
 
-  async listMessages(_runId?: string, _access?: any) {
-    return [];
+  async listMessages(runId?: string, access?: any) {
+    const messages = runId ? this.messages.filter((message) => message.runId === runId) : this.messages;
+
+    return messages.filter((message) => {
+      if (!access) {
+        return true;
+      }
+
+      const run = this.runs.get(message.runId);
+      return run && run.workspaceId === access.workspaceId && run.teamId === access.teamId;
+    });
   }
 
-  async createMessage(_input?: any, _access?: any) {
-    throw new Error("not implemented");
+  async createMessage(input?: any, access?: any) {
+    if (!input?.runId) {
+      throw new HttpError(400, "runId is required");
+    }
+
+    const run = await this.getRun(input.runId, access);
+    const message = {
+      id: crypto.randomUUID(),
+      runId: input.runId,
+      senderAgentId: input.senderAgentId ?? null,
+      recipientAgentId: input.recipientAgentId ?? null,
+      kind: input.kind ?? "direct",
+      body: input.body,
+      createdAt: new Date()
+    };
+
+    this.messages.push(message);
+    return message;
   }
 
   async listSessionTranscript(sessionId: string, access?: any) {
@@ -5404,7 +5439,7 @@ describe("buildApp", () => {
         expect.objectContaining({
           sessionId,
           kind: "prompt",
-          text: "Continue the managed worker session"
+          text: expect.stringContaining("Operator brief:\nContinue the managed worker session")
         }),
         expect.objectContaining({
           sessionId,
@@ -5804,7 +5839,7 @@ describe("buildApp", () => {
         expect.objectContaining({
           sessionId: createdSession.id,
           kind: "prompt",
-          text: "Bootstrap the worker session"
+          text: expect.stringContaining("Operator brief:\nBootstrap the worker session")
         }),
         expect.objectContaining({
           sessionId: createdSession.id,
@@ -5812,6 +5847,335 @@ describe("buildApp", () => {
           text: "bootstrap completed"
         })
       ]);
+    } finally {
+      await rm(worktreeRoot, { recursive: true, force: true });
+      await rm(repoRoot, { recursive: true, force: true });
+      await app.close();
+    }
+  });
+
+  it("consumes inbound agent messages and lets the leader reslice follow-on work automatically", async () => {
+    const verticalSlice = new FakeVerticalSliceControlPlane();
+    const app = await buildApp({
+      config: getConfig({
+        NODE_ENV: "test",
+        PORT: 3000,
+        HOST: "127.0.0.1",
+        DATABASE_URL: "postgres://unused/test",
+        DEV_AUTH_TOKEN: "test-token",
+        OPENAI_TRACING_DISABLED: true
+      }),
+      controlPlane: verticalSlice as unknown as ControlPlaneService
+    });
+
+    const headers = {
+      authorization: "Bearer test-token"
+    };
+    const repoRoot = await mkdtemp(join(tmpdir(), "codex-swarm-reslice-repo-"));
+    const worktreeRoot = await mkdtemp(join(tmpdir(), "codex-swarm-reslice-dispatch-"));
+
+    try {
+      await writeFile(join(repoRoot, "README.md"), "reslice worker dispatch\n", "utf8");
+      execFileSync("git", ["init", "--initial-branch=main"], { cwd: repoRoot, stdio: "pipe" });
+      execFileSync("git", ["config", "user.name", "Codex Swarm"], { cwd: repoRoot, stdio: "pipe" });
+      execFileSync("git", ["config", "user.email", "codex-swarm@example.com"], { cwd: repoRoot, stdio: "pipe" });
+      execFileSync("git", ["add", "README.md"], { cwd: repoRoot, stdio: "pipe" });
+      execFileSync("git", ["commit", "-m", "initial"], { cwd: repoRoot, stdio: "pipe" });
+      (verticalSlice as any).repositories[0].url = repoRoot;
+
+      const request: LeaderPlanningLoopRequest = async <T>(
+        method: string,
+        path: string,
+        payload?: Record<string, unknown>
+      ) => {
+        const response = await (app.inject as any)({
+          method,
+          url: path,
+          headers,
+          ...(payload ? { payload } : {})
+        }) as {
+          statusCode: number;
+          body: string;
+          json(): T;
+        };
+
+        if (response.statusCode >= 400) {
+          throw new Error(`${method} ${path} failed with ${response.statusCode}: ${response.body}`);
+        }
+
+        return response.json() as T;
+      };
+
+      await app.inject({
+        method: "POST",
+        url: "/api/v1/runs",
+        headers,
+        payload: {
+          repositoryId: ids.repository,
+          goal: "Drive automatic reslicing through leader coordination",
+          concurrencyCap: 4,
+          metadata: {}
+        }
+      });
+
+      const leaderResponse = await app.inject({
+        method: "POST",
+        url: "/api/v1/agents",
+        headers,
+        payload: {
+          runId: ids.run,
+          name: "leader",
+          role: "tech-lead",
+          status: "idle",
+          session: {
+            threadId: "thread-leader-reslice",
+            cwd: process.cwd(),
+            sandbox: "workspace-write",
+            approvalPolicy: "on-request",
+            includePlanTool: true,
+            metadata: {
+              source: "leader-reslice-test"
+            }
+          }
+        }
+      });
+
+      expect(leaderResponse.statusCode).toBe(201);
+      const leaderAgentId = leaderResponse.json().id as string;
+
+      const workerResponse = await app.inject({
+        method: "POST",
+        url: "/api/v1/agents",
+        headers,
+        payload: {
+          runId: ids.run,
+          name: "worker-primary",
+          role: "backend-developer",
+          status: "idle",
+          session: {
+            threadId: "thread-worker-reslice",
+            cwd: process.cwd(),
+            sandbox: "workspace-write",
+            approvalPolicy: "on-request",
+            includePlanTool: false,
+            metadata: {
+              source: "worker-reslice-test"
+            }
+          }
+        }
+      });
+
+      expect(workerResponse.statusCode).toBe(201);
+      const workerAgentId = workerResponse.json().id as string;
+      const workerRunDetailResponse = await app.inject({
+        method: "GET",
+        url: `/api/v1/runs/${ids.run}`,
+        headers
+      });
+      const workerSessionId = workerRunDetailResponse.json().sessions.find((session: any) => session.agentId === workerAgentId).id as string;
+
+      const peerResponse = await app.inject({
+        method: "POST",
+        url: "/api/v1/agents",
+        headers,
+        payload: {
+          runId: ids.run,
+          name: "worker-frontend",
+          role: "frontend-developer",
+          status: "idle"
+        }
+      });
+
+      expect(peerResponse.statusCode).toBe(201);
+      const peerAgentId = peerResponse.json().id as string;
+
+      const taskResponse = await app.inject({
+        method: "POST",
+        url: "/api/v1/tasks",
+        headers,
+        payload: {
+          runId: ids.run,
+          title: "Oversized implementation slice",
+          description: "Investigate the worker path and split it when the task spans multiple concerns.",
+          role: "backend-developer",
+          priority: 1,
+          dependencyIds: [],
+          acceptanceCriteria: ["follow-on slices are generated automatically when the worker asks for them"]
+        }
+      });
+
+      const taskId = taskResponse.json().id as string;
+
+      await app.inject({
+        method: "POST",
+        url: "/api/v1/messages",
+        headers,
+        payload: {
+          runId: ids.run,
+          senderAgentId: leaderAgentId,
+          recipientAgentId: workerAgentId,
+          kind: "direct",
+          body: "If the task is too large, ask for slicing and report the exact split."
+        }
+      });
+
+      await app.inject({
+        method: "POST",
+        url: "/api/v1/messages",
+        headers,
+        payload: {
+          runId: ids.run,
+          senderAgentId: peerAgentId,
+          recipientAgentId: workerAgentId,
+          kind: "direct",
+          body: "Frontend will need a smaller API-ready slice."
+        }
+      });
+
+      await app.inject({
+        method: "POST",
+        url: "/api/v1/worker-dispatch-assignments",
+        headers,
+        payload: {
+          runId: ids.run,
+          taskId,
+          agentId: workerAgentId,
+          sessionId: workerSessionId,
+          repositoryId: ids.repository,
+          repositoryName: "codex-swarm",
+          stickyNodeId: ids.workerNode,
+          requiredCapabilities: ["remote"],
+          worktreePath: join(worktreeRoot, "worker-reslice"),
+          prompt: "Primary worker dispatch prompt",
+          profile: "default",
+          sandbox: "workspace-write",
+          approvalPolicy: "on-request"
+        }
+      });
+
+      const prompts: string[] = [];
+      let callCount = 0;
+      const result = await runManagedWorkerDispatch({
+        request,
+        nodeId: ids.workerNode,
+        workspaceRoot: process.cwd(),
+        supervisorCommand: [
+          process.execPath,
+          "--input-type=module",
+          "-e",
+          "setInterval(() => {}, 1000);"
+        ],
+        executeTool: async (toolRequest: any) => {
+          const prompt = "input" in toolRequest
+            ? toolRequest.input.prompt
+            : toolRequest.message.params.prompt;
+          prompts.push(prompt);
+          callCount += 1;
+
+          if (callCount === 1) {
+            return {
+              threadId: "thread-worker-reslice",
+              output: JSON.stringify({
+                summary: "The worker path spans schema and API concerns and should be split.",
+                status: "needs_slicing",
+                messages: [
+                  {
+                    target: "leader",
+                    body: "Please split this into schema prep and API follow-up slices."
+                  },
+                  {
+                    target: "role:frontend-developer",
+                    body: "Expect an API-ready handoff after the backend slices land."
+                  }
+                ],
+                blockingIssues: [
+                  "One worker task currently spans schema preparation and API wiring."
+                ]
+              })
+            };
+          }
+
+          return {
+            threadId: "thread-leader-reslice",
+            output: JSON.stringify({
+              summary: "Split the oversized worker slice into two follow-on tasks.",
+              tasks: [
+                {
+                  key: "schema-slice",
+                  title: "Prepare schema slice",
+                  role: "backend-developer",
+                  description: "Create the schema-facing preparation slice.",
+                  acceptanceCriteria: ["schema concerns are isolated"],
+                  dependencyKeys: []
+                },
+                {
+                  key: "api-slice",
+                  title: "Finish API follow-up slice",
+                  role: "backend-developer",
+                  description: "Finish the API wiring after the schema slice lands.",
+                  acceptanceCriteria: ["API wiring follows the schema prep work"],
+                  dependencyKeys: ["schema-slice"]
+                }
+              ]
+            })
+          };
+        }
+      });
+
+      expect(result).toMatchObject({
+        status: "completed"
+      });
+
+      expect(prompts[0]).toContain("If the task is too large, ask for slicing");
+      expect(prompts[0]).toContain("Frontend will need a smaller API-ready slice.");
+
+      const messagesResponse = await app.inject({
+        method: "GET",
+        url: `/api/v1/messages?runId=${ids.run}`,
+        headers
+      });
+
+      expect(messagesResponse.statusCode).toBe(200);
+      expect(messagesResponse.json()).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            senderAgentId: workerAgentId,
+            recipientAgentId: leaderAgentId,
+            body: expect.stringContaining("needs_slicing")
+          }),
+          expect.objectContaining({
+            senderAgentId: workerAgentId,
+            recipientAgentId: leaderAgentId,
+            body: "Please split this into schema prep and API follow-up slices."
+          }),
+          expect.objectContaining({
+            senderAgentId: workerAgentId,
+            recipientAgentId: peerAgentId,
+            body: "Expect an API-ready handoff after the backend slices land."
+          })
+        ])
+      );
+
+      const tasksResponse = await app.inject({
+        method: "GET",
+        url: `/api/v1/tasks?runId=${ids.run}`,
+        headers
+      });
+
+      expect(tasksResponse.statusCode).toBe(200);
+      expect(tasksResponse.json()).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            title: "Prepare schema slice",
+            parentTaskId: taskId
+          }),
+          expect.objectContaining({
+            title: "Finish API follow-up slice",
+            parentTaskId: taskId,
+            dependencyIds: expect.arrayContaining([expect.any(String)])
+          })
+        ])
+      );
     } finally {
       await rm(worktreeRoot, { recursive: true, force: true });
       await rm(repoRoot, { recursive: true, force: true });

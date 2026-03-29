@@ -1123,7 +1123,10 @@ export class ControlPlaneService {
 
     const id = crypto.randomUUID();
     const now = this.clock.now();
-    const initialStatus = resolveInitialTaskStatus(input.dependencyIds);
+    const dependenciesReady = input.dependencyIds.length === 0
+      ? true
+      : await this.areDependenciesSatisfied(input.runId, input.dependencyIds);
+    const initialStatus = dependenciesReady ? "pending" : resolveInitialTaskStatus(input.dependencyIds);
 
     const [task] = await this.db.insert(tasks).values({
       id,
@@ -1193,14 +1196,15 @@ export class ControlPlaneService {
     }
 
     const activeAgents = await this.db
-      .select({ status: agents.status })
+      .select({ status: agents.status, role: agents.role })
       .from(agents)
       .where(eq(agents.runId, input.runId));
     const activeAgentCount = activeAgents.filter((agent) =>
+      agent.role !== "tech-lead" && (
       agent.status === "provisioning"
       || agent.status === "idle"
       || agent.status === "busy"
-      || agent.status === "paused").length;
+      || agent.status === "paused")).length;
 
     if (activeAgentCount >= run.concurrencyCap) {
       throw new HttpError(409, `run concurrency cap of ${run.concurrencyCap} active agents reached`);
@@ -1764,7 +1768,10 @@ export class ControlPlaneService {
     const existingSessionsByAgentId = new Map(
       runDetail.sessions.map((session) => [session.agentId, session] as const)
     );
+    const leaderAgent = runDetail.agents.find((agent) => agent.role === "tech-lead") ?? null;
     const queuedAssignments: WorkerDispatchAssignment[] = [];
+    const workerSandbox = process.env.CODEX_SWARM_WORKER_SANDBOX?.trim() || "workspace-write";
+    const workerApprovalPolicy = process.env.CODEX_SWARM_WORKER_APPROVAL_POLICY?.trim() || "on-request";
 
     for (const task of tasksToQueue) {
       const existingAgent = existingAgentsByTaskId.get(task.id);
@@ -1805,14 +1812,30 @@ export class ControlPlaneService {
         branchName: runDetail.branchName ?? repository.defaultBranch,
         prompt: this.buildTaskExecutionPrompt(runDetail, repository, task),
         profile: "default",
-        sandbox: "workspace-write",
-        approvalPolicy: "on-request",
+        sandbox: workerSandbox,
+        approvalPolicy: workerApprovalPolicy,
         includePlanTool: false,
         requiredCapabilities: ["workspace-write"],
         metadata: {},
         maxAttempts: 3,
         leaseTtlSeconds: 300
       });
+
+      if (leaderAgent && leaderAgent.id !== (updatedAgent?.id ?? agent.id)) {
+        await this.createMessage({
+          runId,
+          senderAgentId: leaderAgent.id,
+          recipientAgentId: updatedAgent?.id ?? agent.id,
+          kind: "direct",
+          body: [
+            `Take task ${task.title}.`,
+            task.description,
+            task.acceptanceCriteria.length > 0
+              ? `Acceptance criteria: ${task.acceptanceCriteria.join("; ")}`
+              : "Acceptance criteria: complete the assigned slice and report blockers."
+          ].join(" ")
+        }, access);
+      }
 
       queuedAssignments.push(assignment);
     }

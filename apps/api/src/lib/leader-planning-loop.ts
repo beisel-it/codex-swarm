@@ -1,8 +1,10 @@
 import type { RunDetail, Task } from "@codex-swarm/contracts";
 import {
   buildLeaderPlanningPrompt,
+  buildLeaderReslicePrompt,
   orderLeaderPlanTasks,
-  parseLeaderPlanOutput
+  parseLeaderPlanOutput,
+  type WorkerTaskOutcome
 } from "@codex-swarm/orchestration";
 import {
   CodexServerSupervisor,
@@ -47,6 +49,25 @@ export interface LeaderPlanningLoopResult {
   planArtifactPath: string;
   tasks: Task[];
   startOutput: string;
+  planningOutput: string;
+  continuedAt: string | null;
+}
+
+export interface LeaderResliceLoopInput {
+  request: LeaderPlanningLoopRequest;
+  runId: string;
+  parentTaskId: string;
+  actorId: string;
+  workerOutcome: WorkerTaskOutcome;
+  executeTool: CodexToolExecutor;
+  supervisorCommand?: string[];
+}
+
+export interface LeaderResliceLoopResult {
+  agentId: string;
+  sessionId: string;
+  threadId: string;
+  tasks: Task[];
   planningOutput: string;
   continuedAt: string | null;
 }
@@ -261,5 +282,127 @@ export async function runLeaderPlanningLoop(input: LeaderPlanningLoopInput): Pro
     };
   } finally {
     await runtime.stopSession(`bootstrap-${input.runId}`).catch(() => undefined);
+  }
+}
+
+export async function runLeaderResliceLoop(input: LeaderResliceLoopInput): Promise<LeaderResliceLoopResult | null> {
+  if (input.workerOutcome.status !== "needs_slicing" && input.workerOutcome.status !== "blocked") {
+    return null;
+  }
+
+  const runDetail = await input.request<RunDetail>("GET", `/api/v1/runs/${input.runId}`);
+  const parentTask = runDetail.tasks.find((task) => task.id === input.parentTaskId);
+  const leaderAgent = runDetail.agents.find((agent) => agent.role === "tech-lead");
+
+  if (!parentTask || !leaderAgent) {
+    return null;
+  }
+
+  const persistedSession = runDetail.sessions.find((session) => session.agentId === leaderAgent.id);
+
+  if (!persistedSession) {
+    return null;
+  }
+
+  const registry = new SessionRegistry();
+  registry.hydrate([
+    {
+      sessionId: persistedSession.id,
+      runId: input.runId,
+      agentId: leaderAgent.id,
+      worktreePath: persistedSession.cwd,
+      state: persistedSession.state,
+      threadId: persistedSession.threadId,
+      staleReason: persistedSession.staleReason,
+      lastHeartbeatAt: null,
+      createdAt: toDate((persistedSession as unknown as Record<string, unknown>).createdAt as Date | string | null | undefined) ?? new Date(),
+      updatedAt: toDate((persistedSession as unknown as Record<string, unknown>).updatedAt as Date | string | null | undefined) ?? new Date()
+    }
+  ]);
+
+  const runtime = new CodexSessionRuntime({
+    registry,
+    supervisor: new CodexServerSupervisor({
+      config: {
+        cwd: persistedSession.cwd,
+        profile: "default",
+        sandbox: persistedSession.sandbox,
+        approvalPolicy: persistedSession.approvalPolicy,
+        includePlanTool: persistedSession.includePlanTool
+      },
+      ...(input.supervisorCommand ? { command: input.supervisorCommand } : {})
+    }),
+    executeTool: input.executeTool
+  });
+
+  try {
+    const planningPrompt = buildLeaderReslicePrompt({
+      goal: runDetail.goal,
+      taskTitle: parentTask.title,
+      taskRole: parentTask.role,
+      taskDescription: parentTask.description,
+      workerSummary: input.workerOutcome.summary,
+      blockingIssues: input.workerOutcome.blockingIssues,
+      messages: input.workerOutcome.messages
+    });
+    const continued = await runtime.continueSession(persistedSession.id, planningPrompt);
+    const planningBudgetState = await checkpointRunBudget(
+      input.request,
+      input.runId,
+      "leader.reslice",
+      continued.response
+    );
+
+    if (!planningBudgetState.continueAllowed) {
+      throw new Error("run budget requires policy exception approval");
+    }
+
+    await input.request(
+      "POST",
+      `/api/v1/sessions/${persistedSession.id}/transcript`,
+      {
+        entries: buildTranscriptEntries(planningPrompt, continued.response.output)
+      }
+    );
+
+    const plan = parseLeaderPlanOutput(continued.response.output);
+    const orderedTasks = orderLeaderPlanTasks(plan);
+    const createdTaskIds = new Map<string, string>();
+    const createdTasks: Task[] = [];
+
+    for (const task of orderedTasks) {
+      const createdTask = await input.request<Task>("POST", "/api/v1/tasks", {
+        runId: input.runId,
+        parentTaskId: parentTask.id,
+        title: task.title,
+        description: task.description,
+        role: task.role,
+        priority: Math.min(parentTask.priority + 1, 5),
+        dependencyIds: task.dependencyKeys.map((key) => {
+          const dependencyId = createdTaskIds.get(key);
+
+          if (!dependencyId) {
+            throw new Error(`task dependency ${key} has not been created yet`);
+          }
+
+          return dependencyId;
+        }),
+        acceptanceCriteria: task.acceptanceCriteria
+      });
+
+      createdTaskIds.set(task.key, createdTask.id);
+      createdTasks.push(createdTask);
+    }
+
+    return {
+      agentId: leaderAgent.id,
+      sessionId: persistedSession.id,
+      threadId: persistedSession.threadId,
+      tasks: createdTasks,
+      planningOutput: continued.response.output,
+      continuedAt: continued.session.lastHeartbeatAt?.toISOString() ?? null
+    };
+  } finally {
+    await runtime.stopSession(persistedSession.id).catch(() => undefined);
   }
 }

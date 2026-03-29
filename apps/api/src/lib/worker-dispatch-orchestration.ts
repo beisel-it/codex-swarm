@@ -5,6 +5,10 @@ import type {
   WorkerDispatchAssignment
 } from "@codex-swarm/contracts";
 import {
+  buildWorkerTaskExecutionPrompt,
+  parseWorkerTaskOutcome
+} from "@codex-swarm/orchestration";
+import {
   cleanupWorktreePaths,
   CodexServerSupervisor,
   CodexSessionRuntime,
@@ -14,6 +18,7 @@ import {
   SessionRegistry
 } from "@codex-swarm/worker";
 
+import { runLeaderResliceLoop } from "./leader-planning-loop.js";
 import { checkpointRunBudget } from "./run-budget-guard.js";
 
 export interface WorkerDispatchOrchestrationRequest {
@@ -37,6 +42,16 @@ export interface WorkerDispatchOrchestrationResult {
   output: string | null;
   error: string | null;
   supervisorStatus: "stopped" | "failed";
+}
+
+interface RunMessage {
+  id: string;
+  runId: string;
+  senderAgentId?: string | null;
+  recipientAgentId?: string | null;
+  kind: "direct" | "broadcast" | "system";
+  body: string;
+  createdAt: string | Date;
 }
 
 function buildTranscriptEntries(prompt: string, output: string) {
@@ -75,6 +90,128 @@ function toSessionRecord(session: Session, worktreePath: string) {
     createdAt: toDate((session as unknown as Record<string, unknown>).createdAt as Date | string | null | undefined) ?? new Date(),
     updatedAt: toDate((session as unknown as Record<string, unknown>).updatedAt as Date | string | null | undefined) ?? new Date()
   };
+}
+
+function resolveAssignmentTask(runDetail: RunDetail, assignment: WorkerDispatchAssignment) {
+  return assignment.taskId
+    ? runDetail.tasks.find((candidate) => candidate.id === assignment.taskId) ?? null
+    : null;
+}
+
+function buildInboundMessages(
+  runDetail: RunDetail,
+  assignment: WorkerDispatchAssignment,
+  messages: RunMessage[]
+) {
+  const agentNames = new Map(runDetail.agents.map((agent) => [agent.id, agent.name] as const));
+
+  return messages
+    .filter((message) => message.senderAgentId !== assignment.agentId)
+    .filter((message) => message.kind === "broadcast" || message.recipientAgentId === assignment.agentId)
+    .map((message) => ({
+      sender: message.senderAgentId ? (agentNames.get(message.senderAgentId) ?? message.senderAgentId) : "system",
+      body: message.body
+    }));
+}
+
+async function postRunMessage(
+  request: WorkerDispatchOrchestrationRequest,
+  input: {
+    runId: string;
+    senderAgentId?: string;
+    recipientAgentId?: string;
+    kind: "direct" | "broadcast" | "system";
+    body: string;
+  }
+) {
+  if (input.kind === "direct" && !input.recipientAgentId) {
+    return null;
+  }
+
+  return request("POST", "/api/v1/messages", input);
+}
+
+async function publishWorkerOutcomeMessages(
+  request: WorkerDispatchOrchestrationRequest,
+  runDetail: RunDetail,
+  assignment: WorkerDispatchAssignment,
+  summary: string,
+  outcome: ReturnType<typeof parseWorkerTaskOutcome>
+) {
+  const leaderAgent = runDetail.agents.find((agent) => agent.role === "tech-lead" && agent.id !== assignment.agentId) ?? null;
+  const postedTargets = new Set<string>();
+
+  if (leaderAgent) {
+    const leaderBody = `[${outcome.status}] ${summary}`;
+    await postRunMessage(request, {
+      runId: assignment.runId,
+      senderAgentId: assignment.agentId,
+      recipientAgentId: leaderAgent.id,
+      kind: "direct",
+      body: leaderBody
+    });
+    postedTargets.add(`agent:${leaderAgent.id}:${leaderBody}`);
+  }
+
+  for (const message of outcome.messages) {
+    if (message.target === "leader" && leaderAgent) {
+      const dedupeKey = `agent:${leaderAgent.id}:${message.body}`;
+
+      if (!postedTargets.has(dedupeKey)) {
+        await postRunMessage(request, {
+          runId: assignment.runId,
+          senderAgentId: assignment.agentId,
+          recipientAgentId: leaderAgent.id,
+          kind: "direct",
+          body: message.body
+        });
+        postedTargets.add(dedupeKey);
+      }
+
+      continue;
+    }
+
+    if (message.target === "broadcast") {
+      await postRunMessage(request, {
+        runId: assignment.runId,
+        senderAgentId: assignment.agentId,
+        kind: "broadcast",
+        body: message.body
+      });
+      continue;
+    }
+
+    if (message.target.startsWith("agent:")) {
+      const recipientAgentId = message.target.slice("agent:".length);
+
+      if (recipientAgentId && recipientAgentId !== assignment.agentId) {
+        await postRunMessage(request, {
+          runId: assignment.runId,
+          senderAgentId: assignment.agentId,
+          recipientAgentId,
+          kind: "direct",
+          body: message.body
+        });
+      }
+
+      continue;
+    }
+
+    if (message.target.startsWith("role:")) {
+      const role = message.target.slice("role:".length);
+      const matchingAgents = runDetail.agents.filter((agent) => agent.role === role && agent.id !== assignment.agentId);
+
+      for (const recipient of matchingAgents) {
+        await postRunMessage(request, {
+          runId: assignment.runId,
+          senderAgentId: assignment.agentId,
+          recipientAgentId: recipient.id,
+          kind: "direct",
+          body: message.body
+        });
+      }
+    }
+  }
 }
 
 async function failAssignment(
@@ -142,6 +279,20 @@ export async function runManagedWorkerDispatch(
   });
 
   try {
+    const runMessages = await input.request<RunMessage[]>("GET", `/api/v1/messages?runId=${assignment.runId}`);
+    const task = resolveAssignmentTask(runDetail, assignment);
+    const inboundMessages = buildInboundMessages(runDetail, assignment, runMessages);
+    const effectivePrompt = task
+      ? buildWorkerTaskExecutionPrompt({
+        repositoryName: repository.name,
+        runGoal: runDetail.goal,
+        taskTitle: task.title,
+        taskRole: task.role,
+        taskDescription: [task.description, assignment.prompt].filter(Boolean).join("\n\nOperator brief:\n"),
+        acceptanceCriteria: task.acceptanceCriteria,
+        inboundMessages
+      })
+      : assignment.prompt;
     const existingSession = assignment.sessionId
       ? runDetail.sessions.find((candidate) => candidate.id === assignment.sessionId)
       : undefined;
@@ -164,7 +315,7 @@ export async function runManagedWorkerDispatch(
         supervisor,
         executeTool: input.executeTool
       });
-      const continued = await runtime.continueSession(persistedSession.id, assignment.prompt);
+      const continued = await runtime.continueSession(persistedSession.id, effectivePrompt);
       await checkpointRunBudget(
         input.request,
         assignment.runId,
@@ -175,7 +326,7 @@ export async function runManagedWorkerDispatch(
         "POST",
         `/api/v1/sessions/${persistedSession.id}/transcript`,
         {
-          entries: buildTranscriptEntries(assignment.prompt, continued.response.output)
+          entries: buildTranscriptEntries(effectivePrompt, continued.response.output)
         }
       );
       responseOutput = continued.response.output;
@@ -196,7 +347,7 @@ export async function runManagedWorkerDispatch(
         supervisor,
         executeTool: input.executeTool
       });
-      const started = await runtime.startSession(runtimeSessionId, assignment.prompt);
+      const started = await runtime.startSession(runtimeSessionId, effectivePrompt);
       await checkpointRunBudget(
         input.request,
         assignment.runId,
@@ -233,7 +384,7 @@ export async function runManagedWorkerDispatch(
         "POST",
         `/api/v1/sessions/${createdSession.id}/transcript`,
         {
-          entries: buildTranscriptEntries(assignment.prompt, started.response.output)
+          entries: buildTranscriptEntries(effectivePrompt, started.response.output)
         }
       );
       responseOutput = started.response.output;
@@ -241,8 +392,30 @@ export async function runManagedWorkerDispatch(
       supervisorStatus = stopped.supervisor.status === "failed" ? "failed" : "stopped";
     }
 
+    if (responseOutput && assignment.taskId) {
+      const outcome = parseWorkerTaskOutcome(responseOutput);
+
+      await publishWorkerOutcomeMessages(
+        input.request,
+        runDetail,
+        assignment,
+        outcome.summary,
+        outcome
+      );
+
+      await runLeaderResliceLoop({
+        request: input.request,
+        runId: assignment.runId,
+        parentTaskId: assignment.taskId,
+        actorId: assignment.agentId,
+        workerOutcome: outcome,
+        executeTool: input.executeTool,
+        ...(input.supervisorCommand ? { supervisorCommand: input.supervisorCommand } : {})
+      });
+    }
+
     if (assignment.taskId) {
-      const task = runDetail.tasks.find((candidate) => candidate.id === assignment.taskId);
+      const task = resolveAssignmentTask(runDetail, assignment);
 
       if (task) {
         for (const template of task.validationTemplates) {

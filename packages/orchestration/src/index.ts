@@ -20,6 +20,24 @@ export interface LeaderPlan {
   tasks: LeaderPlanTask[];
 }
 
+export type WorkerCoordinationMessageTarget =
+  | "leader"
+  | "broadcast"
+  | `agent:${string}`
+  | `role:${string}`;
+
+export interface WorkerCoordinationMessage {
+  target: WorkerCoordinationMessageTarget;
+  body: string;
+}
+
+export interface WorkerTaskOutcome {
+  summary: string;
+  status: "completed" | "needs_slicing" | "blocked";
+  messages: WorkerCoordinationMessage[];
+  blockingIssues: string[];
+}
+
 function parseStringField(value: unknown, fieldName: string) {
   if (typeof value !== "string" || value.trim().length === 0) {
     throw new Error(`leader plan ${fieldName} must be a non-empty string`);
@@ -86,6 +104,119 @@ export function buildLeaderPlanningPrompt(goal: string) {
   ].join("\n");
 }
 
+export function buildWorkerTaskExecutionPrompt(input: {
+  repositoryName: string;
+  runGoal: string;
+  taskTitle: string;
+  taskRole: string;
+  taskDescription: string;
+  acceptanceCriteria: string[];
+  inboundMessages?: Array<{
+    sender: string;
+    body: string;
+  }>;
+}) {
+  const acceptanceCriteria = input.acceptanceCriteria.length > 0
+    ? input.acceptanceCriteria.map((criterion) => `- ${criterion}`).join("\n")
+    : "- Complete the assigned task and leave clear implementation notes.";
+  const inbox = (input.inboundMessages ?? []).length > 0
+    ? (input.inboundMessages ?? [])
+      .map((message) => `- ${message.sender}: ${message.body}`)
+      .join("\n")
+    : "- No inbound agent messages.";
+
+  return [
+    `Repository: ${input.repositoryName}`,
+    `Run goal: ${input.runGoal}`,
+    `Task: ${input.taskTitle}`,
+    `Role: ${input.taskRole}`,
+    "",
+    input.taskDescription,
+    "",
+    "Acceptance criteria:",
+    acceptanceCriteria,
+    "",
+    "Inbound agent messages:",
+    inbox,
+    "",
+    "Respond with JSON only using this shape:",
+    "{",
+    '  "summary": "short outcome summary",',
+    '  "status": "completed | needs_slicing | blocked",',
+    '  "messages": [',
+    "    {",
+    '      "target": "leader | broadcast | role:<role> | agent:<agentId>",',
+    '      "body": "message text"',
+    "    }",
+    "  ],",
+    '  "blockingIssues": ["issue summary"]',
+    "}",
+    "",
+    "Rules:",
+    "- Use completed when the task can stand as done for this slice.",
+    "- Use needs_slicing when the task should be broken into smaller follow-on tasks.",
+    "- Use blocked when an external blocker prevents useful progress.",
+    "- Include a leader message whenever status is needs_slicing or blocked.",
+    "- Do not include markdown outside the JSON object."
+  ].join("\n");
+}
+
+export function buildLeaderReslicePrompt(input: {
+  goal: string;
+  taskTitle: string;
+  taskRole: string;
+  taskDescription: string;
+  workerSummary: string;
+  blockingIssues: string[];
+  messages: WorkerCoordinationMessage[];
+}) {
+  const blockingIssues = input.blockingIssues.length > 0
+    ? input.blockingIssues.map((issue) => `- ${issue}`).join("\n")
+    : "- No explicit blocking issues were reported.";
+  const workerMessages = input.messages.length > 0
+    ? input.messages.map((message) => `- ${message.target}: ${message.body}`).join("\n")
+    : "- No explicit worker coordination messages were returned.";
+
+  return [
+    "You are continuing the leader orchestration session for a running Codex Swarm run.",
+    `Goal: ${input.goal}`,
+    `Parent task: ${input.taskTitle}`,
+    `Parent role: ${input.taskRole}`,
+    "",
+    "Parent task description:",
+    input.taskDescription,
+    "",
+    `Worker outcome summary: ${input.workerSummary}`,
+    "",
+    "Blocking issues:",
+    blockingIssues,
+    "",
+    "Worker coordination messages:",
+    workerMessages,
+    "",
+    "Respond with JSON only using this shape:",
+    "{",
+    '  "summary": "short coordination summary",',
+    '  "tasks": [',
+    "    {",
+    '      "key": "slice-a",',
+    '      "title": "follow-on task title",',
+    '      "role": "backend-developer",',
+    '      "description": "clear task description",',
+    '      "acceptanceCriteria": ["criterion"],',
+    '      "dependencyKeys": []',
+    "    }",
+    "  ]",
+    "}",
+    "",
+    "Rules:",
+    "- Return at least one follow-on task when the worker asked for more slicing.",
+    "- dependencyKeys may only reference keys from the same response.",
+    "- Keep the tasks specific enough for workers to execute without hidden context.",
+    "- Do not include markdown outside the JSON object."
+  ].join("\n");
+}
+
 export function parseLeaderPlanOutput(output: string): LeaderPlan {
   const parsed = JSON.parse(extractJsonDocument(output)) as Partial<LeaderPlan>;
 
@@ -114,6 +245,59 @@ export function parseLeaderPlanOutput(output: string): LeaderPlan {
     ...(typeof parsed.summary === "string" ? { summary: parsed.summary } : {}),
     tasks
   };
+}
+
+export function parseWorkerTaskOutcome(output: string): WorkerTaskOutcome {
+  try {
+    const parsed = JSON.parse(extractJsonDocument(output)) as Partial<WorkerTaskOutcome>;
+
+    const summary = typeof parsed.summary === "string" && parsed.summary.trim().length > 0
+      ? parsed.summary
+      : output.trim() || "Worker completed the task.";
+    const status = parsed.status === "needs_slicing" || parsed.status === "blocked" || parsed.status === "completed"
+      ? parsed.status
+      : "completed";
+    const messages = Array.isArray(parsed.messages)
+      ? parsed.messages.flatMap((message) => {
+        if (!message || typeof message !== "object") {
+          return [];
+        }
+
+        const target = (message as { target?: unknown }).target;
+        const body = (message as { body?: unknown }).body;
+
+        if (typeof target !== "string" || typeof body !== "string" || body.trim().length === 0) {
+          return [];
+        }
+
+        if (target !== "leader" && target !== "broadcast" && !target.startsWith("agent:") && !target.startsWith("role:")) {
+          return [];
+        }
+
+        return [{
+          target: target as WorkerCoordinationMessageTarget,
+          body
+        }];
+      })
+      : [];
+    const blockingIssues = Array.isArray(parsed.blockingIssues)
+      ? parsed.blockingIssues.filter((issue): issue is string => typeof issue === "string" && issue.trim().length > 0)
+      : [];
+
+    return {
+      summary,
+      status,
+      messages,
+      blockingIssues
+    };
+  } catch {
+    return {
+      summary: output.trim() || "Worker completed the task.",
+      status: "completed",
+      messages: [],
+      blockingIssues: []
+    };
+  }
 }
 
 export function orderLeaderPlanTasks(plan: LeaderPlan): LeaderPlanTask[] {
