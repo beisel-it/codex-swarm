@@ -240,12 +240,12 @@ Make the product useful for real repos and repeated internal use.
 
 ### Deliverables
 - Real repo onboarding flow
-- One-click PR handoff
+- Structured branch publish and PR handoff flow
 - Budget-aware run controls
 - Reusable role and skill starter packs
 
 ### Exit criteria
-- A user can start from a GitHub or GitLab repo and end with a PR.
+- A user can start from a GitHub or GitLab repo, publish a branch, and end with recorded provider or manual PR handoff state.
 - Budget caps and concurrency caps are enforced during real runs.
 - Curated skills, role packs, and repo templates are shipped, documented, and
   usable as starter packs for repeatable Codex Swarm workflows.[^skills][^subagents]

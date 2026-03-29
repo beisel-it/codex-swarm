@@ -190,26 +190,23 @@ Residual risks:
 
 Roadmap entry:
 
-- Phase 3 deliverable: `One-click PR handoff`
+- Phase 3 deliverable: `Structured branch publish and PR handoff flow`
 
 Verdict:
 
-- gap
+- superseded
 
 Evidence:
 
 - The live API exposes two separate actions, `POST /api/v1/runs/:id/publish-branch` and `POST /api/v1/runs/:id/pull-request-handoff`, in `apps/api/src/routes/runs.ts`.
 - `ControlPlaneService.createRunPullRequestHandoff` records PR metadata and publishes an artifact, but it does not itself create a provider pull request; the current implementation persists a supplied URL/number or falls back to a manual handoff artifact in `apps/api/src/services/control-plane-service.ts`.
-- Integration coverage verifies branch publish and recording a PR handoff for an already published run in `apps/api/test/app.test.ts`, which is weaker than a one-click end-to-end provider handoff.
-- The frontend reflects PR state and provider links in run detail surfaces in `frontend/src/App.tsx`, but it does not establish a single action that takes a run from ready state to provider PR creation from the browser.
+- Integration coverage verifies branch publish and recording a PR handoff for an already published run in `apps/api/test/app.test.ts`.
+- `ROADMAP.md` now narrows the deliverable to the actual shipped publish-plus-handoff workflow instead of implying hidden provider-auth PR creation.
+- `docs/user-guide.md` and `docs/operator-guide.md` now document the same two-step replacement interaction explicitly.
 
 Residual risks:
 
-- The platform has structured branch publish and PR-state tracking, but reviewers cannot support the stronger roadmap claim that a user has a one-click PR handoff path.
-
-Backlog follow-up:
-
-- Add a real single-action PR handoff flow that either invokes provider PR creation directly or clearly supersedes the roadmap claim with a documented replacement interaction and acceptance evidence.
+- The product still does not create provider pull requests directly. Operators or the frontend must attach provider PR metadata or use the manual handoff artifact after branch publication.
 
 ## Task `ee969b7a`
 
@@ -437,7 +434,7 @@ Residual risks:
 
 Roadmap entry:
 
-- Phase 3 exit criterion: `A user can start from a GitHub or GitLab repo and end with a PR.`
+- Phase 3 exit criterion: `A user can start from a GitHub or GitLab repo, publish a branch, and end with recorded provider or manual PR handoff state.`
 
 Verdict:
 
@@ -448,16 +445,12 @@ Evidence:
 - The repository onboarding path accepts provider metadata and persists it through `POST /api/v1/repositories` and `ControlPlaneService.createRepository`, but the checked-in API tests only exercise a GitHub example and not an end-to-end GitHub-or-GitLab workflow in `apps/api/src/routes/repositories.ts`, `apps/api/src/services/control-plane-service.ts`, and `apps/api/test/app.test.ts`.
 - Branch publication and PR progression are modeled as two separate follow-up actions, `POST /api/v1/runs/:id/publish-branch` and `POST /api/v1/runs/:id/pull-request-handoff`, in `apps/api/src/routes/runs.ts`.
 - `ControlPlaneService.createRunPullRequestHandoff` does not create a provider PR. It persists supplied PR metadata when a URL is already known, or falls back to a `.swarm/handoffs/.../pull-request.json` manual handoff artifact when no URL is provided in `apps/api/src/services/control-plane-service.ts`.
-- The integration coverage proves repository onboarding metadata, branch publish, and recording a GitHub PR handoff URL, but it does not prove a real provider-created PR or any GitLab path in `apps/api/test/app.test.ts`.
-- The user docs describe reviewing publish and PR handoff state in the UI, which is weaker than the roadmap’s end-to-end acceptance claim in `docs/user-guide.md`.
+- The integration coverage proves repository onboarding metadata, branch publish, and recording a GitHub PR handoff URL in `apps/api/test/app.test.ts`.
+- `ROADMAP.md`, `docs/user-guide.md`, and `docs/operator-guide.md` now align on the supported publish-plus-handoff workflow instead of implying provider-side PR creation.
 
 Residual risks:
 
-- Reviewers can confirm structured provider metadata and PR-state tracking, but not a supportable flow where a user starts from a GitHub or GitLab repository and ends with an actually created pull request.
-
-Backlog follow-up:
-
-- Add a real provider-backed end-to-end acceptance path for GitHub and/or GitLab PR creation, or intentionally narrow the roadmap exit criterion to the current publish-plus-handoff tracking model.
+- Reviewers can confirm structured provider metadata and PR-state tracking, but the product still relies on provider metadata attachment rather than direct PR creation.
 
 ## Task `42ebb355`
 

@@ -10,7 +10,8 @@ This note prepares frontend task `b6031edd` for immediate implementation once ba
 
 ## Blocker summary
 
-The current artifact contract is sufficient for generic artifact links, but not for reviewer-facing diff summaries.
+The original artifact contract was sufficient for generic artifact links, but
+not for reviewer-facing diff summaries.
 
 What is missing today:
 
@@ -25,13 +26,11 @@ Current backend references that prove the limitation:
 - [apps/api/src/routes/artifacts.ts](/home/florian/codex-swarm/apps/api/src/routes/artifacts.ts#L11)
 - [apps/api/src/services/control-plane-service.ts](/home/florian/codex-swarm/apps/api/src/services/control-plane-service.ts#L1136)
 
-## Expected backend contract shape
+## Landed backend contract shape
 
-Frontend implementation should wait for one of these supported shapes:
+Frontend implementation should now target this supported shape:
 
-1. `GET /api/v1/artifacts/:id` returns diff-detail content for `kind === "diff"`.
-2. `GET /api/v1/reviews/diff-summary?approvalId=...` returns a review-scoped diff payload.
-3. `GET /api/v1/artifacts?runId=...` expands diff artifacts with embedded summary fields.
+1. `GET /api/v1/artifacts/:id` returns a typed artifact-detail payload.
 
 Minimum fields needed for the UI:
 
@@ -45,6 +44,13 @@ Minimum fields needed for the UI:
 - `fileSummaries[]`
 - optional `rawDiff` or `diffPreview`
 - optional provider links for PR/file views
+
+The landed payload exposes these through:
+
+- `artifact`
+- `contentState`
+- `bodyText`
+- `diffSummary`
 
 If backend lands a different shape, keep the frontend adapter local in `frontend/src/App.tsx` or a small helper rather than spreading contract knowledge across components.
 

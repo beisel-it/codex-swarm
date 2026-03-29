@@ -5,7 +5,9 @@ import {
   approvalCreateSchema,
   approvalResolveSchema,
   agentCreateSchema,
+  artifactDetailSchema,
   artifactCreateSchema,
+  artifactDiffSummarySchema,
   cleanupJobRunSchema,
   controlPlaneMetricsSchema,
   governanceAdminReportSchema,
@@ -221,6 +223,72 @@ describe("artifactCreateSchema", () => {
     });
 
     expect(artifact.contentBase64).toBe("eyJvayI6dHJ1ZX0=");
+  });
+});
+
+describe("artifactDiffSummarySchema", () => {
+  it("accepts structured reviewer-facing diff summary data", () => {
+    const diffSummary = artifactDiffSummarySchema.parse({
+      filesChanged: 2,
+      insertions: 10,
+      deletions: 3,
+      fileSummaries: [
+        {
+          path: "apps/api/src/routes/artifacts.ts",
+          changeType: "modified",
+          additions: 7,
+          deletions: 1
+        },
+        {
+          path: "frontend/src/App.tsx",
+          changeType: "added",
+          additions: 3,
+          deletions: 2
+        }
+      ],
+      diffPreview: "@@ -1,2 +1,2 @@"
+    });
+
+    expect(diffSummary.filesChanged).toBe(2);
+    expect(diffSummary.fileSummaries).toHaveLength(2);
+  });
+});
+
+describe("artifactDetailSchema", () => {
+  it("accepts text detail and diff summary payloads", () => {
+    const detail = artifactDetailSchema.parse({
+      artifact: {
+        id: "550e8400-e29b-41d4-a716-446655440010",
+        runId: "550e8400-e29b-41d4-a716-446655440000",
+        taskId: null,
+        kind: "diff",
+        path: ".swarm/reviews/run-001/diff.patch",
+        contentType: "text/x-diff",
+        url: null,
+        sizeBytes: 120,
+        sha256: "abc123",
+        metadata: {},
+        createdAt: new Date("2026-03-29T00:00:00.000Z")
+      },
+      contentState: "available",
+      bodyText: "diff --git a/file b/file",
+      diffSummary: {
+        filesChanged: 1,
+        insertions: 1,
+        deletions: 0,
+        fileSummaries: [
+          {
+            path: "file",
+            changeType: "modified",
+            additions: 1,
+            deletions: 0
+          }
+        ]
+      }
+    });
+
+    expect(detail.diffSummary?.filesChanged).toBe(1);
+    expect(detail.contentState).toBe("available");
   });
 });
 

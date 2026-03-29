@@ -351,6 +351,38 @@ export const artifactSchema = z.object({
   createdAt: z.date()
 });
 
+export const artifactDiffChangeTypes = ["added", "modified", "deleted", "renamed", "copied", "unknown"] as const;
+
+export const artifactDiffFileSummarySchema = z.object({
+  path: z.string().min(1),
+  changeType: z.enum(artifactDiffChangeTypes),
+  additions: z.number().int().nonnegative().default(0),
+  deletions: z.number().int().nonnegative().default(0),
+  summary: z.string().min(1).nullable().default(null),
+  previousPath: z.string().min(1).nullable().default(null),
+  providerUrl: z.string().url().nullable().default(null)
+});
+
+export const artifactDiffSummarySchema = z.object({
+  title: z.string().min(1).nullable().default(null),
+  changeSummary: z.string().min(1).nullable().default(null),
+  filesChanged: z.number().int().nonnegative(),
+  insertions: z.number().int().nonnegative(),
+  deletions: z.number().int().nonnegative(),
+  truncated: z.boolean().default(false),
+  fileSummaries: z.array(artifactDiffFileSummarySchema).default([]),
+  diffPreview: z.string().nullable().default(null),
+  rawDiff: z.string().nullable().default(null),
+  providerUrl: z.string().url().nullable().default(null)
+});
+
+export const artifactDetailSchema = z.object({
+  artifact: artifactSchema,
+  contentState: z.enum(["available", "missing", "binary", "truncated"]),
+  bodyText: z.string().nullable().default(null),
+  diffSummary: artifactDiffSummarySchema.nullable().default(null)
+});
+
 export const artifactCreateSchema = z.object({
   runId: z.uuid(),
   taskId: z.uuid().optional(),
@@ -898,6 +930,9 @@ export type Session = z.infer<typeof sessionSchema>;
 export type WorkerNode = z.infer<typeof workerNodeSchema>;
 export type Approval = z.infer<typeof approvalSchema>;
 export type Artifact = z.infer<typeof artifactSchema>;
+export type ArtifactDiffFileSummary = z.infer<typeof artifactDiffFileSummarySchema>;
+export type ArtifactDiffSummary = z.infer<typeof artifactDiffSummarySchema>;
+export type ArtifactDetail = z.infer<typeof artifactDetailSchema>;
 export type RunDetail = z.infer<typeof runDetailSchema>;
 export type RunAuditExport = z.infer<typeof runAuditExportSchema>;
 export type ApprovalsListQuery = z.infer<typeof approvalsListQuerySchema>;

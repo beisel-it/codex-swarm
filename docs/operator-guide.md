@@ -191,6 +191,7 @@ Workflow:
    - run the commands required by the active milestone
    - compare the result to [validate-milestone](/home/florian/codex-swarm/.agents/skills/validate-milestone/SKILL.md)
    - only move to handoff once the evidence is current
+   - treat publish and PR handoff as two explicit steps: publish the branch first, then record provider PR metadata or a manual handoff payload
 4. If the slice is genuinely reviewable, use [prepare-pr](/home/florian/codex-swarm/.agents/skills/prepare-pr/SKILL.md) to gather:
    - commit summary
    - reviewer-facing notes
