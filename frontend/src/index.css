@@ -1461,6 +1461,203 @@ code {
   justify-content: space-between;
 }
 
+.dag-panel-stack {
+  display: grid;
+  gap: 14px;
+}
+
+.dag-copy {
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--theme-border-subtle);
+  background: var(--theme-card-fill-soft);
+  color: var(--theme-text-muted);
+}
+
+.dag-copy p {
+  margin: 0;
+}
+
+.dag-graph-shell {
+  display: grid;
+  gap: 12px;
+}
+
+.dag-graph-summary,
+.dag-graph-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.dag-graph-summary span,
+.dag-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 30px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: 1px solid var(--theme-border-subtle);
+  background: var(--theme-card-fill-soft);
+  color: var(--theme-text-muted);
+  font-size: 0.8rem;
+}
+
+.dag-graph-note {
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px dashed var(--theme-border-strong);
+  background: var(--theme-card-fill-soft);
+  color: var(--theme-text-muted);
+  font-size: 0.84rem;
+}
+
+.dag-legend-swatch {
+  width: 14px;
+  height: 14px;
+  border-radius: 999px;
+  background: var(--theme-border-soft);
+  border: 1px solid var(--theme-border-strong);
+}
+
+.dag-legend-swatch.is-root {
+  background: var(--theme-success-fill);
+  border-color: var(--theme-success-border);
+}
+
+.dag-legend-swatch.is-path {
+  background: var(--theme-accent-fill);
+  border-color: var(--theme-accent-border);
+}
+
+.dag-legend-swatch.is-blocked {
+  background: var(--theme-danger-fill);
+  border-color: var(--theme-danger-border);
+}
+
+.dag-legend-swatch.is-blocking-edge {
+  background: var(--theme-warning-fill);
+  border-color: var(--theme-warning);
+}
+
+.dag-graph-frame {
+  overflow: auto;
+  border-radius: 16px;
+  border: 1px solid var(--theme-border-subtle);
+  background:
+    linear-gradient(180deg, var(--theme-card-fill-hero), var(--theme-card-fill-soft)),
+    var(--theme-card-fill-soft);
+  box-shadow: inset 0 1px 0 var(--theme-backdrop-sheen);
+}
+
+.dag-graph-canvas {
+  display: block;
+  min-width: 100%;
+}
+
+.dag-arrow-marker {
+  fill: currentColor;
+}
+
+.dag-graph-edge {
+  fill: none;
+  stroke: var(--theme-text-muted);
+  stroke-width: 2.4;
+  opacity: 0.44;
+  color: var(--theme-text-muted);
+}
+
+.dag-graph-edge.is-satisfied {
+  opacity: 0.28;
+}
+
+.dag-graph-edge.is-blocking {
+  stroke: var(--theme-warning);
+  opacity: 0.92;
+  stroke-dasharray: 8 6;
+  color: var(--theme-warning);
+}
+
+.dag-graph-edge.is-unblock-path {
+  stroke: var(--theme-accent);
+  opacity: 0.95;
+  color: var(--theme-accent);
+}
+
+.dag-graph-node rect {
+  fill: var(--theme-card-fill-strong);
+  stroke: var(--theme-border-strong);
+  stroke-width: 1.5;
+}
+
+.dag-graph-node.is-root rect {
+  fill: var(--theme-success-fill-faint);
+  stroke: var(--theme-success-border);
+}
+
+.dag-graph-node.is-status-completed rect {
+  fill: var(--theme-success-fill-faint);
+  stroke: var(--theme-success-border);
+}
+
+.dag-graph-node.is-status-in-progress rect {
+  fill: var(--theme-accent-fill-faint);
+  stroke: var(--theme-accent-border);
+}
+
+.dag-graph-node.is-status-awaiting-review rect {
+  fill: var(--theme-warning-fill);
+  stroke: var(--theme-warning);
+}
+
+.dag-graph-node.is-status-failed rect {
+  fill: var(--theme-danger-fill);
+  stroke: var(--theme-danger-border);
+}
+
+.dag-graph-node.is-status-cancelled rect {
+  fill: var(--theme-card-fill-soft);
+  stroke: var(--theme-border-subtle);
+  stroke-dasharray: 6 4;
+}
+
+.dag-graph-node.is-unblock-path rect {
+  fill: var(--theme-accent-fill-faint);
+  stroke: var(--theme-accent-border);
+}
+
+.dag-graph-node.is-blocked rect {
+  fill: var(--theme-danger-fill);
+  stroke: var(--theme-danger-border);
+}
+
+.dag-graph-node.is-blocked.is-unblock-path rect {
+  fill: color-mix(in srgb, var(--theme-danger-fill) 68%, var(--theme-accent-fill) 32%);
+  stroke: var(--theme-accent-border-strong);
+}
+
+.dag-graph-node-title,
+.dag-graph-node-meta {
+  fill: var(--theme-text-strong);
+  pointer-events: none;
+}
+
+.dag-graph-node-title {
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.dag-graph-node.is-status-cancelled .dag-graph-node-title,
+.dag-graph-node.is-status-cancelled .dag-graph-node-meta {
+  fill: var(--theme-text-muted);
+}
+
+.dag-graph-node-meta {
+  font-size: 0.68rem;
+  fill: var(--theme-text-muted);
+}
+
 .detail-grid,
 .contract-surface,
 .provider-grid,

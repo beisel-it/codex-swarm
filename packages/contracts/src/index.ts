@@ -309,6 +309,43 @@ export const taskSchema = taskCreateSchema.extend({
   updatedAt: z.date()
 });
 
+export const taskDagNodeSchema = z.object({
+  taskId: z.uuid(),
+  title: z.string().min(1),
+  role: z.string().min(1),
+  status: z.enum(taskStatuses),
+  parentTaskId: z.uuid().nullable().default(null),
+  dependencyIds: z.array(z.uuid()).default([]),
+  dependentTaskIds: z.array(z.uuid()).default([]),
+  blockedByTaskIds: z.array(z.uuid()).default([]),
+  isRoot: z.boolean(),
+  isBlocked: z.boolean()
+});
+
+export const taskDagEdgeSchema = z.object({
+  id: z.string().min(1),
+  sourceTaskId: z.uuid(),
+  targetTaskId: z.uuid(),
+  kind: z.literal("dependency"),
+  isSatisfied: z.boolean(),
+  isBlocking: z.boolean()
+});
+
+export const taskDagUnblockPathSchema = z.object({
+  taskId: z.uuid(),
+  blockingTaskIds: z.array(z.uuid()).default([]),
+  pathTaskIds: z.array(z.uuid()).default([]),
+  pathEdgeIds: z.array(z.string().min(1)).default([])
+});
+
+export const taskDagGraphSchema = z.object({
+  nodes: z.array(taskDagNodeSchema),
+  edges: z.array(taskDagEdgeSchema),
+  rootTaskIds: z.array(z.uuid()).default([]),
+  blockedTaskIds: z.array(z.uuid()).default([]),
+  unblockPaths: z.array(taskDagUnblockPathSchema).default([])
+});
+
 export const agentSchema = agentCreateSchema.omit({ session: true }).extend({
   id: z.uuid(),
   worktreePath: z.string().min(1).nullable(),
@@ -948,7 +985,8 @@ export const identityEntrypointSchema = identityContextSchema;
 export const runDetailSchema = runSchema.extend({
   tasks: z.array(taskSchema),
   agents: z.array(agentSchema),
-  sessions: z.array(sessionSchema)
+  sessions: z.array(sessionSchema),
+  taskDag: taskDagGraphSchema
 });
 
 export const runAuditExportSchema = z.object({
@@ -1091,6 +1129,10 @@ export type Workspace = z.infer<typeof workspaceSchema>;
 export type Team = z.infer<typeof teamSchema>;
 export type IdentityContext = z.infer<typeof identityContextSchema>;
 export type Task = z.infer<typeof taskSchema>;
+export type TaskDagNode = z.infer<typeof taskDagNodeSchema>;
+export type TaskDagEdge = z.infer<typeof taskDagEdgeSchema>;
+export type TaskDagUnblockPath = z.infer<typeof taskDagUnblockPathSchema>;
+export type TaskDagGraph = z.infer<typeof taskDagGraphSchema>;
 export type Agent = z.infer<typeof agentSchema>;
 export type Session = z.infer<typeof sessionSchema>;
 export type SessionTranscriptEntry = z.infer<typeof sessionTranscriptEntrySchema>;

@@ -44,6 +44,7 @@ import {
   type SessionTranscriptEntry,
   type SessionTranscriptEntryCreateInput,
   type Task,
+  type TaskDagGraph,
   type TaskCreateInput,
   type TaskStatusUpdateInput,
   type ValidationCreateInput,
@@ -851,17 +852,20 @@ export class ControlPlaneService {
         .orderBy(asc(sessions.createdAt))
     ]);
 
+    const mappedTasks = runTasks.map((task): Task => ({
+      ...task,
+      status: task.status as Task["status"]
+    }));
+
     return {
       ...this.mapRun(run),
-      tasks: runTasks.map((task): Task => ({
-        ...task,
-        status: task.status as Task["status"]
-      })),
+      tasks: mappedTasks,
       agents: runAgents.map((agent): Agent => ({
         ...agent,
         status: agent.status as Agent["status"]
       })),
-      sessions: runSessions.map(({ session }): Session => this.mapSession(session))
+      sessions: runSessions.map(({ session }): Session => this.mapSession(session)),
+      taskDag: this.buildTaskDag(mappedTasks)
     };
   }
 
@@ -3461,6 +3465,109 @@ export class ControlPlaneService {
       preferredNodeId: assignment.preferredNodeId ?? null,
       state: assignment.state as WorkerDispatchAssignment["state"],
       branchName: assignment.branchName ?? null
+    };
+  }
+
+  private buildTaskDag(runTasks: Task[]): TaskDagGraph {
+    const tasksById = new Map(runTasks.map((task) => [task.id, task] as const));
+    const dependentTaskIds = new Map<string, string[]>();
+
+    for (const task of runTasks) {
+      dependentTaskIds.set(task.id, []);
+    }
+
+    for (const task of runTasks) {
+      for (const dependencyId of task.dependencyIds) {
+        dependentTaskIds.get(dependencyId)?.push(task.id);
+      }
+    }
+
+    const edgeId = (sourceTaskId: string, targetTaskId: string) => `${sourceTaskId}->${targetTaskId}`;
+    const blockedByTaskIds = new Map<string, string[]>();
+
+    for (const task of runTasks) {
+      blockedByTaskIds.set(task.id, task.dependencyIds.filter((dependencyId) => {
+        const dependencyTask = tasksById.get(dependencyId);
+        return dependencyTask !== undefined && dependencyTask.status !== "completed";
+      }));
+    }
+
+    const nodes: TaskDagGraph["nodes"] = runTasks.map((task) => ({
+      taskId: task.id,
+      title: task.title,
+      role: task.role,
+      status: task.status,
+      parentTaskId: task.parentTaskId ?? null,
+      dependencyIds: task.dependencyIds,
+      dependentTaskIds: dependentTaskIds.get(task.id) ?? [],
+      blockedByTaskIds: blockedByTaskIds.get(task.id) ?? [],
+      isRoot: task.dependencyIds.length === 0,
+      isBlocked: task.status === "blocked"
+    }));
+
+    const edges: TaskDagGraph["edges"] = runTasks.flatMap((task) => task.dependencyIds.flatMap((dependencyId) => {
+      const dependencyTask = tasksById.get(dependencyId);
+
+      if (!dependencyTask) {
+        return [];
+      }
+
+      return [{
+        id: edgeId(dependencyId, task.id),
+        sourceTaskId: dependencyId,
+        targetTaskId: task.id,
+        kind: "dependency" as const,
+        isSatisfied: dependencyTask.status === "completed",
+        isBlocking: (blockedByTaskIds.get(task.id) ?? []).includes(dependencyId)
+      }];
+    }));
+
+    const rootTaskIds = nodes.filter((node) => node.isRoot).map((node) => node.taskId);
+    const blockedTaskIds = nodes.filter((node) => node.isBlocked).map((node) => node.taskId);
+
+    const collectBlockingAncestors = (
+      taskId: string,
+      pathTaskIds: Set<string>,
+      pathEdgeIds: Set<string>,
+      visitedTaskIds: Set<string>
+    ) => {
+      if (visitedTaskIds.has(taskId)) {
+        return;
+      }
+
+      visitedTaskIds.add(taskId);
+      pathTaskIds.add(taskId);
+
+      for (const dependencyId of blockedByTaskIds.get(taskId) ?? []) {
+        pathEdgeIds.add(edgeId(dependencyId, taskId));
+        collectBlockingAncestors(dependencyId, pathTaskIds, pathEdgeIds, visitedTaskIds);
+      }
+    };
+
+    const unblockPaths: TaskDagGraph["unblockPaths"] = blockedTaskIds.map((taskId) => {
+      const pathTaskIds = new Set<string>([taskId]);
+      const pathEdgeIds = new Set<string>();
+      const directBlockingTaskIds = blockedByTaskIds.get(taskId) ?? [];
+
+      for (const blockingTaskId of directBlockingTaskIds) {
+        pathEdgeIds.add(edgeId(blockingTaskId, taskId));
+        collectBlockingAncestors(blockingTaskId, pathTaskIds, pathEdgeIds, new Set<string>([taskId]));
+      }
+
+      return {
+        taskId,
+        blockingTaskIds: directBlockingTaskIds,
+        pathTaskIds: runTasks.map((task) => task.id).filter((candidateId) => pathTaskIds.has(candidateId)),
+        pathEdgeIds: edges.map((edge) => edge.id).filter((candidateId) => pathEdgeIds.has(candidateId))
+      };
+    });
+
+    return {
+      nodes,
+      edges,
+      rootTaskIds,
+      blockedTaskIds,
+      unblockPaths
     };
   }
 

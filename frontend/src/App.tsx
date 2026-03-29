@@ -266,6 +266,43 @@ type Task = {
   updatedAt?: string
 }
 
+type TaskDagNode = {
+  taskId: string
+  title: string
+  role: string
+  status: TaskStatus
+  parentTaskId: string | null
+  dependencyIds: string[]
+  dependentTaskIds: string[]
+  blockedByTaskIds: string[]
+  isRoot: boolean
+  isBlocked: boolean
+}
+
+type TaskDagEdge = {
+  id: string
+  sourceTaskId: string
+  targetTaskId: string
+  kind: 'dependency'
+  isSatisfied: boolean
+  isBlocking: boolean
+}
+
+type TaskDagUnblockPath = {
+  taskId: string
+  blockingTaskIds: string[]
+  pathTaskIds: string[]
+  pathEdgeIds: string[]
+}
+
+type TaskDagGraph = {
+  nodes: TaskDagNode[]
+  edges: TaskDagEdge[]
+  rootTaskIds: string[]
+  blockedTaskIds: string[]
+  unblockPaths: TaskDagUnblockPath[]
+}
+
 type Agent = {
   id: string
   runId: string
@@ -400,6 +437,7 @@ type RunDetail = Run & {
   tasks: Task[]
   agents: Agent[]
   sessions: Session[]
+  taskDag: TaskDagGraph
 }
 
 type ActivityItem = {
@@ -417,6 +455,7 @@ type SwarmData = {
   tasks: Task[]
   agents: Agent[]
   sessions: Session[]
+  taskDagByRun: Record<string, TaskDagGraph>
   workerNodes: WorkerNode[]
   approvals: Approval[]
   validations: Validation[]
@@ -480,6 +519,13 @@ let API_TOKEN = (currentRuntimeConfig.apiToken ?? import.meta.env.VITE_API_TOKEN
 const APPROVAL_RESOLVER = import.meta.env.VITE_APPROVAL_RESOLVER ?? 'frontend-dev'
 const MOCK_FALLBACK_ENABLED = import.meta.env.VITE_ENABLE_MOCK_FALLBACK === 'true'
 const REFRESH_MS = 15_000
+const EMPTY_TASK_DAG_GRAPH: TaskDagGraph = {
+  nodes: [],
+  edges: [],
+  rootTaskIds: [],
+  blockedTaskIds: [],
+  unblockPaths: [],
+}
 const UUID_PATTERN =
   /^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$/
 
@@ -1383,6 +1429,7 @@ const mockData: SwarmData = {
       createdAt: '2026-03-28T20:14:00.000Z',
     },
   ],
+  taskDagByRun: {},
   identity: mockIdentity,
   governance: mockGovernance,
   secretAccessPlan: mockSecretAccessPlan,
@@ -1398,6 +1445,7 @@ function createEmptySwarmData(): SwarmData {
     tasks: [],
     agents: [],
     sessions: [],
+    taskDagByRun: {},
     workerNodes: [],
     approvals: [],
     validations: [],
@@ -1492,6 +1540,398 @@ const workerSessionTone: Record<WorkerSessionState, ActivityItem['tone']> = {
   failed: 'danger',
   stale: 'warning',
   archived: 'muted',
+}
+
+function buildTaskDagGraph(tasks: Task[]): TaskDagGraph {
+  if (tasks.length === 0) {
+    return EMPTY_TASK_DAG_GRAPH
+  }
+
+  const taskIds = new Set(tasks.map((task) => task.id))
+  const taskById = new Map(tasks.map((task) => [task.id, task]))
+  const dependentTaskIdsByTaskId = new Map<string, string[]>()
+
+  for (const task of tasks) {
+    dependentTaskIdsByTaskId.set(task.id, [])
+  }
+
+  for (const task of tasks) {
+    for (const dependencyId of task.dependencyIds) {
+      if (!taskIds.has(dependencyId)) {
+        continue
+      }
+
+      dependentTaskIdsByTaskId.get(dependencyId)?.push(task.id)
+    }
+  }
+
+  const nodes: TaskDagNode[] = tasks.map((task) => {
+    const dependencyIds = task.dependencyIds.filter((dependencyId) => taskIds.has(dependencyId))
+    const blockedByTaskIds = dependencyIds.filter((dependencyId) => {
+      const dependency = taskById.get(dependencyId)
+      return dependency ? dependency.status !== 'completed' : false
+    })
+
+    return {
+      taskId: task.id,
+      title: task.title,
+      role: task.role,
+      status: task.status,
+      parentTaskId: task.parentTaskId ?? null,
+      dependencyIds,
+      dependentTaskIds: dependentTaskIdsByTaskId.get(task.id) ?? [],
+      blockedByTaskIds,
+      isRoot: dependencyIds.length === 0,
+      isBlocked: task.status === 'blocked' || blockedByTaskIds.length > 0,
+    }
+  })
+
+  const nodeById = new Map(nodes.map((node) => [node.taskId, node]))
+  const edges: TaskDagEdge[] = nodes.flatMap((node) =>
+    node.dependencyIds.flatMap((dependencyId) => {
+      const dependencyNode = nodeById.get(dependencyId)
+      if (!dependencyNode) {
+        return []
+      }
+
+      const isSatisfied = dependencyNode.status === 'completed'
+      return [{
+        id: `${dependencyId}->${node.taskId}`,
+        sourceTaskId: dependencyId,
+        targetTaskId: node.taskId,
+        kind: 'dependency' as const,
+        isSatisfied,
+        isBlocking: !isSatisfied && node.isBlocked,
+      }]
+    }),
+  )
+
+  const blockedTaskIds = nodes.filter((node) => node.isBlocked).map((node) => node.taskId)
+  const unblockPaths: TaskDagUnblockPath[] = blockedTaskIds.map((taskId) => {
+    const pathTaskIds = new Set<string>([taskId])
+    const blockingTaskIds = new Set<string>()
+    const pathEdgeIds = new Set<string>()
+    const queue = [taskId]
+    const visited = new Set<string>()
+
+    while (queue.length > 0) {
+      const currentTaskId = queue.shift()
+      if (!currentTaskId || visited.has(currentTaskId)) {
+        continue
+      }
+
+      visited.add(currentTaskId)
+      const currentNode = nodeById.get(currentTaskId)
+      if (!currentNode) {
+        continue
+      }
+
+      for (const dependencyId of currentNode.blockedByTaskIds) {
+        blockingTaskIds.add(dependencyId)
+        pathTaskIds.add(dependencyId)
+        pathEdgeIds.add(`${dependencyId}->${currentTaskId}`)
+        queue.push(dependencyId)
+      }
+    }
+
+    return {
+      taskId,
+      blockingTaskIds: [...blockingTaskIds],
+      pathTaskIds: [...pathTaskIds],
+      pathEdgeIds: [...pathEdgeIds],
+    }
+  })
+
+  return {
+    nodes,
+    edges,
+    rootTaskIds: nodes.filter((node) => node.isRoot).map((node) => node.taskId),
+    blockedTaskIds,
+    unblockPaths,
+  }
+}
+
+function buildTaskDagGraphModel(tasks: Task[], publishedGraph?: TaskDagGraph | null): TaskDagGraph {
+  if (tasks.length === 0) {
+    return publishedGraph ?? EMPTY_TASK_DAG_GRAPH
+  }
+
+  const derivedGraph = buildTaskDagGraph(tasks)
+  if (!publishedGraph) {
+    return derivedGraph
+  }
+
+  const validTaskIds = new Set(derivedGraph.nodes.map((node) => node.taskId))
+  const publishedNodeById = new Map(
+    publishedGraph.nodes
+      .filter((node) => validTaskIds.has(node.taskId))
+      .map((node) => [node.taskId, node]),
+  )
+
+  const nodes = derivedGraph.nodes.map((node) => {
+    const publishedNode = publishedNodeById.get(node.taskId)
+    if (!publishedNode) {
+      return node
+    }
+
+    return {
+      ...node,
+      dependentTaskIds: publishedNode.dependentTaskIds.filter((taskId) => validTaskIds.has(taskId)),
+    }
+  })
+
+  const publishedEdgeById = new Map(
+    publishedGraph.edges
+      .filter((edge) => validTaskIds.has(edge.sourceTaskId) && validTaskIds.has(edge.targetTaskId))
+      .map((edge) => [edge.id, edge]),
+  )
+  const edges = derivedGraph.edges.map((edge) => ({
+    ...edge,
+    kind: publishedEdgeById.get(edge.id)?.kind ?? edge.kind,
+  }))
+
+  const rootTaskIds = publishedGraph.rootTaskIds.filter((taskId) => validTaskIds.has(taskId))
+  return {
+    nodes,
+    edges,
+    rootTaskIds: rootTaskIds.length > 0 ? rootTaskIds : derivedGraph.rootTaskIds,
+    blockedTaskIds: derivedGraph.blockedTaskIds,
+    unblockPaths: derivedGraph.unblockPaths,
+  }
+}
+
+type DagGraphLayoutNode = {
+  node: TaskDagNode
+  x: number
+  y: number
+}
+
+type DagGraphLayout = {
+  nodes: DagGraphLayoutNode[]
+  width: number
+  height: number
+}
+
+function layoutTaskDag(graph: TaskDagGraph): DagGraphLayout {
+  if (graph.nodes.length === 0) {
+    return { nodes: [], width: 0, height: 0 }
+  }
+
+  const nodeById = new Map(graph.nodes.map((node) => [node.taskId, node]))
+  const levelByTaskId = new Map<string, number>()
+  const visiting = new Set<string>()
+
+  const assignLevel = (taskId: string): number => {
+    if (levelByTaskId.has(taskId)) {
+      return levelByTaskId.get(taskId) ?? 0
+    }
+
+    if (visiting.has(taskId)) {
+      return 0
+    }
+
+    visiting.add(taskId)
+
+    const dependencyIds = nodeById.get(taskId)?.dependencyIds ?? []
+    const level = dependencyIds.length === 0
+      ? 0
+      : Math.max(
+          ...dependencyIds
+            .filter((dependencyId) => nodeById.has(dependencyId))
+            .map((dependencyId) => assignLevel(dependencyId)),
+          0,
+        ) + 1
+
+    visiting.delete(taskId)
+    levelByTaskId.set(taskId, level)
+    return level
+  }
+
+  for (const node of graph.nodes) {
+    assignLevel(node.taskId)
+  }
+
+  const columns = new Map<number, TaskDagNode[]>()
+  for (const node of graph.nodes) {
+    const column = levelByTaskId.get(node.taskId) ?? 0
+    const current = columns.get(column) ?? []
+    current.push(node)
+    columns.set(column, current)
+  }
+
+  const orderedColumns = [...columns.entries()].sort(([left], [right]) => left - right)
+  const highestColumn = orderedColumns[orderedColumns.length - 1]?.[0] ?? 0
+  const columnWidth = 248
+  const rowHeight = 112
+  const paddingX = 28
+  const paddingY = 24
+  const nodes: DagGraphLayoutNode[] = []
+  let maxRows = 0
+
+  for (const [columnIndex, columnNodes] of orderedColumns) {
+    columnNodes.sort((left, right) =>
+      Number(right.isBlocked) - Number(left.isBlocked)
+      || Number(right.isRoot) - Number(left.isRoot)
+      || left.title.localeCompare(right.title),
+    )
+
+    maxRows = Math.max(maxRows, columnNodes.length)
+
+    columnNodes.forEach((node, rowIndex) => {
+      nodes.push({
+        node,
+        x: paddingX + columnIndex * columnWidth,
+        y: paddingY + rowIndex * rowHeight,
+      })
+    })
+  }
+
+  return {
+    nodes,
+    width: paddingX * 2 + Math.max(1, highestColumn + 1) * columnWidth,
+    height: paddingY * 2 + Math.max(1, maxRows) * rowHeight,
+  }
+}
+
+type TaskDagGraphPanelProps = {
+  graph: TaskDagGraph
+  loading: boolean
+  error: string
+}
+
+function taskDagNodeStatusClass(status: TaskStatus) {
+  switch (status) {
+    case 'completed':
+      return 'is-status-completed'
+    case 'in_progress':
+      return 'is-status-in-progress'
+    case 'awaiting_review':
+      return 'is-status-awaiting-review'
+    case 'failed':
+      return 'is-status-failed'
+    case 'cancelled':
+      return 'is-status-cancelled'
+    case 'blocked':
+      return 'is-status-blocked'
+    default:
+      return 'is-status-pending'
+  }
+}
+
+function TaskDagGraphPanel({ graph, loading, error }: TaskDagGraphPanelProps) {
+  if (loading && graph.nodes.length === 0) {
+    return <div className="empty-state">Loading task DAG graph…</div>
+  }
+
+  if (error && graph.nodes.length === 0) {
+    return <div className="empty-state">{error}</div>
+  }
+
+  if (graph.nodes.length === 0) {
+    return <div className="empty-state">No task DAG data published for this run yet.</div>
+  }
+
+  const layout = layoutTaskDag(graph)
+  const nodeWidth = 196
+  const nodeHeight = 72
+  const hasDependencyEdges = graph.edges.length > 0
+  const layoutNodeById = new Map(layout.nodes.map((layoutNode) => [layoutNode.node.taskId, layoutNode]))
+  const unblockPathTaskIds = new Set(graph.unblockPaths.flatMap((path) => path.pathTaskIds))
+  const unblockPathEdgeIds = new Set(graph.unblockPaths.flatMap((path) => path.pathEdgeIds))
+
+  return (
+    <div className="dag-graph-shell">
+      <div className="dag-graph-summary">
+        <span>{graph.nodes.length} tasks</span>
+        <span>{graph.edges.length} links</span>
+        <span>{graph.blockedTaskIds.length} blocked</span>
+        {!hasDependencyEdges ? <span>All tasks are dependency-free</span> : null}
+      </div>
+
+      <div className="dag-graph-legend" aria-label="Task DAG graph legend">
+        <span className="dag-legend-item"><span className="dag-legend-swatch is-root" />Root task</span>
+        <span className="dag-legend-item"><span className="dag-legend-swatch is-path" />Unblock path</span>
+        <span className="dag-legend-item"><span className="dag-legend-swatch is-blocked" />Blocked task</span>
+        <span className="dag-legend-item"><span className="dag-legend-swatch is-blocking-edge" />Blocking link</span>
+      </div>
+
+      {!hasDependencyEdges ? (
+        <div className="dag-graph-note">
+          Every task is currently a root task. The graph stays in a single ready column until dependency links are added.
+        </div>
+      ) : null}
+
+      <div className="dag-graph-frame">
+        <svg
+          className="dag-graph-canvas"
+          viewBox={`0 0 ${Math.max(layout.width, 320)} ${Math.max(layout.height, 180)}`}
+          role="img"
+          aria-label="Task dependency graph"
+        >
+          <defs>
+            <marker id="dag-arrow-default" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+              <path d="M0,0 L8,4 L0,8 z" className="dag-arrow-marker" />
+            </marker>
+          </defs>
+
+          {graph.edges.map((edge) => {
+            const source = layoutNodeById.get(edge.sourceTaskId)
+            const target = layoutNodeById.get(edge.targetTaskId)
+
+            if (!source || !target) {
+              return null
+            }
+
+            const sourceX = source.x + nodeWidth
+            const sourceY = source.y + nodeHeight / 2
+            const targetX = target.x
+            const targetY = target.y + nodeHeight / 2
+            const controlOffset = Math.max(36, (targetX - sourceX) / 2)
+            const className = [
+              'dag-graph-edge',
+              edge.isBlocking ? 'is-blocking' : '',
+              edge.isSatisfied ? 'is-satisfied' : '',
+              unblockPathEdgeIds.has(edge.id) ? 'is-unblock-path' : '',
+            ].filter(Boolean).join(' ')
+
+            return (
+              <path
+                key={edge.id}
+                className={className}
+                d={`M ${sourceX} ${sourceY} C ${sourceX + controlOffset} ${sourceY}, ${targetX - controlOffset} ${targetY}, ${targetX} ${targetY}`}
+                markerEnd="url(#dag-arrow-default)"
+              />
+            )
+          })}
+
+          {layout.nodes.map(({ node, x, y }) => {
+            const className = [
+              'dag-graph-node',
+              node.isRoot ? 'is-root' : '',
+              graph.blockedTaskIds.includes(node.taskId) ? 'is-blocked' : '',
+              unblockPathTaskIds.has(node.taskId) ? 'is-unblock-path' : '',
+              taskDagNodeStatusClass(node.status),
+            ].filter(Boolean).join(' ')
+
+            return (
+              <g key={node.taskId} className={className} transform={`translate(${x}, ${y})`}>
+                <rect width={nodeWidth} height={nodeHeight} rx="16" ry="16" />
+                <text className="dag-graph-node-title" x="14" y="25">
+                  {node.title.length > 29 ? `${node.title.slice(0, 28)}…` : node.title}
+                </text>
+                <text className="dag-graph-node-meta" x="14" y="45">
+                  {formatLabel(node.status)}
+                </text>
+                <text className="dag-graph-node-meta" x="14" y="61">
+                  {node.role}
+                </text>
+              </g>
+            )
+          })}
+        </svg>
+      </div>
+    </div>
+  )
 }
 
 const capturePresets: Record<string, CapturePreset> = {
@@ -1981,6 +2421,9 @@ async function loadSwarmData(): Promise<SwarmData> {
       tasks: details.flatMap((detail) => detail.tasks),
       agents: details.flatMap((detail) => detail.agents),
       sessions: details.flatMap((detail) => detail.sessions),
+      taskDagByRun: Object.fromEntries(
+        details.map((detail) => [detail.id, buildTaskDagGraphModel(detail.tasks, detail.taskDag)]),
+      ),
       workerNodes,
       approvals: approvalsPerRun.flat(),
       validations: validationsPerRun.flat(),
@@ -2463,6 +2906,9 @@ function App() {
   }, [data.repositories, runDraftRepositoryId, selectedRepositoryStableId])
 
   const runTasks = data.tasks.filter((task) => task.runId === selectedRun?.id)
+  const selectedTaskDag = selectedRun
+    ? data.taskDagByRun[selectedRun.id] ?? buildTaskDagGraphModel(runTasks)
+    : EMPTY_TASK_DAG_GRAPH
   const visibleTasks = runTasks.filter((task) => {
     if (!deferredTaskQuery.trim()) {
       return true
@@ -3816,34 +4262,48 @@ function App() {
                   </div>
 
                   {showDagSection ? (
-                  <div className="dag-list">
-                    {runTasks.map((task) => (
-                      <article key={task.id} className="dag-card">
-                          <div className="dag-card-header">
-                            <strong>{task.title}</strong>
-                            <span className={`tone-chip tone-${runStatusToneForTask(task.status)}`}>
-                              {formatLabel(task.status)}
-                            </span>
-                          </div>
-                        <p>{task.description}</p>
-                        <div className="dag-meta">
-                          <span>{task.role}</span>
-                          <span>{task.parentTaskId ? `parent ${task.parentTaskId.slice(0, 8)}` : 'top-level task'}</span>
-                        </div>
-                        <div className="dag-edges">
-                          <span className="dag-label">Dependencies</span>
-                          {task.dependencyIds.length > 0 ? (
-                            task.dependencyIds.map((dependencyId) => (
-                              <span key={dependencyId} className="dependency-chip">
-                                {dependencyId.slice(0, 8)}
+                  <div className="dag-panel-stack">
+                    <div className="dag-copy">
+                      <p>The visual map mirrors the textual DAG below so operators can trace dependency pressure and unblock routes without losing the raw task list.</p>
+                    </div>
+
+                    <TaskDagGraphPanel
+                      graph={selectedTaskDag}
+                      loading={loading}
+                      error={errorText ? 'Unable to load task DAG graph from the live API.' : ''}
+                    />
+
+                    <div className="dag-list">
+                      {runTasks.length > 0 ? runTasks.map((task) => (
+                        <article key={task.id} className="dag-card">
+                            <div className="dag-card-header">
+                              <strong>{task.title}</strong>
+                              <span className={`tone-chip tone-${runStatusToneForTask(task.status)}`}>
+                                {formatLabel(task.status)}
                               </span>
-                            ))
-                          ) : (
-                            <span className="dependency-chip is-clear">ready</span>
-                          )}
-                        </div>
-                      </article>
-                    ))}
+                            </div>
+                          <p>{task.description}</p>
+                          <div className="dag-meta">
+                            <span>{task.role}</span>
+                            <span>{task.parentTaskId ? `parent ${task.parentTaskId.slice(0, 8)}` : 'top-level task'}</span>
+                          </div>
+                          <div className="dag-edges">
+                            <span className="dag-label">Dependencies</span>
+                            {task.dependencyIds.length > 0 ? (
+                              task.dependencyIds.map((dependencyId) => (
+                                <span key={dependencyId} className="dependency-chip">
+                                  {dependencyId.slice(0, 8)}
+                                </span>
+                              ))
+                            ) : (
+                              <span className="dependency-chip is-clear">ready</span>
+                            )}
+                          </div>
+                        </article>
+                      )) : (
+                        <div className="empty-state">No task DAG entries recorded for this run.</div>
+                      )}
+                    </div>
                   </div>
                   ) : (
                     <div className="compact-summary-row">

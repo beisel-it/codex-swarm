@@ -17,6 +17,7 @@ import {
   retentionReconcileReportSchema,
   runBranchPublishSchema,
   runCreateSchema,
+  runDetailSchema,
   runPullRequestHandoffSchema,
   sessionTranscriptAppendSchema,
   secretAccessPlanSchema,
@@ -103,6 +104,129 @@ describe("taskCreateSchema", () => {
     expect(task.priority).toBe(3);
     expect(task.dependencyIds).toEqual([]);
     expect(task.acceptanceCriteria).toEqual([]);
+  });
+});
+
+describe("runDetailSchema", () => {
+  it("accepts graph-oriented task DAG metadata alongside tasks", () => {
+    const now = new Date("2026-03-29T10:00:00.000Z");
+    const runDetail = runDetailSchema.parse({
+      id: "550e8400-e29b-41d4-a716-446655440000",
+      repositoryId: "550e8400-e29b-41d4-a716-446655440001",
+      workspaceId: "workspace-1",
+      teamId: "team-1",
+      goal: "Render the task DAG",
+      status: "in_progress",
+      branchName: null,
+      planArtifactPath: null,
+      budgetTokens: null,
+      budgetCostUsd: null,
+      concurrencyCap: 1,
+      policyProfile: "standard",
+      publishedBranch: null,
+      branchPublishedAt: null,
+      branchPublishApprovalId: null,
+      pullRequestUrl: null,
+      pullRequestNumber: null,
+      pullRequestStatus: null,
+      pullRequestApprovalId: null,
+      handoffStatus: "pending",
+      completedAt: null,
+      metadata: {},
+      createdBy: "leader",
+      createdAt: now,
+      updatedAt: now,
+      tasks: [
+        {
+          id: "550e8400-e29b-41d4-a716-446655440010",
+          runId: "550e8400-e29b-41d4-a716-446655440000",
+          parentTaskId: null,
+          title: "Root task",
+          description: "Start here",
+          role: "backend-developer",
+          status: "completed",
+          priority: 3,
+          ownerAgentId: null,
+          dependencyIds: [],
+          acceptanceCriteria: [],
+          validationTemplates: [],
+          createdAt: now,
+          updatedAt: now
+        },
+        {
+          id: "550e8400-e29b-41d4-a716-446655440011",
+          runId: "550e8400-e29b-41d4-a716-446655440000",
+          parentTaskId: null,
+          title: "Blocked task",
+          description: "Waits on work",
+          role: "frontend-developer",
+          status: "blocked",
+          priority: 3,
+          ownerAgentId: null,
+          dependencyIds: ["550e8400-e29b-41d4-a716-446655440010"],
+          acceptanceCriteria: [],
+          validationTemplates: [],
+          createdAt: now,
+          updatedAt: now
+        }
+      ],
+      agents: [],
+      sessions: [],
+      taskDag: {
+        nodes: [
+          {
+            taskId: "550e8400-e29b-41d4-a716-446655440010",
+            title: "Root task",
+            role: "backend-developer",
+            status: "completed",
+            parentTaskId: null,
+            dependencyIds: [],
+            dependentTaskIds: ["550e8400-e29b-41d4-a716-446655440011"],
+            blockedByTaskIds: [],
+            isRoot: true,
+            isBlocked: false
+          },
+          {
+            taskId: "550e8400-e29b-41d4-a716-446655440011",
+            title: "Blocked task",
+            role: "frontend-developer",
+            status: "blocked",
+            parentTaskId: null,
+            dependencyIds: ["550e8400-e29b-41d4-a716-446655440010"],
+            dependentTaskIds: [],
+            blockedByTaskIds: ["550e8400-e29b-41d4-a716-446655440010"],
+            isRoot: false,
+            isBlocked: true
+          }
+        ],
+        edges: [
+          {
+            id: "550e8400-e29b-41d4-a716-446655440010->550e8400-e29b-41d4-a716-446655440011",
+            sourceTaskId: "550e8400-e29b-41d4-a716-446655440010",
+            targetTaskId: "550e8400-e29b-41d4-a716-446655440011",
+            kind: "dependency",
+            isSatisfied: true,
+            isBlocking: false
+          }
+        ],
+        rootTaskIds: ["550e8400-e29b-41d4-a716-446655440010"],
+        blockedTaskIds: ["550e8400-e29b-41d4-a716-446655440011"],
+        unblockPaths: [
+          {
+            taskId: "550e8400-e29b-41d4-a716-446655440011",
+            blockingTaskIds: ["550e8400-e29b-41d4-a716-446655440010"],
+            pathTaskIds: [
+              "550e8400-e29b-41d4-a716-446655440010",
+              "550e8400-e29b-41d4-a716-446655440011"
+            ],
+            pathEdgeIds: ["550e8400-e29b-41d4-a716-446655440010->550e8400-e29b-41d4-a716-446655440011"]
+          }
+        ]
+      }
+    });
+
+    expect(runDetail.taskDag.rootTaskIds).toEqual(["550e8400-e29b-41d4-a716-446655440010"]);
+    expect(runDetail.taskDag.blockedTaskIds).toEqual(["550e8400-e29b-41d4-a716-446655440011"]);
   });
 });
 
