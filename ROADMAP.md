@@ -47,7 +47,9 @@ Establish the project skeleton, core contracts, and executable technical spike b
 ### Scope
 - Finalize PRD and roadmap
 - Define domain model and event taxonomy
-- Define Swarm Control MCP tool surface
+- Define control-plane interaction contract
+  - Superseded in the shipped implementation by the HTTP control-plane API
+    documented in `docs/architecture/control-plane-api-contract.md`
 - Build proof of concept for:
   - starting `codex mcp-server`
   - launching a session with `codex()`
@@ -105,12 +107,22 @@ Deliver the first vertical slice: create a run, plan tasks, spawn isolated worke
 - Validation command runner
 - Artifact upload pipeline
 
-#### MCP surface
-- `run_context.get`
-- `task.list`, `task.create`, `task.update`
-- `message.send`, `message.list`
-- `artifact.publish`
-- `agent.spawn`, `agent.status`, `agent.stop`
+#### Control-plane contract
+The planned Swarm Control MCP surface was intentionally superseded by the
+Fastify HTTP API under `/api/v1`. The authoritative mapping is recorded in
+`docs/architecture/control-plane-api-contract.md`.
+
+- `GET /api/v1/runs/:id` replaces `run_context.get`
+- `GET /api/v1/tasks`, `POST /api/v1/tasks`, and
+  `PATCH /api/v1/tasks/:id/status` replace `task.list`, `task.create`, and
+  `task.update`
+- `POST /api/v1/messages` and `GET /api/v1/messages` replace `message.send`
+  and `message.list`
+- `POST /api/v1/artifacts` replaces `artifact.publish`
+- `POST /api/v1/agents` and `GET /api/v1/agents` replace `agent.spawn` and
+  `agent.status`
+- agent stop is currently expressed through run/session recovery controls rather
+  than a standalone agent-stop endpoint
 
 ### Deliverables
 - Create run from repo + goal/spec
@@ -466,7 +478,7 @@ Ship a clearly supported, production-ready platform.
 3. Leader session bootstrapping  
 4. Task DAG persistence  
 5. Worktree creation and worker session provisioning  
-6. MCP control tools for task/message/artifact updates  
+6. HTTP control-plane routes for task/message/artifact updates
 7. Validation runner  
 8. Board API and UI  
 9. Approvals  
@@ -568,4 +580,3 @@ A milestone is done only when all of the following are true:
 [^subagents]: [Codex subagents and custom agents](https://developers.openai.com/codex/subagents/)
 [^worktrees]: [Codex worktrees](https://developers.openai.com/codex/app/worktrees/)
 [^agents-mcp]: [Agents SDK MCP guide](https://openai.github.io/openai-agents-python/mcp/)
-

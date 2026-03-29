@@ -79,18 +79,21 @@ Integration tests:
 - worker runtime bootstrap against a fixture repository
 - validation command execution captures logs and exit codes
 
-### 4. Swarm Control MCP surface
+### 4. Control-plane contract
 
 Unit tests:
 
-- tool request parsing and response normalization
+- route-schema validation and response normalization
 - authorization and run-context scoping rules
 
 Integration tests:
 
-- `task.list`, `task.update`, and `message.send` reflect control-plane state
-- `artifact.publish` and `validation.record` persist expected records
-- `agent.spawn` and `agent.stop` change runtime state safely
+- `GET /api/v1/tasks`, `PATCH /api/v1/tasks/:id/status`, and
+  `POST /api/v1/messages` reflect control-plane state
+- `POST /api/v1/artifacts` and `POST /api/v1/validations` persist expected
+  records
+- `POST /api/v1/agents` and lifecycle recovery controls change runtime state
+  safely
 
 ### 5. Browser board and review UI
 

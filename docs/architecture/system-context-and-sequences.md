@@ -91,5 +91,8 @@ sequenceDiagram
 
 - This document is the architecture-local home for the roadmap's required
   diagrams.
+- The planned Swarm Control MCP surface was intentionally superseded by the
+  HTTP control-plane contract documented in
+  [`control-plane-api-contract.md`](./control-plane-api-contract.md).
 - `PRD.md` still contains earlier diagrams, but `docs/architecture/` is now the
   authoritative location for the shipped implementation view.
