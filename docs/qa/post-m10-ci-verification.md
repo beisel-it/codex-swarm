@@ -14,9 +14,8 @@ Source of truth: `docs/architecture/post-m10-ci-hardening-plan.md`
 
 The redesigned CI gate matches the checked-in hardening plan and is reproducible
 locally on the branch under test. GitHub Actions and local reproduction use the
-same four validation stages, the separation between CI and Vercel deployment is
-explicit, and the remaining coverage differences are intentional and documented
-rather than hidden workflow drift.
+same four validation stages, and the remaining coverage differences are
+intentional and documented rather than hidden workflow drift.
 
 ## Verification Performed
 
@@ -34,7 +33,6 @@ Result:
 Inspected artifacts:
 
 - `.github/workflows/ci.yml`
-- `.github/workflows/deploy-vercel.yml`
 - `.github/actions/setup-workspace/action.yml`
 - `docs/operations/cicd.md`
 - `docs/architecture/post-m10-ci-audit.md`
@@ -58,21 +56,7 @@ Conclusion:
 - no undocumented drift remains between the documented local gate and the
   GitHub CI validation workflow
 
-### 2. CI and deployment are intentionally separated
-
-- `docs/operations/cicd.md` explicitly separates the `CI` workflow from the
-  `Deploy Vercel` workflow
-- `.github/workflows/deploy-vercel.yml` is triggered by successful `CI`
-  completion or explicit `workflow_dispatch`
-- the deploy workflow includes explicit readiness detection, fork protection,
-  and skip reasons
-
-Conclusion:
-
-- the distinction between validation and deployment is explicit and matches the
-  hardening-plan requirement
-
-### 3. Shared workspace assumptions are aligned
+### 2. Shared workspace assumptions are aligned
 
 - `.github/actions/setup-workspace/action.yml` standardizes checkout, pnpm
   setup, Node setup from `.nvmrc`, and `pnpm install --frozen-lockfile`
@@ -136,19 +120,6 @@ Assessment:
 
 - intentional and visible
 - this is coverage shape, not parity drift
-
-### 4. Deploy workflow reruns only the build gate in CI
-
-- `.github/workflows/deploy-vercel.yml` reruns `pnpm ci:build` before Vercel
-  build and deploy
-- `docs/operations/cicd.md` describes deployment as separate from the full CI
-  validation workflow and gives full local reproduction commands separately
-
-Assessment:
-
-- intentional and documented
-- not a hidden reduction of the primary CI gate because deployment depends on a
-  successful upstream `CI` run
 
 ## Residual Risks
 

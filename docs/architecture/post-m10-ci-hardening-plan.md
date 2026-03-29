@@ -13,7 +13,6 @@ without blocking the active TUI delivery work.
 The repo already ships:
 
 - `.github/workflows/ci.yml`
-- `.github/workflows/deploy-vercel.yml`
 - workspace commands:
   - `pnpm ci:lint`
   - `pnpm ci:typecheck`
@@ -68,7 +67,7 @@ This slice is done only when all of the following are true:
 ### A. Workflow clarity
 
 - the order and purpose of `lint`, `typecheck`, `test`, and `build` are documented
-- the distinction between CI validation and Vercel deployment is explicit
+- the CI gate is documented as the active repository validation path
 
 ### B. Reproducibility
 
