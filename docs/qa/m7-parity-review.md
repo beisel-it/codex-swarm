@@ -888,3 +888,24 @@ Evidence:
 Residual risks:
 
 - The repo proves data-driven policy differentiation and inheritance, but not a richer standalone policy-administration editor beyond the current API-backed onboarding and governance surfaces.
+
+## Task `937cf22e`
+
+Roadmap entry:
+
+- Phase 5 exit criterion: `Sensitive repos can run with stricter defaults than standard repos.`
+
+Verdict:
+
+- parity
+
+Evidence:
+
+- Sensitive-default behavior is explicit in `requiresSensitiveDefaults(...)`, which clamps sensitive or non-standard-policy runs to stricter concurrency behavior in `apps/api/src/services/control-plane-service.ts`.
+- Policy tests verify that restricted repositories are elevated to a sensitive profile by default and that sensitive runs are clamped to `concurrencyCap = 1` while standard runs preserve looser defaults in `apps/api/test/control-plane-service.policy.test.ts`.
+- Governance tests verify that standard and sensitive repositories receive different secret-access outcomes and policy profiles in `apps/api/test/control-plane-service.governance.test.ts`.
+- The admin guide and frontend governance surface both expose sensitive-repository posture and stricter defaults as supported admin review surfaces in `docs/admin-guide.md` and `frontend/src/App.tsx`.
+
+Residual risks:
+
+- The stricter-default proof is strongest on concurrency and secret-access policy. Additional differentiated defaults could be added later, but the roadmap wording only requires that sensitive repos run with stricter defaults than standard repos.
