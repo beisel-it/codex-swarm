@@ -245,7 +245,8 @@ Make the product useful for real repos and repeated internal use.
 ### Exit criteria
 - A user can start from a GitHub or GitLab repo and end with a PR.
 - Budget caps and concurrency caps are enforced during real runs.
-- Curated skills and roles reduce prompt/setup overhead.[^skills][^subagents]
+- Curated skills, role packs, and repo templates are shipped, documented, and
+  usable as starter packs for repeatable Codex Swarm workflows.[^skills][^subagents]
 
 ### What is intentionally deferred
 - True multi-tenant auth/RBAC

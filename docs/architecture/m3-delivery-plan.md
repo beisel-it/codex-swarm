@@ -19,7 +19,8 @@ Phase 3 is complete when:
 
 1. A user can start from a GitHub or GitLab repo and end with a PR.
 2. Budget caps and concurrency caps are enforced during real runs.
-3. Curated skills and role packs reduce prompt/setup overhead.
+3. Curated skills, role packs, and repo templates are shipped, documented, and
+   usable as starter packs for repeatable Codex Swarm workflows.
 
 ## Execution Order
 
