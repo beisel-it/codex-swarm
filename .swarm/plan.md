@@ -58,28 +58,36 @@ M6 implementation is complete:
 
 ### M7
 
-M7 parity review is in progress:
+M7 parity review is complete:
 
-- each roadmap entry is being verified as parity, better, superseded, or gap
-- documented gaps are converted into explicit backlog items
-- roadmap and architecture wording is being tightened where supportability was overstated
+- each roadmap entry was verified as parity, better, superseded, or gap
+- documented gaps were converted into explicit backlog items or resolved with shipped fixes
+- roadmap and architecture wording was tightened where supportability had been overstated
 
 ### M8
 
-M8 refinement is active:
+M8 implementation is complete:
 
-- external-operator Codex skill library
+- codex-swarm-specific external-operator Codex skill library
 - board/inbox/task-control skills
 - diagnostics and recovery skills
 - agent and skill authoring guidance
 - acceptance examples proving Codex can manage codex-swarm from the outside
+
+### M9
+
+M9 end-to-end validation is complete:
+
+- codex-swarm was used to run a real designer-plus-developer product scenario in an isolated workdir
+- the run produced design artifacts, implementation output, screenshots, validations, and an audit export
+- M9 surfaced and fixed product bugs in artifact persistence and audit-export compatibility
 
 ## Dependency Order
 
 1. Complete roadmap phase refinement for the active milestone.
 2. Activate the concrete delivery tracks for that milestone.
 3. Close milestone implementation before opening the next roadmap refinement gate.
-4. Preserve a clean dependency chain from M3 to M8.
+4. Preserve a clean dependency chain from M3 through M9.
 
 ## Execution Rules
 

@@ -5,14 +5,16 @@
 - M0/M1 foundation: monorepo, API, worker spike, frontend shell, CI baseline
 - M2: approvals, review flows, validation history, observability, recovery spike
 - M3: repo onboarding, PR reflection, governance-lite controls, quality hardening, and reusable role/template packs
+- M7: roadmap parity review, documented gap conversion, shipped follow-up fixes, and wording cleanup for overstated support claims
+- M8: codex-swarm-specific external operator skill pack, walkthroughs, diagnostics/recovery skills, and authoring guidance
+- M9: isolated codex-swarm end-to-end landing-page scenario completed with persisted run evidence, screenshots, validations, and audit export
 
 ## Active
 
-- M7 parity review is active across roadmap commitments and is verifying live implementation against `ROADMAP.md`
-- M7 parity review has verified the roadmap's security-defaults and observability commitments as implemented, with richer secret-boundary and operator-metrics surfaces than the original milestone wording
-- devops follow-up `45aaf257` closed the Phase 4 shared-artifact-store gap with durable artifact persistence, download serving, and remote-worker enforcement
-- devops follow-up `8e4cd968` closes the Phase 4 MCP transport split with explicit stdio vs streamable-HTTP runtime wiring for local and remote/shared worker execution
+- backlog is now beyond M9; current follow-up work should be treated as post-M9 backlog rather than milestone-completion debt
+- the real M9 run found and fixed product issues in artifact metadata persistence and audit-export compatibility on commit `cb51312`
 
 ## Current Validation
 
 - workspace `ci:lint`, `ci:typecheck`, `ci:test`, and `ci:build` passed on the current branch during M6 delivery work
+- M9 run `ad5cb54c-8e6c-47c7-b386-1fea85c8138d` completed through codex-swarm with 12 persisted artifacts, 2 validations, generated landing-page output, screenshots, and `run-audit-export.json` under `/tmp/codex-swarm-m9/m9-landing-page-001`
