@@ -14,6 +14,7 @@
     "dev:api": "pnpm --dir apps/api dev",
     "dev:worker": "pnpm --dir apps/worker dev",
     "dev:frontend": "pnpm --dir frontend dev",
+    "tui": "corepack pnpm --dir apps/tui start",
     "ci:lint": "node ./scripts/ci/run-stage.mjs lint",
     "ci:typecheck": "node ./scripts/ci/run-stage.mjs typecheck",
     "ci:test": "node ./scripts/ci/run-stage.mjs test",
