@@ -845,3 +845,25 @@ Evidence:
 Residual risks:
 
 - The verified flow covers the in-repo two-node continuity path; it does not constitute broader fleet-scale or chaos-style continuity testing beyond the roadmap’s stated acceptance bar.
+
+## Task `57450e9a`
+
+Roadmap entry:
+
+- Phase 5 exit criterion: `An org admin can prove who approved what and when.`
+
+Verdict:
+
+- parity
+
+Evidence:
+
+- Approval audit entries include `approvalId`, requester, requested-by actor, delegation, resolver, resolver actor, resolved-at timestamp, resolved-by-delegate status, and policy profile in `apps/api/src/services/control-plane-service.ts`.
+- Governance tests verify that approval provenance captures both who requested and who resolved a governed approval, including delegated approval chains, in `apps/api/test/control-plane-service.governance.test.ts`.
+- Audit-export tests verify the same provenance survives into the run audit bundle that an admin can inspect or export in `apps/api/test/control-plane-service.governance.test.ts`.
+- The admin guide explicitly instructs admins to use audit export and approval provenance to confirm who approved what and when in `docs/admin-guide.md`.
+- The frontend admin surface renders requested actor, resolver actor, policy profile, and resolved-at details in `frontend/src/App.tsx`.
+
+Residual risks:
+
+- The proof surface is run-scoped via governance report and audit export; broader cross-run aggregation would be an enhancement, not a requirement of the roadmap wording.
