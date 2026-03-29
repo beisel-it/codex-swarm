@@ -6,9 +6,10 @@ This plan implements backlog item `1823fdc3`:
 
 `M8 - add a comprehensive skill library (codex compatible) to be able for codex to drive and manage codex-swarm from the outside, diagnose problems, run workflows and tasks, define new agents and do everything a user can`
 
-The goal is not "more skills" in the abstract. The goal is a complete external
-operator skill pack that lets Codex manage Codex Swarm through the same surfaces
-that a strong human operator would use.
+The goal is not "more skills" in the abstract. The goal is a complete
+codex-swarm-specific external operator skill pack that lets Codex manage Codex
+Swarm through the same product and repository surfaces that a strong human
+operator would use.
 
 ## Objective
 
@@ -56,7 +57,7 @@ M8 is complete when all of the following are true:
    - purpose
    - trigger conditions
    - required inputs
-   - concrete commands or workflow steps
+   - concrete codex-swarm workflow steps and commands
    - expected outputs
 4. At least three end-to-end example workflows are documented and exercised
    against the repo's real coordination model.
@@ -73,7 +74,8 @@ Deliver:
 
 - board/inbox/task-control skills
 - run diagnostics/recovery skill
-- workflow-management skill surfaces mapped to real `clawteam` and repo flows
+- workflow-management skill surfaces mapped to real codex-swarm operating flows,
+  using `clawteam` only where it is one underlying control surface
 
 Primary acceptance:
 
@@ -133,7 +135,7 @@ Primary acceptance:
 
 - Writing generic skills instead of codex-swarm-specific workflows will produce
   noise, not capability.
-- If examples are not grounded in real `clawteam` and repo operations, the
-  library will look complete but remain unusable.
+- If examples are not grounded in real codex-swarm operations, the library will
+  look complete but remain unusable.
 - If the verification pass does not test discoverability, the pack may still
   depend on hidden team knowledge.
