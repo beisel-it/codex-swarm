@@ -2155,7 +2155,7 @@ function App() {
         <div className="hero-copy">
           <p className="eyebrow">Codex Swarm operator console</p>
           <h1>Runs, reviews, and fleet state.</h1>
-          <p className="lede">Use the board to watch work move, inspect blocked items, and step into review or admin detail only when needed.</p>
+          <p className="lede">Track live runs, inspect worker state, and step into review only when a run needs attention.</p>
         </div>
 
         <div className="hero-metrics">
@@ -2172,13 +2172,15 @@ function App() {
             type="button"
             className={`view-tab ${selectedView === view ? 'is-active' : ''}`}
             onClick={() => setSelectedView(view)}
+            disabled={!selectedRun && view !== 'board'}
+            title={!selectedRun && view !== 'board' ? 'Select or start a run first.' : undefined}
           >
             {view === 'board' ? 'Board' : view === 'detail' ? 'Run Detail' : view === 'review' ? 'Review' : 'Admin'}
           </button>
         ))}
       </div>
 
-      <main className="board-layout">
+      <main className={`board-layout ${selectedRun ? '' : 'is-empty'}`}>
         <aside className="panel panel-runs">
           <div className="panel-header">
             <div>
@@ -2337,6 +2339,12 @@ function App() {
                 ) : null}
               </div>
             ))}
+            {data.runs.length === 0 ? (
+              <article className="live-empty-state">
+                <strong>No active runs yet.</strong>
+                <p>Register a repository or create a run from this panel. The other views stay locked until a run exists.</p>
+              </article>
+            ) : null}
           </div>
 
           <div className="run-summary-grid">
