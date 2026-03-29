@@ -1,6 +1,8 @@
-import { mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { execFile } from "node:child_process";
+import { mkdtemp, mkdir, readFile, writeFile, copyFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
+import { promisify } from "node:util";
 
 import type {
   Agent,
@@ -19,6 +21,8 @@ import {
   createLocalCodexCliExecutor
 } from "../../apps/worker/src/runtime.js";
 import { SessionRegistry } from "../../apps/worker/src/session-registry.js";
+
+const execFileAsync = promisify(execFile);
 
 function requireEnv(name: string) {
   const value = process.env[name]?.trim();
@@ -74,6 +78,64 @@ async function api<T>(baseUrl: string, authToken: string, method: string, path: 
 
 async function sleep(ms: number) {
   await new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function runCommand(command: string, args: string[], cwd?: string) {
+  return execFileAsync(command, args, {
+    cwd,
+    env: process.env,
+    maxBuffer: 1024 * 1024 * 20
+  });
+}
+
+async function ensureGithubRepository(repoSlug: string) {
+  try {
+    const { stdout } = await runCommand("gh", [
+      "repo",
+      "view",
+      repoSlug,
+      "--json",
+      "nameWithOwner,url,defaultBranchRef"
+    ]);
+    const parsed = JSON.parse(stdout) as {
+      url: string;
+      defaultBranchRef?: { name?: string | null } | null;
+    };
+
+    return {
+      url: parsed.url,
+      defaultBranch: parsed.defaultBranchRef?.name || "main"
+    };
+  } catch {
+    await runCommand("gh", [
+      "repo",
+      "create",
+      repoSlug,
+      "--private",
+      "--disable-issues",
+      "--disable-wiki",
+      "--description",
+      "Codex Swarm automated handoff proof repository",
+      "--confirm"
+    ]);
+
+    const { stdout } = await runCommand("gh", [
+      "repo",
+      "view",
+      repoSlug,
+      "--json",
+      "nameWithOwner,url,defaultBranchRef"
+    ]);
+    const parsed = JSON.parse(stdout) as {
+      url: string;
+      defaultBranchRef?: { name?: string | null } | null;
+    };
+
+    return {
+      url: parsed.url,
+      defaultBranch: parsed.defaultBranchRef?.name || "main"
+    };
+  }
 }
 
 async function bootstrapLeaderSession(input: {
@@ -136,6 +198,8 @@ async function main() {
   const repoRoot = join(proofRoot, "repo");
   const leaderWorkspace = process.cwd();
   await mkdir(repoRoot, { recursive: true });
+  const handoffRepo = await ensureGithubRepository(process.env.CODEX_SWARM_HANDOFF_REPO?.trim() || "beisel-it/codex-swarm-e2e-handoff");
+  const remoteUrl = handoffRepo.url.endsWith(".git") ? handoffRepo.url : `${handoffRepo.url}.git`;
 
   await writeFile(join(repoRoot, "README.md"), "# Hosted coordination proof\n", "utf8");
   await writeFile(join(repoRoot, "docs", ".gitkeep"), "", "utf8").catch(async () => {
@@ -155,12 +219,21 @@ async function main() {
     await writeFile(join(repoRoot, "ops", ".gitkeep"), "", "utf8");
   });
 
+  await runCommand("git", ["-C", repoRoot, "init", "--initial-branch=main"]);
+  await runCommand("git", ["-C", repoRoot, "config", "user.name", "Codex Swarm"]);
+  await runCommand("git", ["-C", repoRoot, "config", "user.email", "codex-swarm@example.com"]);
+  await runCommand("git", ["-C", repoRoot, "remote", "remove", "origin"]).catch(() => undefined);
+  await runCommand("git", ["-C", repoRoot, "remote", "add", "origin", remoteUrl]);
+  await runCommand("git", ["-C", repoRoot, "add", "."]);
+  await runCommand("git", ["-C", repoRoot, "commit", "-m", "Initial proof baseline"]);
+  await runCommand("git", ["-C", repoRoot, "push", "-u", "origin", handoffRepo.defaultBranch, "--force"]);
+
   const repository = await api<Repository>(baseUrl, authToken, "POST", "/api/v1/repositories", {
     name: "agent-coordination-proof",
-    provider: "local",
-    url: `file://${repoRoot}`,
+    provider: "github",
+    url: remoteUrl,
     localPath: repoRoot,
-    defaultBranch: "main",
+    defaultBranch: handoffRepo.defaultBranch,
     metadata: {
       source: "agent-coordination-proof"
     }
@@ -387,14 +460,75 @@ async function main() {
       const alphaHeroAgent = detail.agents.find((agent) => detail.tasks.some((task) => task.id === agent.currentTaskId && task.title.toLowerCase().includes("hero")));
       const alphaCtaAgent = detail.agents.find((agent) => detail.tasks.some((task) => task.id === agent.currentTaskId && task.title.toLowerCase().includes("cta")));
 
-      const filesToCheck = [
-        writerAgent?.worktreePath ? join(writerAgent.worktreePath, "notes", "changelog.txt") : null,
-        alphaHeroAgent?.worktreePath ? join(alphaHeroAgent.worktreePath, "stories", "story-alpha-hero.txt") : null,
-        alphaCtaAgent?.worktreePath ? join(alphaCtaAgent.worktreePath, "stories", "story-alpha-cta.txt") : null
-      ].filter((value): value is string => Boolean(value));
+      const apiAgent = detail.agents.find((agent) => detail.tasks.some((task) => task.id === agent.currentTaskId && task.title.toLowerCase().includes("api summary")));
+      const opsAgent = detail.agents.find((agent) => detail.tasks.some((task) => task.id === agent.currentTaskId && task.title.toLowerCase().includes("ops deployment")));
+      const artifactSources = [
+        writerAgent?.worktreePath ? { source: join(writerAgent.worktreePath, "notes", "changelog.txt"), destination: join(repoRoot, "notes", "changelog.txt") } : null,
+        alphaHeroAgent?.worktreePath ? { source: join(alphaHeroAgent.worktreePath, "stories", "story-alpha-hero.txt"), destination: join(repoRoot, "stories", "story-alpha-hero.txt") } : null,
+        alphaCtaAgent?.worktreePath ? { source: join(alphaCtaAgent.worktreePath, "stories", "story-alpha-cta.txt"), destination: join(repoRoot, "stories", "story-alpha-cta.txt") } : null,
+        apiAgent?.worktreePath ? { source: join(apiAgent.worktreePath, "docs", "api-summary.txt"), destination: join(repoRoot, "docs", "api-summary.txt") } : null,
+        opsAgent?.worktreePath ? { source: join(opsAgent.worktreePath, "ops", "deployment.txt"), destination: join(repoRoot, "ops", "deployment.txt") } : null
+      ].filter((value): value is { source: string; destination: string } => Boolean(value));
 
-      for (const filePath of filesToCheck) {
-        await readFile(filePath, "utf8");
+      for (const file of artifactSources) {
+        await readFile(file.source, "utf8");
+        await mkdir(dirname(file.destination), { recursive: true });
+        await copyFile(file.source, file.destination);
+      }
+
+      const branchName = `proof/${run.id}`;
+
+      await runCommand("git", ["-C", repoRoot, "fetch", "origin", handoffRepo.defaultBranch]);
+      await runCommand("git", ["-C", repoRoot, "checkout", handoffRepo.defaultBranch]);
+      await runCommand("git", ["-C", repoRoot, "reset", "--hard", `origin/${handoffRepo.defaultBranch}`]);
+      await runCommand("git", ["-C", repoRoot, "checkout", "-B", branchName]);
+      await runCommand("git", ["-C", repoRoot, "add", "."]);
+      await runCommand("git", ["-C", repoRoot, "commit", "-m", `Codex Swarm proof for ${run.id}`]);
+      await runCommand("git", ["-C", repoRoot, "push", "-u", "origin", branchName, "--force"]);
+
+      const { stdout: prUrl } = await runCommand("gh", [
+        "pr",
+        "create",
+        "--repo",
+        handoffRepo.url.replace("https://github.com/", ""),
+        "--base",
+        handoffRepo.defaultBranch,
+        "--head",
+        branchName,
+        "--title",
+        `Codex Swarm proof ${run.id}`,
+        "--body",
+        `Automated publish-plus-handoff proof for run ${run.id}.`,
+        "--draft"
+      ], repoRoot);
+      const pullRequestUrl = prUrl.trim();
+      const prNumber = Number(pullRequestUrl.split("/").at(-1));
+
+      await api<RunDetail>(baseUrl, authToken, "POST", `/api/v1/runs/${run.id}/publish-branch`, {
+        branchName,
+        publishedBy: "codex-swarm-proof",
+        remoteName: "origin",
+        notes: "Automated hosted publish proof"
+      });
+
+      await api<RunDetail>(baseUrl, authToken, "POST", `/api/v1/runs/${run.id}/pull-request-handoff`, {
+        title: `Codex Swarm proof ${run.id}`,
+        body: `Automated publish-plus-handoff proof for run ${run.id}.`,
+        createdBy: "codex-swarm-proof",
+        provider: "github",
+        baseBranch: handoffRepo.defaultBranch,
+        headBranch: branchName,
+        url: pullRequestUrl,
+        number: prNumber,
+        status: "draft"
+      });
+
+      const handoffRun = await api<RunDetail>(baseUrl, authToken, "GET", `/api/v1/runs/${run.id}`);
+      if (handoffRun.handoffStatus !== "pr_open") {
+        throw new Error(`Proof failed: expected handoffStatus pr_open, saw ${handoffRun.handoffStatus}`);
+      }
+      if (!handoffRun.pullRequestUrl) {
+        throw new Error("Proof failed: run did not persist a pull request URL");
       }
 
       const workerNodes = await api<WorkerNode[]>(baseUrl, authToken, "GET", "/api/v1/worker-nodes");
@@ -419,6 +553,11 @@ async function main() {
           leaderToWorker: hasLeaderToWorker,
           workerToLeader: hasWorkerToLeader,
           workerToWorker: hasWorkerToWriter
+        },
+        handoff: {
+          branchName,
+          pullRequestUrl,
+          handoffStatus: handoffRun.handoffStatus
         }
       }, null, 2));
 
