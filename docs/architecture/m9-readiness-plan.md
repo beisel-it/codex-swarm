@@ -73,6 +73,10 @@ Deliver:
 - the designer/developer boundary
 - expected handoffs between design output and implementation output
 
+Checked-in deliverable target:
+
+- [docs/architecture/m9-designer-developer-playbook.md](/home/florian/codex-swarm/docs/architecture/m9-designer-developer-playbook.md)
+
 Done when:
 
 - the roles are concrete enough that an external operator can instantiate them
