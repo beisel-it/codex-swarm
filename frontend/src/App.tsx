@@ -398,6 +398,8 @@ const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? '').replace(/\/$/, ''
 const API_TOKEN = import.meta.env.VITE_API_TOKEN ?? 'codex-swarm-dev-token'
 const APPROVAL_RESOLVER = import.meta.env.VITE_APPROVAL_RESOLVER ?? 'frontend-dev'
 const REFRESH_MS = 15_000
+const UUID_PATTERN =
+  /^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$/
 
 const mockIdentity: IdentityContext = {
   principal: 'dev-user',
@@ -1241,6 +1243,10 @@ function buildApiUrl(path: string) {
   return API_BASE_URL ? `${API_BASE_URL}${path}` : path
 }
 
+function isUuid(value: string | null | undefined) {
+  return Boolean(value && UUID_PATTERN.test(value))
+}
+
 async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(buildApiUrl(path), {
     ...init,
@@ -1638,7 +1644,13 @@ function App() {
         }
 
         setData(nextData)
-        setSelectedRunId((current) => current || nextData.runs[0]?.id || '')
+        setSelectedRunId((current) => {
+          if (current && nextData.runs.some((run) => run.id === current)) {
+            return current
+          }
+
+          return nextData.runs[0]?.id || ''
+        })
         setErrorText('')
       } catch (error) {
         if (!active) {
@@ -1822,7 +1834,7 @@ function App() {
     let active = true
 
     async function hydrateAdminSurface() {
-      if (!selectedRunStableId || !selectedRepositoryStableId) {
+      if (data.source !== 'api' || !isUuid(selectedRunStableId) || !selectedRepositoryStableId) {
         return
       }
 
@@ -1849,7 +1861,7 @@ function App() {
     return () => {
       active = false
     }
-  }, [selectedRepositoryStableId, selectedRunStableId])
+  }, [data.source, selectedRepositoryStableId, selectedRunStableId])
 
   const blockedTasks = runTasks.filter((task) => task.status === 'blocked')
 
