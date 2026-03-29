@@ -48,6 +48,37 @@ type OpenAiTracingModule = {
 
 let tracingModulePromise: Promise<OpenAiTracingModule | null> | undefined;
 
+function normalizeLegacyGovernanceRole(role: unknown) {
+  return role === "platform-admin" ? "workspace_admin" : role;
+}
+
+function normalizeLegacyEventActor<T>(value: T): T {
+  if (!value || typeof value !== "object") {
+    return value;
+  }
+
+  const event = value as Record<string, unknown>;
+  const actor = event.actor;
+
+  if (!actor || typeof actor !== "object") {
+    return value;
+  }
+
+  const actorRecord = actor as Record<string, unknown>;
+  const roles = Array.isArray(actorRecord.roles)
+    ? actorRecord.roles.map((role) => normalizeLegacyGovernanceRole(role))
+    : actorRecord.roles;
+
+  return {
+    ...event,
+    actor: {
+      ...actorRecord,
+      role: normalizeLegacyGovernanceRole(actorRecord.role),
+      roles
+    }
+  } as T;
+}
+
 function createTraceId() {
   return `trace_${crypto.randomUUID().replaceAll("-", "")}`;
 }
@@ -213,7 +244,7 @@ export class ObservabilityService {
         return null;
       }
 
-      return controlPlaneEventSchema.parse(event);
+      return controlPlaneEventSchema.parse(normalizeLegacyEventActor(event));
     } catch (error) {
       console.error("[observability] timeline event persistence failed", error);
       return null;

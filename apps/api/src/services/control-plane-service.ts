@@ -110,6 +110,37 @@ type OwnershipBoundary = {
 };
 type TeamRecord = typeof teams.$inferSelect;
 
+function normalizeLegacyGovernanceRole(role: unknown) {
+  return role === "platform-admin" ? "workspace_admin" : role;
+}
+
+function normalizeLegacyEventActor<T>(value: T): T {
+  if (!value || typeof value !== "object") {
+    return value;
+  }
+
+  const event = value as Record<string, unknown>;
+  const actor = event.actor;
+
+  if (!actor || typeof actor !== "object") {
+    return value;
+  }
+
+  const actorRecord = actor as Record<string, unknown>;
+  const roles = Array.isArray(actorRecord.roles)
+    ? actorRecord.roles.map((role) => normalizeLegacyGovernanceRole(role))
+    : actorRecord.roles;
+
+  return {
+    ...event,
+    actor: {
+      ...actorRecord,
+      role: normalizeLegacyGovernanceRole(actorRecord.role),
+      roles
+    }
+  } as T;
+}
+
 function assertAccessBoundary(access: AccessBoundary | undefined): asserts access is AccessBoundary & {
   workspaceId: string;
   teamId: string;
@@ -1387,7 +1418,7 @@ export class ControlPlaneService {
       url: storage.url,
       sizeBytes: storage.sizeBytes,
       sha256: storage.sha256,
-      metadata: sql`jsonb_set(jsonb_set(jsonb_set(jsonb_set(metadata, '{storageKey}', to_jsonb(${storage.storageKey}::text), true), '{url}', to_jsonb(${storage.url}::text), true), '{sizeBytes}', to_jsonb(${storage.sizeBytes}), true), '{sha256}', to_jsonb(${storage.sha256}::text), true)`
+      metadata: sql`jsonb_set(jsonb_set(jsonb_set(jsonb_set(metadata, '{storageKey}', to_jsonb(${storage.storageKey}::text), true), '{url}', to_jsonb(${storage.url}::text), true), '{sizeBytes}', to_jsonb(${storage.sizeBytes}::int), true), '{sha256}', to_jsonb(${storage.sha256}::text), true)`
     }).where(eq(artifacts.id, artifactId)).returning();
 
     return this.mapArtifact(expectPersistedRecord(artifact, "artifact"));
@@ -1639,7 +1670,7 @@ export class ControlPlaneService {
     ]);
     const repository = await this.assertRepositoryExists(runDetail.repositoryId, access);
     const now = this.clock.now();
-    const mappedEvents = events.map((event) => controlPlaneEventSchema.parse(event));
+    const mappedEvents = events.map((event) => controlPlaneEventSchema.parse(normalizeLegacyEventActor(event)));
     const approvalAuditEntries = this.buildApprovalAuditEntries(
       approvalsList,
       runDetail,
@@ -1737,7 +1768,7 @@ export class ControlPlaneService {
           approval,
           run,
           repository,
-          eventRows.map((event) => controlPlaneEventSchema.parse(event))
+          eventRows.map((event) => controlPlaneEventSchema.parse(normalizeLegacyEventActor(event)))
         );
       });
 
