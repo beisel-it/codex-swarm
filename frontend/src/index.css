@@ -1,5 +1,6 @@
 :root,
 :root[data-theme='default'] {
+  color-scheme: light;
   --theme-bg-canvas: #f2efe8;
   --theme-bg-canvas-strong: #121723;
   --theme-surface-panel: rgba(255, 251, 245, 0.84);
@@ -80,6 +81,7 @@
 }
 
 :root[data-theme='gruvbox'] {
+  color-scheme: light;
   --theme-bg-canvas: #f2e5bc;
   --theme-bg-canvas-strong: #282828;
   --theme-surface-panel: rgba(251, 241, 199, 0.84);
@@ -157,6 +159,168 @@
   --theme-action-text: #fbf1c7;
   --theme-danger-surface: rgba(251, 223, 219, 0.78);
   --theme-accent-surface: rgba(250, 236, 196, 0.88);
+}
+
+:root[data-theme='gruvbox-dark'] {
+  color-scheme: dark;
+  --theme-bg-canvas: #1d2021;
+  --theme-bg-canvas-strong: #141617;
+  --theme-surface-panel: rgba(40, 40, 40, 0.9);
+  --theme-text-primary: #ebdbb2;
+  --theme-text-strong: #fbf1c7;
+  --theme-text-inverse: #1d2021;
+  --theme-text-muted: #bdae93;
+  --theme-accent: #fe8019;
+  --theme-positive: #8ec07c;
+  --theme-warning: #fabd2f;
+  --theme-danger: #fb4934;
+  --theme-shadow-strong: 0 28px 80px rgba(0, 0, 0, 0.5);
+  --theme-shadow-soft: 0 14px 32px rgba(0, 0, 0, 0.32);
+  --theme-bg-gradient-start: #282828;
+  --theme-bg-gradient-end: #1d2021;
+  --theme-bg-wash-accent: rgba(254, 128, 25, 0.18);
+  --theme-bg-wash-positive: rgba(142, 192, 124, 0.16);
+  --theme-grid-line: rgba(251, 241, 199, 0.05);
+  --theme-grid-mask: rgba(20, 22, 23, 0.72);
+  --theme-border-soft: rgba(235, 219, 178, 0.12);
+  --theme-border-strong: rgba(235, 219, 178, 0.18);
+  --theme-border-muted: rgba(235, 219, 178, 0.15);
+  --theme-border-subtle: rgba(235, 219, 178, 0.09);
+  --theme-border-faint: rgba(235, 219, 178, 0.06);
+  --theme-border-dashed: rgba(235, 219, 178, 0.22);
+  --theme-backdrop-sheen: rgba(251, 241, 199, 0.06);
+  --theme-backdrop-fill: rgba(29, 32, 33, 0.84);
+  --theme-hero-surface-start: rgba(50, 48, 47, 0.96);
+  --theme-hero-surface-end: rgba(29, 32, 33, 0.92);
+  --theme-hero-surface-base: rgba(40, 40, 40, 0.95);
+  --theme-hero-orb: rgba(142, 192, 124, 0.22);
+  --theme-tab-fill: rgba(50, 48, 47, 0.9);
+  --theme-metric-fill: #32302f;
+  --theme-metric-border: rgba(251, 241, 199, 0.14);
+  --theme-metric-label: #d5c4a1;
+  --theme-metric-value: #fbf1c7;
+  --theme-overview-start: rgba(40, 40, 40, 0.98);
+  --theme-overview-end: rgba(50, 48, 47, 0.95);
+  --theme-card-fill: rgba(40, 40, 40, 0.88);
+  --theme-card-fill-strong: rgba(50, 48, 47, 0.94);
+  --theme-card-fill-soft: rgba(60, 56, 54, 0.9);
+  --theme-card-fill-muted: rgba(40, 40, 40, 0.82);
+  --theme-card-fill-hero: rgba(50, 48, 47, 0.96);
+  --theme-card-fill-elevated: rgba(60, 56, 54, 0.92);
+  --theme-card-fill-selected: rgba(80, 73, 69, 0.96);
+  --theme-panel-fill-subtle: rgba(251, 241, 199, 0.04);
+  --theme-panel-border-inverse: rgba(251, 241, 199, 0.1);
+  --theme-divider-inverse: rgba(251, 241, 199, 0.14);
+  --theme-scrim: rgba(20, 22, 23, 0.72);
+  --theme-modal-fill: rgba(40, 40, 40, 0.98);
+  --theme-modal-shadow: 0 28px 72px rgba(0, 0, 0, 0.54);
+  --theme-pill-fill: rgba(251, 241, 199, 0.07);
+  --theme-pill-muted: rgba(251, 241, 199, 0.1);
+  --theme-pill-faint: rgba(251, 241, 199, 0.05);
+  --theme-success-fill: rgba(142, 192, 124, 0.18);
+  --theme-success-fill-soft: rgba(142, 192, 124, 0.14);
+  --theme-success-fill-faint: rgba(142, 192, 124, 0.09);
+  --theme-success-fill-strong: rgba(142, 192, 124, 0.22);
+  --theme-success-border: rgba(142, 192, 124, 0.38);
+  --theme-warning-fill: rgba(250, 189, 47, 0.18);
+  --theme-danger-fill: rgba(251, 73, 52, 0.18);
+  --theme-danger-border: rgba(251, 73, 52, 0.3);
+  --theme-accent-fill: rgba(254, 128, 25, 0.2);
+  --theme-accent-fill-soft: rgba(254, 128, 25, 0.24);
+  --theme-accent-fill-faint: rgba(254, 128, 25, 0.09);
+  --theme-accent-fill-ghost: rgba(254, 128, 25, 0.04);
+  --theme-accent-focus: rgba(254, 128, 25, 0.3);
+  --theme-accent-border: rgba(254, 128, 25, 0.42);
+  --theme-accent-border-strong: rgba(254, 128, 25, 0.54);
+  --theme-run-summary-fade-start: rgba(29, 32, 33, 0);
+  --theme-run-summary-fade-end: rgba(29, 32, 33, 0.94);
+  --theme-surface-handle: rgba(251, 241, 199, 0.22);
+  --theme-surface-mask: rgba(251, 241, 199, 0.16);
+  --theme-surface-ghost: rgba(251, 241, 199, 0.05);
+  --theme-action-text: #1d2021;
+  --theme-danger-surface: rgba(251, 73, 52, 0.12);
+  --theme-accent-surface: rgba(254, 128, 25, 0.11);
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --theme-bg-canvas: #09111d;
+  --theme-bg-canvas-strong: #030712;
+  --theme-surface-panel: rgba(13, 18, 31, 0.88);
+  --theme-text-primary: #d6dde8;
+  --theme-text-strong: #f7f9fc;
+  --theme-text-inverse: #eef4fb;
+  --theme-text-muted: #93a1b8;
+  --theme-accent: #e7a35d;
+  --theme-positive: #62c6a2;
+  --theme-warning: #d4a34d;
+  --theme-danger: #ef7373;
+  --theme-shadow-strong: 0 28px 80px rgba(0, 0, 0, 0.46);
+  --theme-shadow-soft: 0 14px 32px rgba(0, 0, 0, 0.28);
+  --theme-bg-gradient-start: #111a2d;
+  --theme-bg-gradient-end: #07101c;
+  --theme-bg-wash-accent: rgba(231, 163, 93, 0.16);
+  --theme-bg-wash-positive: rgba(98, 198, 162, 0.16);
+  --theme-grid-line: rgba(255, 255, 255, 0.05);
+  --theme-grid-mask: rgba(3, 7, 18, 0.7);
+  --theme-border-soft: rgba(255, 255, 255, 0.11);
+  --theme-border-strong: rgba(255, 255, 255, 0.17);
+  --theme-border-muted: rgba(255, 255, 255, 0.14);
+  --theme-border-subtle: rgba(255, 255, 255, 0.08);
+  --theme-border-faint: rgba(255, 255, 255, 0.05);
+  --theme-border-dashed: rgba(255, 255, 255, 0.2);
+  --theme-backdrop-sheen: rgba(255, 255, 255, 0.06);
+  --theme-backdrop-fill: rgba(12, 18, 31, 0.84);
+  --theme-hero-surface-start: rgba(18, 25, 41, 0.96);
+  --theme-hero-surface-end: rgba(11, 17, 29, 0.92);
+  --theme-hero-surface-base: rgba(9, 14, 25, 0.95);
+  --theme-hero-orb: rgba(98, 198, 162, 0.26);
+  --theme-tab-fill: rgba(14, 20, 34, 0.86);
+  --theme-metric-fill: #172033;
+  --theme-metric-border: rgba(255, 255, 255, 0.14);
+  --theme-metric-label: #9eb0c7;
+  --theme-metric-value: #f5f8fc;
+  --theme-overview-start: rgba(13, 19, 33, 0.98);
+  --theme-overview-end: rgba(22, 31, 50, 0.95);
+  --theme-card-fill: rgba(16, 23, 38, 0.88);
+  --theme-card-fill-strong: rgba(20, 29, 45, 0.94);
+  --theme-card-fill-soft: rgba(18, 26, 42, 0.9);
+  --theme-card-fill-muted: rgba(15, 22, 36, 0.82);
+  --theme-card-fill-hero: rgba(22, 31, 49, 0.98);
+  --theme-card-fill-elevated: rgba(22, 31, 49, 0.94);
+  --theme-card-fill-selected: rgba(35, 54, 84, 0.96);
+  --theme-panel-fill-subtle: rgba(255, 255, 255, 0.04);
+  --theme-panel-border-inverse: rgba(255, 255, 255, 0.09);
+  --theme-divider-inverse: rgba(255, 255, 255, 0.13);
+  --theme-scrim: rgba(2, 6, 15, 0.7);
+  --theme-modal-fill: rgba(14, 21, 36, 0.98);
+  --theme-modal-shadow: 0 28px 72px rgba(0, 0, 0, 0.5);
+  --theme-pill-fill: rgba(255, 255, 255, 0.07);
+  --theme-pill-muted: rgba(255, 255, 255, 0.09);
+  --theme-pill-faint: rgba(255, 255, 255, 0.05);
+  --theme-success-fill: rgba(98, 198, 162, 0.18);
+  --theme-success-fill-soft: rgba(98, 198, 162, 0.14);
+  --theme-success-fill-faint: rgba(98, 198, 162, 0.09);
+  --theme-success-fill-strong: rgba(98, 198, 162, 0.22);
+  --theme-success-border: rgba(98, 198, 162, 0.36);
+  --theme-warning-fill: rgba(212, 163, 77, 0.18);
+  --theme-danger-fill: rgba(239, 115, 115, 0.18);
+  --theme-danger-border: rgba(239, 115, 115, 0.3);
+  --theme-accent-fill: rgba(231, 163, 93, 0.18);
+  --theme-accent-fill-soft: rgba(231, 163, 93, 0.22);
+  --theme-accent-fill-faint: rgba(231, 163, 93, 0.08);
+  --theme-accent-fill-ghost: rgba(231, 163, 93, 0.03);
+  --theme-accent-focus: rgba(231, 163, 93, 0.3);
+  --theme-accent-border: rgba(231, 163, 93, 0.4);
+  --theme-accent-border-strong: rgba(231, 163, 93, 0.52);
+  --theme-run-summary-fade-start: rgba(7, 12, 21, 0);
+  --theme-run-summary-fade-end: rgba(7, 12, 21, 0.94);
+  --theme-surface-handle: rgba(255, 255, 255, 0.2);
+  --theme-surface-mask: rgba(255, 255, 255, 0.16);
+  --theme-surface-ghost: rgba(255, 255, 255, 0.04);
+  --theme-action-text: #07111b;
+  --theme-danger-surface: rgba(239, 115, 115, 0.12);
+  --theme-accent-surface: rgba(231, 163, 93, 0.11);
 }
 
 :root {
@@ -896,7 +1060,7 @@ code {
 
 .mini-stat span {
   display: block;
-  color: var(--text-subtle);
+  color: var(--muted);
 }
 
 .mini-stat strong {
@@ -1057,7 +1221,7 @@ code {
 .template-preview > p {
   margin: 0;
   font-size: 0.82rem;
-  color: var(--text-subtle);
+  color: var(--muted);
 }
 
 .member-chip-grid {
@@ -1082,7 +1246,7 @@ code {
 
 .member-chip span {
   font-size: 0.68rem;
-  color: var(--text-subtle);
+  color: var(--muted);
 }
 
 .modal-backdrop {
@@ -1113,7 +1277,7 @@ code {
 }
 
 .confirm-modal p:last-of-type {
-  color: var(--text-subtle);
+  color: var(--muted);
 }
 
 .action-row-inline {
