@@ -4,6 +4,7 @@ import { ZodError } from "zod";
 import { getConfig } from "./config.js";
 import { HttpError } from "./lib/http-error.js";
 import { authPlugin } from "./plugins/auth.js";
+import { corsPlugin } from "./plugins/cors.js";
 import { dependenciesPlugin } from "./plugins/dependencies.js";
 import { agentRoutes } from "./routes/agents.js";
 import { adminRoutes } from "./routes/admin.js";
@@ -183,6 +184,7 @@ export async function buildApp(options: BuildAppOptions = {}) {
     await app.register(dependenciesPlugin);
   }
 
+  await app.register(corsPlugin);
   await app.register(authPlugin);
   await app.register(healthRoutes);
   await app.register(adminRoutes, { prefix: "/api/v1" });

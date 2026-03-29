@@ -51,6 +51,7 @@ const configSchema = z.object({
   DATABASE_URL: z.string().min(1).default("postgres://postgres:postgres@localhost:5432/codex_swarm"),
   ARTIFACT_STORAGE_ROOT: z.string().min(1).default(".swarm/artifacts"),
   ARTIFACT_BASE_URL: z.string().url().default("http://localhost:3000"),
+  CORS_ALLOWED_ORIGINS: createCsvSchema(z.string().min(1), []),
   CONTROL_PLANE_SCHEMA_VERSION: z.string().min(1).default(CURRENT_CONTROL_PLANE_SCHEMA_VERSION),
   CONTROL_PLANE_CONFIG_VERSION: z.string().min(1).default(CURRENT_CONTROL_PLANE_CONFIG_VERSION),
   DEV_AUTH_TOKEN: z.string().min(1).default("codex-swarm-dev-token"),
