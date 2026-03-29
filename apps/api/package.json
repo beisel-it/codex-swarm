@@ -10,7 +10,8 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
     "db:migrate": "tsx src/db/migrate.ts",
-    "db:status": "tsx src/db/check-version.ts"
+    "db:status": "tsx src/db/check-version.ts",
+    "ops:smoke": "node ./scripts/ops/single-host-smoke.mjs"
   },
   "dependencies": {
     "@codex-swarm/contracts": "workspace:*",

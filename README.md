@@ -51,6 +51,7 @@ Operational tooling:
 - `corepack pnpm ops:restore` restores a snapshot from `BACKUP_FILE` into `RESTORE_DATABASE_URL` or `DATABASE_URL`.
 - `corepack pnpm ops:drill` creates a scratch Postgres database, restores a snapshot, and records counts/timings.
 - `corepack pnpm ops:perf` runs a simple concurrent HTTP latency check against a live API base URL.
+- `corepack pnpm ops:smoke` drives a live single-host smoke flow against `SMOKE_BASE_URL`, covering repository/run creation, persisted plan artifact linkage, delegation messaging, and operator-visible verification output.
 
 Operations docs:
 
