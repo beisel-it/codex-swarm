@@ -94,6 +94,7 @@ The hosted instance runs as enabled `systemd --user` services:
 - `codex-swarm-api.service`
 - `codex-swarm-frontend.service`
 - `codex-swarm-worker.service`
+- optional `codex-swarm-worker@.service` instances for local multi-worker execution on the same host
 
 With user lingering enabled, these services restart automatically on boot
 without exposing the database or cache beyond loopback.
@@ -103,6 +104,37 @@ without exposing the database or cache beyond loopback.
 The local host should also run:
 
 - `codex-swarm-worker.service`
+
+If you want the hosted instance to execute several tasks in parallel on the same
+machine, use the checked-in worker template:
+
+- `codex-swarm-worker@.service`
+
+Bootstrap four local worker instances with:
+
+```bash
+corepack pnpm ops:tailnet:workers:bootstrap 4
+```
+
+This extends the existing primary worker service and writes per-worker env
+overrides for workers `2..N` under:
+
+- `~/.config/codex-swarm/workers/worker-2.env`
+- `~/.config/codex-swarm/workers/worker-3.env`
+- `~/.config/codex-swarm/workers/worker-4.env`
+
+Each worker gets:
+
+- its own `CODEX_SWARM_NODE_ID`
+- its own `CODEX_SWARM_NODE_NAME`
+- its own workspace root under `CODEX_SWARM_WORKSPACE_ROOT/nodes/`
+- the same tailnet-only API and local Codex executor
+
+Run a real hosted multi-agent proof with:
+
+```bash
+corepack pnpm ops:tailnet:multi-agent-proof
+```
 
 This service registers a real worker node with the hosted control plane and
 executes claimed dispatch assignments on the local host.

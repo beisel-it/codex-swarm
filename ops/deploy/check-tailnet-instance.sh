@@ -23,7 +23,11 @@ systemctl --user --no-pager --full status \
   codex-swarm-redis.service \
   codex-swarm-api.service \
   codex-swarm-frontend.service \
-  codex-swarm-worker.service
+  codex-swarm-worker.service || true
+
+echo
+echo "worker services:"
+systemctl --user --no-pager --full --plain list-units 'codex-swarm-worker*.service' || true
 
 echo
 echo "listeners:"
@@ -41,7 +45,7 @@ curl -fsS "http://${CODEX_SWARM_TAILNET_DNS}:${CODEX_SWARM_API_PORT}/api/v1/work
 echo
 
 echo "recent worker logs:"
-journalctl --user -u codex-swarm-worker.service -n 20 --no-pager || true
+journalctl --user -u 'codex-swarm-worker*.service' -n 40 --no-pager || true
 
 echo
 echo "worker dispatch assignments:"

@@ -183,8 +183,9 @@ export async function runManagedWorkerDispatch(
       const stopped = await runtime.stopSession(persistedSession.id);
       supervisorStatus = stopped.supervisor.status === "failed" ? "failed" : "stopped";
     } else {
+      const runtimeSessionId = sessionId;
       registry.seed({
-        sessionId,
+        sessionId: runtimeSessionId,
         runId: assignment.runId,
         agentId: assignment.agentId,
         worktreePath: workspace.path
@@ -195,7 +196,7 @@ export async function runManagedWorkerDispatch(
         supervisor,
         executeTool: input.executeTool
       });
-      const started = await runtime.startSession(sessionId, assignment.prompt);
+      const started = await runtime.startSession(runtimeSessionId, assignment.prompt);
       await checkpointRunBudget(
         input.request,
         assignment.runId,
@@ -236,7 +237,7 @@ export async function runManagedWorkerDispatch(
         }
       );
       responseOutput = started.response.output;
-      const stopped = await runtime.stopSession(sessionId);
+      const stopped = await runtime.stopSession(runtimeSessionId);
       supervisorStatus = stopped.supervisor.status === "failed" ? "failed" : "stopped";
     }
 

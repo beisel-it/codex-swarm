@@ -2286,42 +2286,56 @@ function App() {
             </section>
           </div>
 
-          <div className="action-row action-row-inline">
-            <button type="button" className="action-button" onClick={handleStartSelectedRun} disabled={actionPending || !selectedRun}>
-              Start selected run
-            </button>
-            {errorText ? <p className="control-error">{errorText}</p> : null}
-          </div>
+          {errorText ? <p className="control-error control-error-inline">{errorText}</p> : null}
 
           <div className="run-stack">
             {data.runs.map((run) => (
-              <button
-                key={run.id}
-                type="button"
-                className={`run-card ${run.id === selectedRun?.id ? 'is-selected' : ''}`}
-                onClick={() => {
-                  startTransition(() => setSelectedRunId(run.id))
-                }}
-              >
-                <div className="run-card-topline">
-                  <span className={`tone-chip tone-${runStatusTone[run.status]}`}>
-                    {formatLabel(run.status)}
-                  </span>
-                  <span className="run-timestamp">{formatDate(run.updatedAt)}</span>
-                </div>
-                <h3>{run.goal}</h3>
-                <p>
-                  {run.pullRequestUrl
-                    ? `PR #${run.pullRequestNumber ?? 'pending'} · ${formatLabel(run.pullRequestStatus ?? 'open')}`
-                    : run.publishedBranch ?? run.branchName ?? 'Branch not assigned yet'}
-                </p>
-                <div className="run-card-meta">
-                  <span className="role-chip">
-                    {data.repositories.find((repository) => repository.id === run.repositoryId)?.provider ?? 'other'}
-                  </span>
-                  <span className={`tone-chip tone-${handoffTone[run.handoffStatus]}`}>{formatLabel(run.handoffStatus)}</span>
-                </div>
-              </button>
+              <div key={run.id} className={`run-entry ${run.id === selectedRun?.id ? 'is-selected' : ''}`}>
+                <button
+                  type="button"
+                  className={`run-card ${run.id === selectedRun?.id ? 'is-selected' : ''}`}
+                  onClick={() => {
+                    startTransition(() => setSelectedRunId(run.id))
+                  }}
+                >
+                  <div className="run-card-topline">
+                    <span className="run-timestamp">{formatDate(run.updatedAt)}</span>
+                    <div className="run-status-badges">
+                      <div className="run-status-badge">
+                        <span className="badge-label">Run</span>
+                        <span className={`tone-chip tone-${runStatusTone[run.status]}`}>
+                          {formatLabel(run.status)}
+                        </span>
+                      </div>
+                      <div className="run-status-badge">
+                        <span className="badge-label">Handoff</span>
+                        <span className={`tone-chip tone-${handoffTone[run.handoffStatus]}`}>
+                          {formatLabel(run.handoffStatus)}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                  <h3>{run.goal}</h3>
+                  <p>
+                    {run.pullRequestUrl
+                      ? `PR #${run.pullRequestNumber ?? 'pending'} · ${formatLabel(run.pullRequestStatus ?? 'open')}`
+                      : run.publishedBranch ?? run.branchName ?? 'Branch not assigned yet'}
+                  </p>
+                  <div className="run-card-meta">
+                    <span className="role-chip">
+                      {data.repositories.find((repository) => repository.id === run.repositoryId)?.provider ?? 'other'}
+                    </span>
+                    <span className="priority-chip">
+                      {run.publishedBranch ?? run.branchName ?? 'Branch not assigned yet'}
+                    </span>
+                  </div>
+                </button>
+                {run.id === selectedRun?.id ? (
+                  <button type="button" className="action-button run-start-button" onClick={handleStartSelectedRun} disabled={actionPending || !selectedRun}>
+                    Start selected run
+                  </button>
+                ) : null}
+              </div>
             ))}
           </div>
 

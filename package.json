@@ -27,6 +27,8 @@
     "ops:perf": "node ./apps/api/scripts/ops/perf-envelope.mjs",
     "ops:smoke": "node ./apps/api/scripts/ops/single-host-smoke.mjs",
     "ops:tailnet:status": "bash ./ops/deploy/check-tailnet-instance.sh",
-    "ops:tailnet:tui": "bash ./ops/deploy/run-tailnet-tui.sh"
+    "ops:tailnet:tui": "bash ./ops/deploy/run-tailnet-tui.sh",
+    "ops:tailnet:workers:bootstrap": "bash ./ops/deploy/bootstrap-tailnet-workers.sh",
+    "ops:tailnet:multi-agent-proof": "bash ./ops/deploy/run-tailnet-multi-agent-proof.sh"
   }
 }

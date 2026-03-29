@@ -797,6 +797,25 @@ class FakeVerticalSliceControlPlane {
     return assignment;
   }
 
+  async attachSessionToWorkerDispatchAssignment(assignmentId: string, sessionId: string) {
+    const assignment = this.workerDispatchAssignments.find((candidate) => candidate.id === assignmentId);
+
+    if (!assignment) {
+      throw new HttpError(404, `worker dispatch assignment ${assignmentId} not found`);
+    }
+
+    const run = await this.getRun(assignment.runId);
+    const session = run.sessions.find((candidate: any) => candidate.id === sessionId);
+
+    if (!session) {
+      throw new HttpError(404, `session ${sessionId} not found`);
+    }
+
+    assignment.sessionId = sessionId;
+    assignment.updatedAt = new Date("2026-03-28T12:05:30.000Z");
+    return assignment;
+  }
+
   async claimNextWorkerDispatch(nodeId: string) {
     const workerNode = this.workerNodes.find((candidate) => candidate.id === nodeId);
 
@@ -871,6 +890,12 @@ class FakeVerticalSliceControlPlane {
       assignment.state = "completed";
       assignment.completedAt = new Date("2026-03-28T12:10:00.000Z");
       assignment.updatedAt = new Date("2026-03-28T12:10:00.000Z");
+      if (session) {
+        session.workerNodeId = input.nodeId;
+        session.stickyNodeId = assignment.stickyNodeId ?? input.nodeId;
+        session.state = "stopped";
+        session.staleReason = null;
+      }
       return assignment;
     }
 
@@ -5590,6 +5615,203 @@ describe("buildApp", () => {
       expect(artifactContentResponse.statusCode).toBe(200);
       expect(artifactContentResponse.body).toContain("\"status\": \"passed\"");
       expect(artifactContentResponse.body).toContain("\"stdout\": \"validation ok");
+    } finally {
+      await rm(worktreeRoot, { recursive: true, force: true });
+      await rm(repoRoot, { recursive: true, force: true });
+      await app.close();
+    }
+  });
+
+  it("bootstraps a fresh worker session without a forced retry", async () => {
+    const verticalSlice = new FakeVerticalSliceControlPlane();
+    const app = await buildApp({
+      config: getConfig({
+        NODE_ENV: "test",
+        PORT: 3000,
+        HOST: "127.0.0.1",
+        DATABASE_URL: "postgres://unused/test",
+        DEV_AUTH_TOKEN: "test-token",
+        OPENAI_TRACING_DISABLED: true
+      }),
+      controlPlane: verticalSlice as unknown as ControlPlaneService
+    });
+
+    const headers = {
+      authorization: "Bearer test-token"
+    };
+    const repoRoot = await mkdtemp(join(tmpdir(), "codex-swarm-bootstrap-dispatch-repo-"));
+    const worktreeRoot = await mkdtemp(join(tmpdir(), "codex-swarm-bootstrap-dispatch-"));
+
+    try {
+      await writeFile(join(repoRoot, "README.md"), "bootstrap worker dispatch\n", "utf8");
+      execFileSync("git", ["init", "--initial-branch=main"], { cwd: repoRoot, stdio: "pipe" });
+      execFileSync("git", ["config", "user.name", "Codex Swarm"], { cwd: repoRoot, stdio: "pipe" });
+      execFileSync("git", ["config", "user.email", "codex-swarm@example.com"], { cwd: repoRoot, stdio: "pipe" });
+      execFileSync("git", ["add", "README.md"], { cwd: repoRoot, stdio: "pipe" });
+      execFileSync("git", ["commit", "-m", "initial"], { cwd: repoRoot, stdio: "pipe" });
+      (verticalSlice as any).repositories[0].url = repoRoot;
+
+      const request: LeaderPlanningLoopRequest = async <T>(
+        method: string,
+        path: string,
+        payload?: Record<string, unknown>
+      ) => {
+        const response = await (app.inject as any)({
+          method,
+          url: path,
+          headers,
+          ...(payload ? { payload } : {})
+        }) as {
+          statusCode: number;
+          body: string;
+          json(): T;
+        };
+
+        if (response.statusCode >= 400) {
+          throw new Error(`${method} ${path} failed with ${response.statusCode}: ${response.body}`);
+        }
+
+        return response.json() as T;
+      };
+
+      const runResponse = await app.inject({
+        method: "POST",
+        url: "/api/v1/runs",
+        headers,
+        payload: {
+          repositoryId: ids.repository,
+          goal: "Bootstrap a fresh worker session",
+          concurrencyCap: 1,
+          metadata: {}
+        }
+      });
+
+      expect(runResponse.statusCode).toBe(201);
+
+      const agentResponse = await app.inject({
+        method: "POST",
+        url: "/api/v1/agents",
+        headers,
+        payload: {
+          runId: ids.run,
+          name: "worker-bootstrap",
+          role: "backend-developer",
+          status: "idle"
+        }
+      });
+
+      expect(agentResponse.statusCode).toBe(201);
+      const agentId = ids.agent;
+
+      const taskResponse = await app.inject({
+        method: "POST",
+        url: "/api/v1/tasks",
+        headers,
+        payload: {
+          runId: ids.run,
+          title: "Bootstrap worker dispatch task",
+          description: "Start a fresh worker session and complete the task in one pass.",
+          role: "backend-developer",
+          priority: 1,
+          dependencyIds: [],
+          acceptanceCriteria: ["worker dispatch completes without a bootstrap retry"]
+        }
+      });
+
+      expect(taskResponse.statusCode).toBe(201);
+      const taskId = taskResponse.json().id as string;
+
+      const dispatchResponse = await app.inject({
+        method: "POST",
+        url: "/api/v1/worker-dispatch-assignments",
+        headers,
+        payload: {
+          runId: ids.run,
+          taskId,
+          agentId,
+          repositoryId: ids.repository,
+          repositoryName: "codex-swarm",
+          stickyNodeId: ids.workerNode,
+          requiredCapabilities: ["remote"],
+          worktreePath: join(worktreeRoot, "worker-bootstrap"),
+          prompt: "Bootstrap the worker session",
+          profile: "default",
+          sandbox: "workspace-write",
+          approvalPolicy: "on-request"
+        }
+      });
+
+      expect(dispatchResponse.statusCode).toBe(201);
+
+      const result = await runManagedWorkerDispatch({
+        request,
+        nodeId: ids.workerNode,
+        workspaceRoot: process.cwd(),
+        supervisorCommand: [
+          process.execPath,
+          "--input-type=module",
+          "-e",
+          "setInterval(() => {}, 1000);"
+        ],
+        executeTool: async () => ({
+          threadId: "thread-worker-bootstrap",
+          output: "bootstrap completed"
+        })
+      });
+
+      expect(result).toMatchObject({
+        status: "completed",
+        output: "bootstrap completed",
+        supervisorStatus: "stopped"
+      });
+
+      const completedAssignments = await app.inject({
+        method: "GET",
+        url: `/api/v1/worker-dispatch-assignments?runId=${ids.run}&state=completed`,
+        headers
+      });
+
+      expect(completedAssignments.statusCode).toBe(200);
+      expect(completedAssignments.json()).toHaveLength(1);
+      expect(completedAssignments.json()[0]).toMatchObject({
+        id: dispatchResponse.json().id,
+        state: "completed",
+        attempt: 0
+      });
+
+      const runDetailResponse = await app.inject({
+        method: "GET",
+        url: `/api/v1/runs/${ids.run}`,
+        headers
+      });
+
+      expect(runDetailResponse.statusCode).toBe(200);
+      const createdSession = runDetailResponse.json().sessions[0];
+      expect(createdSession).toMatchObject({
+        agentId,
+        threadId: "thread-worker-bootstrap",
+        state: "stopped"
+      });
+
+      const transcriptResponse = await app.inject({
+        method: "GET",
+        url: `/api/v1/sessions/${createdSession.id}/transcript`,
+        headers
+      });
+
+      expect(transcriptResponse.statusCode).toBe(200);
+      expect(transcriptResponse.json()).toEqual([
+        expect.objectContaining({
+          sessionId: createdSession.id,
+          kind: "prompt",
+          text: "Bootstrap the worker session"
+        }),
+        expect.objectContaining({
+          sessionId: createdSession.id,
+          kind: "response",
+          text: "bootstrap completed"
+        })
+      ]);
     } finally {
       await rm(worktreeRoot, { recursive: true, force: true });
       await rm(repoRoot, { recursive: true, force: true });
