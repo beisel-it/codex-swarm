@@ -1,4 +1,6 @@
 import { execFile } from "node:child_process";
+import { readFile } from "node:fs/promises";
+import { isAbsolute, resolve } from "node:path";
 import { promisify } from "node:util";
 import type {
   Repository,
@@ -275,9 +277,16 @@ async function synchronizeRunBranchContext(
 async function recordWorkerOutcomeArtifacts(
   request: WorkerDispatchOrchestrationRequest,
   assignment: WorkerDispatchAssignment,
+  workspacePath: string,
   outcome: ReturnType<typeof parseWorkerTaskOutcome>
 ) {
   for (const artifact of outcome.artifacts ?? []) {
+    const resolvedArtifactPath = isAbsolute(artifact.path)
+      ? artifact.path
+      : resolve(workspacePath, artifact.path);
+    const contentBase64 = artifact.contentBase64
+      ?? (await readFile(resolvedArtifactPath)).toString("base64");
+
     await request(
       "POST",
       "/api/v1/artifacts",
@@ -287,10 +296,12 @@ async function recordWorkerOutcomeArtifacts(
         kind: artifact.kind,
         path: artifact.path,
         contentType: artifact.contentType,
-        ...(artifact.contentBase64 ? { contentBase64: artifact.contentBase64 } : {}),
+        contentBase64,
         metadata: {
           source: "worker-outcome",
           assignmentId: assignment.id,
+          workspacePath,
+          resolvedArtifactPath,
           ...(artifact.metadata ?? {})
         }
       }
@@ -514,6 +525,7 @@ export async function runManagedWorkerDispatch(
       await recordWorkerOutcomeArtifacts(
         input.request,
         assignment,
+        workspace.path,
         outcome
       );
 
