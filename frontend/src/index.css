@@ -79,7 +79,7 @@ code {
 .backdrop-grid {
   position: absolute;
   inset: 24px 0 auto;
-  height: 150px;
+  height: 76px;
   border-radius: 3px;
   border: 1px solid rgba(18, 23, 35, 0.08);
   background:
@@ -98,10 +98,10 @@ code {
 
 .hero-panel {
   display: grid;
-  grid-template-columns: minmax(0, 1.45fr) minmax(320px, 0.95fr);
-  align-items: end;
-  gap: 14px;
-  padding: 16px 18px;
+  grid-template-columns: minmax(0, 1.6fr) minmax(360px, 1fr);
+  align-items: start;
+  gap: 8px;
+  padding: 8px 12px;
   border-radius: 3px;
   background:
     linear-gradient(135deg, rgba(255, 251, 245, 0.88), rgba(255, 246, 238, 0.7)),
@@ -114,11 +114,17 @@ code {
 .hero-panel::after {
   content: '';
   position: absolute;
-  inset: auto -36px -52px auto;
-  width: 160px;
-  height: 160px;
+  inset: auto -28px -40px auto;
+  width: 96px;
+  height: 96px;
   background: radial-gradient(circle, rgba(13, 122, 111, 0.26), transparent 64%);
   pointer-events: none;
+}
+
+.hero-copy {
+  display: grid;
+  align-content: start;
+  gap: 4px;
 }
 
 .eyebrow,
@@ -136,10 +142,10 @@ code {
 }
 
 .hero-copy h1 {
-  margin: 0 0 6px;
+  margin: 0;
   font-family: var(--serif);
-  font-size: clamp(1.7rem, 3vw, 2.5rem);
-  line-height: 1;
+  font-size: clamp(1.05rem, 1.6vw, 1.35rem);
+  line-height: 0.95;
   letter-spacing: -0.05em;
   color: var(--text-strong);
 }
@@ -155,26 +161,28 @@ code {
 .lede {
   max-width: none;
   margin: 0;
-  font-size: 0.9rem;
-  line-height: 1.45;
+  font-size: 0.78rem;
+  line-height: 1.25;
   color: var(--muted);
 }
 
 .hero-metrics {
-  display: grid;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-content: start;
   gap: 8px;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
 .view-switcher {
   display: flex;
   gap: 12px;
-  margin-top: 12px;
+  margin-top: 8px;
 }
 
 .view-tab {
-  min-height: 42px;
-  padding: 0 16px;
+  min-height: 34px;
+  padding: 0 12px;
   border-radius: 3px;
   border: 1px solid rgba(18, 23, 35, 0.12);
   background: rgba(255, 255, 255, 0.62);
@@ -187,24 +195,42 @@ code {
 }
 
 .metric-card {
-  padding: 12px 14px;
+  display: grid;
+  grid-template-columns: auto auto;
+  align-items: center;
+  column-gap: 10px;
+  row-gap: 2px;
+  min-height: 0;
+  padding: 6px 10px;
   border-radius: 3px;
   background: var(--bg-deep);
   color: var(--text-inverse);
   border: 1px solid rgba(255, 255, 255, 0.12);
+  min-width: 180px;
 }
 
 .metric-card strong {
   display: block;
-  margin: 10px 0 6px;
-  font-size: clamp(1.4rem, 2.3vw, 1.85rem);
+  margin: 0;
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  justify-self: end;
+  font-size: clamp(1rem, 1.4vw, 1.2rem);
   line-height: 1;
   letter-spacing: -0.06em;
 }
 
 .metric-card span {
+  grid-column: 1;
+  font-size: 0.68rem;
   color: rgba(247, 240, 232, 0.7);
-  line-height: 1.5;
+  line-height: 1.2;
+}
+
+.metric-card p {
+  margin: 0;
+  font-size: 0.62rem;
+  letter-spacing: 0.1em;
 }
 
 .board-layout {
@@ -1041,7 +1067,7 @@ code {
   }
 
   .hero-metrics {
-    grid-template-columns: 1fr;
+    justify-content: flex-start;
   }
 
   .panel-runs {
@@ -1081,7 +1107,7 @@ code {
   }
 
   .hero-copy h1 {
-    font-size: 2rem;
+    font-size: 1rem;
   }
 
   .overview-grid,
