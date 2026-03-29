@@ -4,6 +4,12 @@ import { createServer } from "node:http";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { describe, expect, it } from "vitest";
+import type {
+  Repository,
+  RunDetail,
+  WorkerDispatchAssignment,
+  WorkerNodeRuntime
+} from "@codex-swarm/contracts";
 
 import {
   buildCodexServerCommand,
@@ -19,6 +25,7 @@ import {
   materializePlanArtifact,
   createWorktreePath
 } from "../src/runtime.js";
+import { claimAndProvisionDispatchWorkspace } from "../src/control-plane.js";
 import { SessionRegistry } from "../src/session-registry.js";
 
 function git(args: string[], cwd: string) {
@@ -26,6 +33,27 @@ function git(args: string[], cwd: string) {
     cwd,
     stdio: "pipe"
   });
+}
+
+function createRuntime(workspaceRoot: string): WorkerNodeRuntime {
+  return {
+    nodeId: "node-a",
+    nodeName: "node-a",
+    state: "active",
+    workspaceRoot,
+    codexCommand: ["codex"],
+    codexTransport: {
+      kind: "stdio"
+    },
+    controlPlaneUrl: "http://127.0.0.1",
+    artifactBaseUrl: "http://127.0.0.1/artifacts",
+    postgresUrl: "postgres://worker:test@localhost:5432/codex",
+    redisUrl: "redis://localhost:6379/0",
+    queueKeyPrefix: "codex-swarm",
+    capabilities: ["node"],
+    credentialEnvNames: [],
+    heartbeatIntervalSeconds: 30
+  };
 }
 
 describe("worker runtime helpers", () => {
@@ -293,6 +321,211 @@ describe("worker runtime helpers", () => {
       expect(await readFile(join(mountPath, "README.md"), "utf8")).toBe("hello from mount\n");
     } finally {
       await rm(sourceRoot, { recursive: true, force: true });
+      await rm(workspaceRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("claims dispatch work from the control plane and provisions isolated worktrees", async () => {
+    const repoRoot = await mkdtemp(join(tmpdir(), "codex-swarm-provision-source-"));
+    const workspaceRoot = await mkdtemp(join(tmpdir(), "codex-swarm-provision-workspaces-"));
+
+    try {
+      git(["init", "--initial-branch=main"], repoRoot);
+      git(["config", "user.name", "Codex Swarm"], repoRoot);
+      git(["config", "user.email", "codex-swarm@example.com"], repoRoot);
+      await writeFile(join(repoRoot, "README.md"), "hello from source\n", "utf8");
+      git(["add", "README.md"], repoRoot);
+      git(["commit", "-m", "initial"], repoRoot);
+
+      const assignments: WorkerDispatchAssignment[] = [
+        {
+          id: "11111111-1111-4111-8111-111111111111",
+          runId: "22222222-2222-4222-8222-222222222222",
+          taskId: "33333333-3333-4333-8333-333333333333",
+          agentId: "44444444-4444-4444-8444-444444444444",
+          sessionId: undefined,
+          repositoryId: "55555555-5555-4555-8555-555555555555",
+          repositoryName: "codex-swarm",
+          queue: "worker-dispatch",
+          state: "claimed",
+          stickyNodeId: null,
+          preferredNodeId: null,
+          claimedByNodeId: "node-a",
+          requiredCapabilities: ["node"],
+          worktreePath: join(workspaceRoot, "worker-a"),
+          branchName: "main",
+          prompt: "Implement task A",
+          profile: "default",
+          sandbox: "workspace-write",
+          approvalPolicy: "on-request",
+          includePlanTool: false,
+          metadata: {},
+          attempt: 0,
+          maxAttempts: 3,
+          leaseTtlSeconds: 300,
+          createdAt: new Date("2026-03-29T00:00:00.000Z")
+        },
+        {
+          id: "66666666-6666-4666-8666-666666666666",
+          runId: "22222222-2222-4222-8222-222222222222",
+          taskId: "77777777-7777-4777-8777-777777777777",
+          agentId: "88888888-8888-4888-8888-888888888888",
+          sessionId: undefined,
+          repositoryId: "55555555-5555-4555-8555-555555555555",
+          repositoryName: "codex-swarm",
+          queue: "worker-dispatch",
+          state: "claimed",
+          stickyNodeId: null,
+          preferredNodeId: null,
+          claimedByNodeId: "node-a",
+          requiredCapabilities: ["node"],
+          worktreePath: join(workspaceRoot, "worker-b"),
+          branchName: "main",
+          prompt: "Implement task B",
+          profile: "default",
+          sandbox: "workspace-write",
+          approvalPolicy: "on-request",
+          includePlanTool: false,
+          metadata: {},
+          attempt: 0,
+          maxAttempts: 3,
+          leaseTtlSeconds: 300,
+          createdAt: new Date("2026-03-29T00:00:00.000Z")
+        }
+      ];
+
+      const runDetail: RunDetail = {
+        id: "22222222-2222-4222-8222-222222222222",
+        repositoryId: "55555555-5555-4555-8555-555555555555",
+        workspaceId: "default-workspace",
+        teamId: "default-team",
+        goal: "Provision isolated worker worktrees",
+        status: "in_progress",
+        branchName: "main",
+        planArtifactPath: null,
+        budgetTokens: null,
+        budgetCostUsd: null,
+        concurrencyCap: 2,
+        policyProfile: "standard",
+        publishedBranch: null,
+        branchPublishedAt: null,
+        branchPublishApprovalId: null,
+        pullRequestUrl: null,
+        pullRequestNumber: null,
+        pullRequestStatus: null,
+        pullRequestApprovalId: null,
+        handoffStatus: "pending",
+        metadata: {},
+        createdBy: "tech-lead",
+        createdAt: new Date("2026-03-29T00:00:00.000Z"),
+        updatedAt: new Date("2026-03-29T00:00:00.000Z"),
+        completedAt: null,
+        tasks: [],
+        agents: [],
+        sessions: []
+      };
+      const repository: Repository = {
+        id: "55555555-5555-4555-8555-555555555555",
+        workspaceId: "default-workspace",
+        teamId: "default-team",
+        name: "codex-swarm",
+        url: repoRoot,
+        provider: "github",
+        defaultBranch: "main",
+        localPath: null,
+        trustLevel: "trusted",
+        approvalProfile: "standard",
+        providerSync: {
+          connectivityStatus: "validated",
+          validatedAt: null,
+          defaultBranch: "main",
+          branches: ["main"],
+          providerRepoUrl: repoRoot,
+          lastError: null
+        },
+        createdAt: new Date("2026-03-29T00:00:00.000Z"),
+        updatedAt: new Date("2026-03-29T00:00:00.000Z")
+      };
+
+      const server = createServer((request, response) => {
+        if (request.method === "POST" && request.url === "/api/v1/worker-nodes/node-a/claim-dispatch") {
+          const nextAssignment = assignments.shift() ?? null;
+          response.writeHead(200, { "content-type": "application/json" });
+          response.end(JSON.stringify(nextAssignment));
+          return;
+        }
+
+        if (request.method === "GET" && request.url === `/api/v1/runs/${runDetail.id}`) {
+          response.writeHead(200, { "content-type": "application/json" });
+          response.end(JSON.stringify(runDetail));
+          return;
+        }
+
+        if (request.method === "GET" && request.url === "/api/v1/repositories") {
+          response.writeHead(200, { "content-type": "application/json" });
+          response.end(JSON.stringify([repository]));
+          return;
+        }
+
+        response.writeHead(404, { "content-type": "application/json" });
+        response.end(JSON.stringify({ error: "not found" }));
+      });
+
+      await new Promise<void>((resolve) => {
+        server.listen(0, "127.0.0.1", () => resolve());
+      });
+
+      try {
+        const address = server.address();
+
+        if (!address || typeof address === "string") {
+          throw new Error("failed to resolve test server address");
+        }
+
+        const runtime = {
+          ...createRuntime(workspaceRoot),
+          controlPlaneUrl: `http://127.0.0.1:${address.port}`
+        };
+
+        const first = await claimAndProvisionDispatchWorkspace({
+          runtime,
+          controlPlane: {
+            baseUrl: runtime.controlPlaneUrl
+          }
+        });
+        const second = await claimAndProvisionDispatchWorkspace({
+          runtime,
+          controlPlane: {
+            baseUrl: runtime.controlPlaneUrl
+          }
+        });
+
+        expect(first?.workspace.mode).toBe("git_clone");
+        expect(second?.workspace.mode).toBe("git_clone");
+        expect(await readFile(join(first!.workspace.path, "README.md"), "utf8")).toBe("hello from source\n");
+        expect(await readFile(join(second!.workspace.path, "README.md"), "utf8")).toBe("hello from source\n");
+        expect(first?.bootstrap.environment.CODEX_SWARM_DISPATCH_ID).toBe(first?.assignment.id);
+        expect(second?.bootstrap.environment.CODEX_SWARM_DISPATCH_ID).toBe(second?.assignment.id);
+
+        await writeFile(join(first!.workspace.path, "README.md"), "worker one change\n", "utf8");
+
+        expect(await readFile(join(first!.workspace.path, "README.md"), "utf8")).toBe("worker one change\n");
+        expect(await readFile(join(second!.workspace.path, "README.md"), "utf8")).toBe("hello from source\n");
+        expect(await readFile(join(repoRoot, "README.md"), "utf8")).toBe("hello from source\n");
+      } finally {
+        await new Promise<void>((resolve, reject) => {
+          server.close((error) => {
+            if (error) {
+              reject(error);
+              return;
+            }
+
+            resolve();
+          });
+        });
+      }
+    } finally {
+      await rm(repoRoot, { recursive: true, force: true });
       await rm(workspaceRoot, { recursive: true, force: true });
     }
   });
