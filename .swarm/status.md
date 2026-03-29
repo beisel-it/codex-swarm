@@ -11,7 +11,7 @@
 
 ## Active
 
-- backlog is now beyond M9; current follow-up work should be treated as post-M9 backlog rather than milestone-completion debt
+- post-M10 backlog work is now focused on a codex-swarm terminal UI with clawteam-style board polish and codex-swarm-specific operator depth
 - the real M9 run found and fixed product issues in artifact metadata persistence and audit-export compatibility on commit `cb51312`
 
 ## Current Validation

@@ -6,6 +6,15 @@ Build Codex Swarm through the roadmap in executable phases, starting with the de
 
 ## Current Phase
 
+### Post-M10 TUI
+
+Post-M10 work is now active on a codex-swarm terminal UI:
+
+- confirm the real clawteam terminal-board implementation and extract the usable interaction model
+- ship a codex-swarm-specific TUI with live board, run, review, and operator views
+- package the TUI as a first-class operator entrypoint instead of a one-off demo
+- verify the TUI through explicit operator acceptance and regression checks
+
 ### M2
 
 M2 implementation is complete:
