@@ -402,11 +402,23 @@ type SwarmData = {
 
 type LoadState = 'idle' | 'loading' | 'ready' | 'error'
 
+type RuntimeConfig = {
+  apiBaseUrl?: string
+  apiToken?: string
+}
+
+const runtimeConfig = (
+  window as typeof window & {
+    __CODEX_SWARM_CONFIG__?: RuntimeConfig
+  }
+).__CODEX_SWARM_CONFIG__
+
 const API_BASE_URL = (
-  import.meta.env.VITE_API_BASE_URL
+  runtimeConfig?.apiBaseUrl
+  ?? import.meta.env.VITE_API_BASE_URL
   ?? `${window.location.protocol}//${window.location.hostname}:4300`
 ).replace(/\/$/, '')
-const API_TOKEN = import.meta.env.VITE_API_TOKEN ?? ''
+const API_TOKEN = (runtimeConfig?.apiToken ?? import.meta.env.VITE_API_TOKEN ?? '').trim()
 const APPROVAL_RESOLVER = import.meta.env.VITE_APPROVAL_RESOLVER ?? 'frontend-dev'
 const MOCK_FALLBACK_ENABLED = import.meta.env.VITE_ENABLE_MOCK_FALLBACK === 'true'
 const REFRESH_MS = 15_000
@@ -1218,13 +1230,17 @@ function isUuid(value: string | null | undefined) {
 }
 
 async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
+  const headers = new Headers(init?.headers ?? {})
+  if (!headers.has('Content-Type')) {
+    headers.set('Content-Type', 'application/json')
+  }
+  if (API_TOKEN.trim()) {
+    headers.set('Authorization', `Bearer ${API_TOKEN}`)
+  }
+
   const response = await fetch(buildApiUrl(path), {
     ...init,
-    headers: {
-      Authorization: `Bearer ${API_TOKEN}`,
-      'Content-Type': 'application/json',
-      ...(init?.headers ?? {}),
-    },
+    headers,
   })
 
   if (!response.ok) {

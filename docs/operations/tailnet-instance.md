@@ -85,6 +85,11 @@ The helper reads `~/.config/codex-swarm/tailnet.env`, exports
 `CODEX_SWARM_API_BASE_URL` and `CODEX_SWARM_API_TOKEN`, then launches the
 repo-level TUI entrypoint in live mode.
 
+The hosted frontend reads its API base URL and auth token from a generated
+`/runtime-config.js` file written during the `codex-swarm-frontend.service`
+startup path. Do not rely on build-time-only Vite env injection for the hosted
+instance.
+
 ## Autostart model
 
 The hosted instance runs as enabled `systemd --user` services:

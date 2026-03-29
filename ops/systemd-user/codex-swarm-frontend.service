@@ -12,6 +12,7 @@ Restart=always
 RestartSec=5
 ExecStartPre=/bin/sh -lc 'corepack pnpm install --frozen-lockfile'
 ExecStartPre=/bin/sh -lc 'export VITE_API_BASE_URL="$CODEX_SWARM_API_BASE_URL" VITE_API_TOKEN="$CODEX_SWARM_DEV_AUTH_TOKEN"; corepack pnpm --dir frontend build'
+ExecStartPre=/bin/sh -lc 'node -e '\''const fs=require("fs"); fs.writeFileSync("frontend/dist/runtime-config.js", "window.__CODEX_SWARM_CONFIG__ = " + JSON.stringify({ apiBaseUrl: process.env.CODEX_SWARM_API_BASE_URL ?? "", apiToken: process.env.CODEX_SWARM_DEV_AUTH_TOKEN ?? "" }, null, 2) + ";\\n")'\'''
 ExecStart=/bin/sh -lc 'corepack pnpm --dir frontend preview --host "$CODEX_SWARM_HOST" --port "$CODEX_SWARM_FRONTEND_PORT"'
 
 [Install]
