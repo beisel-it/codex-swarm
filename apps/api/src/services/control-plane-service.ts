@@ -39,6 +39,8 @@ import {
   type RunDetail,
   type RunStatusUpdateInput,
   type Session,
+  type SessionTranscriptEntry,
+  type SessionTranscriptEntryCreateInput,
   type Task,
   type TaskCreateInput,
   type TaskStatusUpdateInput,
@@ -105,6 +107,7 @@ type WorkerNodeDrainUpdate = WorkerNodeDrainUpdateInput;
 type WorkerDispatchCreate = WorkerDispatchCreateInput;
 type WorkerDispatchComplete = WorkerDispatchCompleteInput;
 type WorkerDispatchSessionAttach = z.infer<typeof workerDispatchSessionAttachSchema>;
+type SessionTranscriptEntryCreate = SessionTranscriptEntryCreateInput;
 type WorkerNodeReconcile = WorkerNodeReconcileInput;
 type AccessBoundary = Pick<ActorIdentity, "workspaceId" | "workspaceName" | "teamId" | "teamName"> & {
   policyProfile?: ActorIdentity["policyProfile"];
@@ -117,6 +120,30 @@ type OwnershipBoundary = {
   policyProfile: string | null;
 };
 type TeamRecord = typeof teams.$inferSelect;
+
+function readSessionTranscript(metadata: Record<string, unknown> | null | undefined) {
+  const transcript = metadata?.transcript;
+
+  if (!Array.isArray(transcript)) {
+    return [] as SessionTranscriptEntry[];
+  }
+
+  return transcript
+    .map((entry) => {
+      const parsed = controlPlaneSessionTranscriptEntrySchema.safeParse(entry);
+      return parsed.success ? parsed.data : null;
+    })
+    .filter((entry): entry is SessionTranscriptEntry => entry !== null);
+}
+
+const controlPlaneSessionTranscriptEntrySchema = z.object({
+  id: z.string().uuid(),
+  sessionId: z.string().uuid(),
+  kind: z.enum(["prompt", "response", "system"]),
+  text: z.string().min(1),
+  createdAt: z.coerce.date(),
+  metadata: z.record(z.string(), z.unknown()).default({})
+});
 
 function normalizeLegacyGovernanceRole(role: unknown) {
   return role === "platform-admin" ? "workspace_admin" : role;
@@ -1325,6 +1352,50 @@ export class ControlPlaneService {
   async listMessages(runId: string, access?: AccessBoundary) {
     await this.assertRunExists(runId, access);
     return this.db.select().from(messages).where(eq(messages.runId, runId)).orderBy(asc(messages.createdAt));
+  }
+
+  async listSessionTranscript(sessionId: string, access?: AccessBoundary) {
+    const session = await this.assertSessionExists(sessionId);
+    await this.assertAgentExists(session.agentId, access);
+
+    return readSessionTranscript(session.metadata);
+  }
+
+  async appendSessionTranscript(
+    sessionId: string,
+    entries: SessionTranscriptEntryCreate[],
+    access?: AccessBoundary
+  ) {
+    const session = await this.assertSessionExists(sessionId);
+    await this.assertAgentExists(session.agentId, access);
+
+    const now = this.clock.now();
+    const nextEntries = [
+      ...readSessionTranscript(session.metadata),
+      ...entries.map((entry) => ({
+        id: crypto.randomUUID(),
+        sessionId,
+        kind: entry.kind,
+        text: entry.text,
+        createdAt: entry.createdAt ?? now,
+        metadata: entry.metadata ?? {}
+      }))
+    ];
+
+    const nextMetadata = {
+      ...session.metadata,
+      transcript: nextEntries.map((entry) => ({
+        ...entry,
+        createdAt: entry.createdAt.toISOString()
+      }))
+    };
+
+    await this.db.update(sessions).set({
+      metadata: nextMetadata,
+      updatedAt: this.clock.now()
+    }).where(eq(sessions.id, sessionId));
+
+    return nextEntries;
   }
 
   async createApproval(input: ApprovalCreate, access?: AccessBoundary) {

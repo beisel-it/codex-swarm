@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { ZodError } from "zod";
 
-import { artifactCreateSchema, messageCreateSchema, validationCreateSchema } from "../src/http/schemas.js";
+import {
+  artifactCreateSchema,
+  messageCreateSchema,
+  sessionTranscriptAppendSchema,
+  validationCreateSchema
+} from "../src/http/schemas.js";
 
 describe("messageCreateSchema", () => {
   it("requires a recipient for direct messages", () => {
@@ -49,5 +54,20 @@ describe("artifactCreateSchema", () => {
     });
 
     expect(artifact.metadata).toEqual({});
+  });
+});
+
+describe("sessionTranscriptAppendSchema", () => {
+  it("defaults transcript entry metadata to an empty object", () => {
+    const transcript = sessionTranscriptAppendSchema.parse({
+      entries: [
+        {
+          kind: "response",
+          text: "Done."
+        }
+      ]
+    });
+
+    expect(transcript.entries[0]?.metadata).toEqual({});
   });
 });

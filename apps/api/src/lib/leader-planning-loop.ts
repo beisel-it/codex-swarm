@@ -51,6 +51,21 @@ export interface LeaderPlanningLoopResult {
   continuedAt: string | null;
 }
 
+function buildTranscriptEntries(prompt: string, output: string) {
+  return [
+    {
+      kind: "prompt",
+      text: prompt,
+      metadata: {}
+    },
+    {
+      kind: "response",
+      text: output,
+      metadata: {}
+    }
+  ];
+}
+
 function toDate(value: Date | string | null | undefined) {
   if (!value) {
     return null;
@@ -122,6 +137,14 @@ export async function runLeaderPlanningLoop(input: LeaderPlanningLoopInput): Pro
       throw new Error(`persisted leader session for agent ${agent.id} was not found`);
     }
 
+    await input.request(
+      "POST",
+      `/api/v1/sessions/${persistedSession.id}/transcript`,
+      {
+        entries: buildTranscriptEntries(startPrompt, started.response.output)
+      }
+    );
+
     const persistedRegistry = new SessionRegistry();
     persistedRegistry.hydrate([
       {
@@ -147,6 +170,7 @@ export async function runLeaderPlanningLoop(input: LeaderPlanningLoopInput): Pro
       persistedSession.id,
       input.planningPrompt ?? buildLeaderPlanningPrompt(runDetail.goal)
     );
+    const planningPrompt = input.planningPrompt ?? buildLeaderPlanningPrompt(runDetail.goal);
     const planningBudgetState = await checkpointRunBudget(
       input.request,
       input.runId,
@@ -157,6 +181,14 @@ export async function runLeaderPlanningLoop(input: LeaderPlanningLoopInput): Pro
     if (!planningBudgetState.continueAllowed) {
       throw new Error("run budget requires policy exception approval");
     }
+
+    await input.request(
+      "POST",
+      `/api/v1/sessions/${persistedSession.id}/transcript`,
+      {
+        entries: buildTranscriptEntries(planningPrompt, continued.response.output)
+      }
+    );
 
     const plan = parseLeaderPlanOutput(continued.response.output);
     const orderedTasks = orderLeaderPlanTasks(plan);

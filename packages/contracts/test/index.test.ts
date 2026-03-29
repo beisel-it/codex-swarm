@@ -18,6 +18,7 @@ import {
   runBranchPublishSchema,
   runCreateSchema,
   runPullRequestHandoffSchema,
+  sessionTranscriptAppendSchema,
   secretAccessPlanSchema,
   workerDispatchAssignmentSchema,
   workerDispatchCompleteSchema,
@@ -223,6 +224,21 @@ describe("artifactCreateSchema", () => {
     });
 
     expect(artifact.contentBase64).toBe("eyJvayI6dHJ1ZX0=");
+  });
+});
+
+describe("sessionTranscriptAppendSchema", () => {
+  it("accepts append payloads with default metadata", () => {
+    const transcript = sessionTranscriptAppendSchema.parse({
+      entries: [
+        {
+          kind: "prompt",
+          text: "Create the landing page."
+        }
+      ]
+    });
+
+    expect(transcript.entries[0]?.metadata).toEqual({});
   });
 });
 

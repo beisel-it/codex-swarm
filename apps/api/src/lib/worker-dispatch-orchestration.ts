@@ -39,6 +39,21 @@ export interface WorkerDispatchOrchestrationResult {
   supervisorStatus: "stopped" | "failed";
 }
 
+function buildTranscriptEntries(prompt: string, output: string) {
+  return [
+    {
+      kind: "prompt",
+      text: prompt,
+      metadata: {}
+    },
+    {
+      kind: "response",
+      text: output,
+      metadata: {}
+    }
+  ];
+}
+
 function toDate(value: Date | string | null | undefined) {
   if (!value) {
     return null;
@@ -156,6 +171,13 @@ export async function runManagedWorkerDispatch(
         "worker.dispatch",
         continued.response
       );
+      await input.request(
+        "POST",
+        `/api/v1/sessions/${persistedSession.id}/transcript`,
+        {
+          entries: buildTranscriptEntries(assignment.prompt, continued.response.output)
+        }
+      );
       responseOutput = continued.response.output;
       sessionId = persistedSession.id;
       const stopped = await runtime.stopSession(persistedSession.id);
@@ -206,6 +228,13 @@ export async function runManagedWorkerDispatch(
       );
       persistedSession = createdSession;
       sessionId = createdSession.id;
+      await input.request(
+        "POST",
+        `/api/v1/sessions/${createdSession.id}/transcript`,
+        {
+          entries: buildTranscriptEntries(assignment.prompt, started.response.output)
+        }
+      );
       responseOutput = started.response.output;
       const stopped = await runtime.stopSession(sessionId);
       supervisorStatus = stopped.supervisor.status === "failed" ? "failed" : "stopped";

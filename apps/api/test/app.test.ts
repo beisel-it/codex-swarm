@@ -721,6 +721,38 @@ class FakeVerticalSliceControlPlane {
     return agent;
   }
 
+  async createAgentSession(agentId: string, input: any, access?: any) {
+    const run = [...this.runs.values()].find((candidate) =>
+      candidate.agents.some((agent: any) => agent.id === agentId));
+
+    if (!run) {
+      throw new HttpError(404, `agent ${agentId} not found`);
+    }
+
+    this.assertBoundary(run, access);
+    const session = {
+      id: crypto.randomUUID(),
+      agentId,
+      threadId: input.threadId,
+      cwd: input.cwd,
+      sandbox: input.sandbox,
+      approvalPolicy: input.approvalPolicy,
+      includePlanTool: input.includePlanTool ?? false,
+      workerNodeId: input.workerNodeId ?? null,
+      stickyNodeId: input.workerNodeId ?? null,
+      placementConstraintLabels: input.placementConstraintLabels ?? [],
+      lastHeartbeatAt: null,
+      state: "active",
+      staleReason: null,
+      metadata: input.metadata ?? {},
+      createdAt: new Date(),
+      updatedAt: new Date()
+    };
+
+    run.sessions.push(session);
+    return session;
+  }
+
   async listWorkerDispatchAssignments(query: any = {}) {
     return this.workerDispatchAssignments
       .filter((assignment) => query.runId ? assignment.runId === query.runId : true)
@@ -917,6 +949,47 @@ class FakeVerticalSliceControlPlane {
 
   async createMessage(_input?: any, _access?: any) {
     throw new Error("not implemented");
+  }
+
+  async listSessionTranscript(sessionId: string, access?: any) {
+    const run = [...this.runs.values()].find((candidate) =>
+      candidate.sessions.some((session: any) => session.id === sessionId));
+
+    if (!run) {
+      throw new HttpError(404, `session ${sessionId} not found`);
+    }
+
+    this.assertBoundary(run, access);
+    const session = run.sessions.find((candidate: any) => candidate.id === sessionId);
+    return Array.isArray(session.metadata?.transcript) ? session.metadata.transcript : [];
+  }
+
+  async appendSessionTranscript(sessionId: string, entries: any[], access?: any) {
+    const run = [...this.runs.values()].find((candidate) =>
+      candidate.sessions.some((session: any) => session.id === sessionId));
+
+    if (!run) {
+      throw new HttpError(404, `session ${sessionId} not found`);
+    }
+
+    this.assertBoundary(run, access);
+    const session = run.sessions.find((candidate: any) => candidate.id === sessionId);
+    const now = new Date();
+    const existing = Array.isArray(session.metadata?.transcript) ? session.metadata.transcript : [];
+    const appended = entries.map((entry) => ({
+      id: crypto.randomUUID(),
+      sessionId,
+      kind: entry.kind,
+      text: entry.text,
+      createdAt: entry.createdAt ?? now,
+      metadata: entry.metadata ?? {}
+    }));
+    session.metadata = {
+      ...session.metadata,
+      transcript: [...existing, ...appended]
+    };
+    session.updatedAt = now;
+    return session.metadata.transcript;
   }
 
   async listApprovals(runId?: string, access?: any) {
@@ -3491,6 +3564,112 @@ describe("buildApp", () => {
     await app.close();
   });
 
+  it("stores and returns per-session transcript entries", async () => {
+    const app = await buildApp({
+      config: getConfig({
+        NODE_ENV: "test",
+        PORT: 3000,
+        HOST: "127.0.0.1",
+        DATABASE_URL: "postgres://unused/test",
+        DEV_AUTH_TOKEN: "test-token",
+        OPENAI_TRACING_DISABLED: true
+      }),
+      controlPlane: new FakeVerticalSliceControlPlane() as unknown as ControlPlaneService
+    });
+
+    const headers = {
+      authorization: "Bearer test-token"
+    };
+
+    const createRunResponse = await app.inject({
+      method: "POST",
+      url: "/api/v1/runs",
+      headers,
+      payload: {
+        repositoryId: ids.repository,
+        goal: "Persist transcript entries",
+        metadata: {}
+      }
+    });
+
+    expect(createRunResponse.statusCode).toBe(201);
+
+    const createAgentResponse = await app.inject({
+      method: "POST",
+      url: "/api/v1/agents",
+      headers,
+      payload: {
+        runId: ids.run,
+        name: "transcript-agent",
+        role: "backend-developer",
+        status: "idle",
+        session: {
+          threadId: "thread-transcript",
+          cwd: "/tmp/codex-swarm-transcript",
+          sandbox: "workspace-write",
+          approvalPolicy: "on-request",
+          includePlanTool: false,
+          metadata: {}
+        }
+      }
+    });
+
+    expect(createAgentResponse.statusCode).toBe(201);
+
+    const appendResponse = await app.inject({
+      method: "POST",
+      url: `/api/v1/sessions/${ids.session}/transcript`,
+      headers,
+      payload: {
+        entries: [
+          {
+            kind: "prompt",
+            text: "Create the landing page"
+          },
+          {
+            kind: "response",
+            text: "Landing page draft is ready.",
+            metadata: {
+              source: "worker-dispatch"
+            }
+          }
+        ]
+      }
+    });
+
+    expect(appendResponse.statusCode).toBe(201);
+    expect(appendResponse.json()).toEqual([
+      expect.objectContaining({
+        sessionId: ids.session,
+        kind: "prompt",
+        text: "Create the landing page"
+      }),
+      expect.objectContaining({
+        sessionId: ids.session,
+        kind: "response",
+        text: "Landing page draft is ready.",
+        metadata: {
+          source: "worker-dispatch"
+        }
+      })
+    ]);
+
+    const transcriptResponse = await app.inject({
+      method: "GET",
+      url: `/api/v1/sessions/${ids.session}/transcript`,
+      headers
+    });
+
+    expect(transcriptResponse.statusCode).toBe(200);
+    expect(transcriptResponse.json()).toHaveLength(2);
+    expect(transcriptResponse.json()[1]).toMatchObject({
+      kind: "response",
+      text: "Landing page draft is ready."
+    });
+
+    await app.close();
+  });
+
   it("maps control plane HttpError responses to their status code", async () => {
     controlPlane.getRun.mockRejectedValueOnce(new HttpError(404, "run run-404 not found"));
 
@@ -5188,6 +5367,26 @@ describe("buildApp", () => {
         state: "completed",
         attempt: 1
       });
+
+      const transcriptResponse = await app.inject({
+        method: "GET",
+        url: `/api/v1/sessions/${sessionId}/transcript`,
+        headers
+      });
+
+      expect(transcriptResponse.statusCode).toBe(200);
+      expect(transcriptResponse.json()).toEqual([
+        expect.objectContaining({
+          sessionId,
+          kind: "prompt",
+          text: "Continue the managed worker session"
+        }),
+        expect.objectContaining({
+          sessionId,
+          kind: "response",
+          text: "worker completed"
+        })
+      ]);
     } finally {
       await rm(repoRoot, { recursive: true, force: true });
       await app.close();

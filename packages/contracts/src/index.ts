@@ -297,6 +297,26 @@ export const sessionSchema = z.object({
   updatedAt: z.date()
 });
 
+export const sessionTranscriptEntrySchema = z.object({
+  id: z.uuid(),
+  sessionId: z.uuid(),
+  kind: z.enum(["prompt", "response", "system"]),
+  text: z.string().min(1),
+  createdAt: z.coerce.date(),
+  metadata: z.record(z.string(), z.unknown()).default({})
+});
+
+export const sessionTranscriptEntryCreateSchema = z.object({
+  kind: z.enum(["prompt", "response", "system"]),
+  text: z.string().min(1),
+  createdAt: z.coerce.date().optional(),
+  metadata: z.record(z.string(), z.unknown()).default({})
+});
+
+export const sessionTranscriptAppendSchema = z.object({
+  entries: z.array(sessionTranscriptEntryCreateSchema).min(1)
+});
+
 export const workerNodeSchema = workerNodeRegisterSchema.extend({
   id: z.uuid(),
   endpoint: z.string().min(1).nullable(),
@@ -1028,6 +1048,8 @@ export type IdentityContext = z.infer<typeof identityContextSchema>;
 export type Task = z.infer<typeof taskSchema>;
 export type Agent = z.infer<typeof agentSchema>;
 export type Session = z.infer<typeof sessionSchema>;
+export type SessionTranscriptEntry = z.infer<typeof sessionTranscriptEntrySchema>;
+export type SessionTranscriptEntryCreateInput = z.infer<typeof sessionTranscriptEntryCreateSchema>;
 export type WorkerNode = z.infer<typeof workerNodeSchema>;
 export type Approval = z.infer<typeof approvalSchema>;
 export type Artifact = z.infer<typeof artifactSchema>;

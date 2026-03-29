@@ -1,3 +1,4 @@
+import os from "node:os";
 import { mkdir } from "node:fs/promises";
 import { setTimeout as sleep } from "node:timers/promises";
 
@@ -27,6 +28,21 @@ interface WorkerDaemonState {
   stopping: boolean;
   lastError: string | null;
   lastResult: WorkerDispatchOrchestrationResult | null;
+  metrics: WorkerMetrics;
+  cpuSnapshot: CpuSnapshot;
+}
+
+interface WorkerMetrics {
+  cpuPercent: number;
+  memoryPercent: number;
+  queueDepth: number;
+  sessionCount: number;
+  activeClaims: number;
+}
+
+interface CpuSnapshot {
+  idle: number;
+  total: number;
 }
 
 function requireEnv(name: string) {
@@ -95,6 +111,115 @@ function parseCodexCommand(value: string | null) {
   }
 
   return value.split(/\s+/).filter((entry) => entry.length > 0);
+}
+
+function roundMetric(value: number) {
+  return Math.round(value * 10) / 10;
+}
+
+function clampPercentage(value: number) {
+  return Math.min(100, Math.max(0, value));
+}
+
+function readCpuSnapshot(): CpuSnapshot {
+  const cpus = os.cpus();
+
+  return cpus.reduce<CpuSnapshot>((accumulator, cpu) => {
+    const total = Object.values(cpu.times).reduce((sum, current) => sum + current, 0);
+
+    return {
+      idle: accumulator.idle + cpu.times.idle,
+      total: accumulator.total + total
+    };
+  }, {
+    idle: 0,
+    total: 0
+  });
+}
+
+function estimateCpuPercent(previousSnapshot: CpuSnapshot) {
+  const nextSnapshot = readCpuSnapshot();
+  const idleDelta = nextSnapshot.idle - previousSnapshot.idle;
+  const totalDelta = nextSnapshot.total - previousSnapshot.total;
+  const loadAverage = os.loadavg()[0] ?? 0;
+  const cpuCount = Math.max(1, os.cpus().length);
+  const fallbackPercent = clampPercentage((loadAverage / cpuCount) * 100);
+  const cpuPercent = totalDelta > 0
+    ? clampPercentage(((totalDelta - idleDelta) / totalDelta) * 100)
+    : fallbackPercent;
+
+  return {
+    cpuPercent: roundMetric(cpuPercent),
+    snapshot: nextSnapshot
+  };
+}
+
+async function listWorkerDispatchAssignments(
+  baseUrl: string,
+  authToken: string,
+  query: string
+) {
+  return requestJson<Array<{ id: string }>>(
+    baseUrl,
+    authToken,
+    "GET",
+    `/api/v1/worker-dispatch-assignments${query}`
+  );
+}
+
+async function countSessionsForNode(
+  baseUrl: string,
+  authToken: string,
+  nodeId: string
+) {
+  const runs = await requestJson<Array<{ id: string }>>(baseUrl, authToken, "GET", "/api/v1/runs");
+  const details = await Promise.all(
+    runs.map((run) =>
+      requestJson<{ sessions: Array<{ workerNodeId: string | null; stickyNodeId: string | null; state: string }> }>(
+        baseUrl,
+        authToken,
+        "GET",
+        `/api/v1/runs/${run.id}`
+      ).catch(() => ({ sessions: [] }))
+    )
+  );
+
+  return details.flatMap((detail) => detail.sessions).filter((session) =>
+    (session.workerNodeId === nodeId || session.stickyNodeId === nodeId)
+    && session.state !== "archived"
+  ).length;
+}
+
+async function collectWorkerMetrics(
+  baseUrl: string,
+  authToken: string,
+  nodeId: string,
+  previousSnapshot: CpuSnapshot
+) {
+  const [{ cpuPercent, snapshot }, queuedAssignments, retryingAssignments, claimedAssignments, sessionCount] = await Promise.all([
+    Promise.resolve(estimateCpuPercent(previousSnapshot)),
+    listWorkerDispatchAssignments(baseUrl, authToken, "?state=queued"),
+    listWorkerDispatchAssignments(baseUrl, authToken, "?state=retrying"),
+    listWorkerDispatchAssignments(
+      baseUrl,
+      authToken,
+      `?nodeId=${encodeURIComponent(nodeId)}&state=claimed`
+    ),
+    countSessionsForNode(baseUrl, authToken, nodeId)
+  ]);
+  const memoryPercent = clampPercentage(((os.totalmem() - os.freemem()) / os.totalmem()) * 100);
+  const activeClaims = claimedAssignments.length;
+
+  return {
+    metrics: {
+      cpuPercent,
+      memoryPercent: roundMetric(memoryPercent),
+      queueDepth: queuedAssignments.length + retryingAssignments.length,
+      sessionCount,
+      activeClaims
+    },
+    cpuSnapshot: snapshot
+  };
 }
 
 function buildRuntime(): WorkerNodeRuntime {
@@ -250,6 +375,17 @@ function buildWorkerMetadata(runtime: WorkerNodeRuntime, state: WorkerDaemonStat
     transport: runtime.codexTransport.kind,
     codexCommand: runtime.codexTransport.kind === "stdio" ? runtime.codexCommand : [],
     checks: state.latestChecks,
+    cpuPercent: state.metrics.cpuPercent,
+    memoryPercent: state.metrics.memoryPercent,
+    queueDepth: state.metrics.queueDepth,
+    sessionCount: state.metrics.sessionCount,
+    activeClaims: state.metrics.activeClaims,
+    cpuUtilization: state.metrics.cpuPercent,
+    memoryUtilization: state.metrics.memoryPercent,
+    utilization: {
+      cpu: state.metrics.cpuPercent,
+      memory: state.metrics.memoryPercent
+    },
     lastError: state.lastError,
     lastResult: state.lastResult
       ? {
@@ -271,6 +407,13 @@ async function heartbeatWorkerNode(
   statusOverride?: WorkerNodeStatus
 ) {
   state.latestChecks = evaluateWorkerRuntimeDependencies(runtime);
+  try {
+    const nextMetrics = await collectWorkerMetrics(baseUrl, authToken, runtime.nodeId, state.cpuSnapshot);
+    state.metrics = nextMetrics.metrics;
+    state.cpuSnapshot = nextMetrics.cpuSnapshot;
+  } catch (error) {
+    console.warn(`worker metrics collection failed: ${error instanceof Error ? error.message : String(error)}`);
+  }
   state.latestStatus = statusOverride ?? deriveWorkerStatus(state.latestChecks, state.lastError);
 
   return requestJson<WorkerNode>(
@@ -309,7 +452,15 @@ async function main() {
     latestStatus: "online",
     stopping: false,
     lastError: null,
-    lastResult: null
+    lastResult: null,
+    metrics: {
+      cpuPercent: 0,
+      memoryPercent: roundMetric(clampPercentage(((os.totalmem() - os.freemem()) / os.totalmem()) * 100)),
+      queueDepth: 0,
+      sessionCount: 0,
+      activeClaims: 0
+    },
+    cpuSnapshot: readCpuSnapshot()
   };
 
   const missingChecks = state.latestChecks.filter((check) => check.status === "missing");

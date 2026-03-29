@@ -14,6 +14,8 @@ import {
   runCreateSchema,
   runPullRequestHandoffSchema,
   runStatusUpdateSchema,
+  sessionTranscriptAppendSchema as contractSessionTranscriptAppendSchema,
+  sessionTranscriptEntryCreateSchema as contractSessionTranscriptEntrySchema,
   taskCreateSchema,
   taskStatusUpdateSchema,
   validationCreateSchema as contractValidationCreateSchema,
@@ -112,6 +114,8 @@ export const agentSessionCreateSchema = z.object({
 export const workerDispatchSessionAttachSchema = z.object({
   sessionId: z.uuid()
 });
+export const sessionTranscriptEntrySchema = contractSessionTranscriptEntrySchema;
+export const sessionTranscriptAppendSchema = contractSessionTranscriptAppendSchema;
 export {
   agentCreateSchema,
   approvalsListQuerySchema,

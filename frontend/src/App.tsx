@@ -32,6 +32,14 @@ type ApprovalStatus = 'pending' | 'approved' | 'rejected'
 type ValidationStatus = 'pending' | 'passed' | 'failed'
 type ArtifactKind = 'plan' | 'patch' | 'log' | 'report' | 'diff' | 'screenshot' | 'pr_link' | 'other'
 type ActorType = 'system' | 'user' | 'service'
+type SessionTranscriptEntry = {
+  id: string
+  sessionId: string
+  kind: 'prompt' | 'response' | 'system'
+  text: string
+  createdAt: string
+  metadata?: Record<string, unknown>
+}
 
 type Repository = {
   id: string
@@ -385,8 +393,8 @@ type SwarmData = {
   validations: Validation[]
   artifacts: Artifact[]
   messages: Message[]
-  identity: IdentityContext
-  governance: GovernanceAdminReport
+  identity: IdentityContext | null
+  governance: GovernanceAdminReport | null
   secretAccessPlan: SecretAccessPlan | null
   auditExport: RunAuditExport | null
   source: 'mock' | 'api'
@@ -621,81 +629,6 @@ const mockAuditExport: RunAuditExport = {
   },
   retention: mockGovernance.retention,
   exportedAt: '2026-03-28T22:17:00.000Z',
-}
-
-const mockArtifactDetails: Record<string, ArtifactDetail> = {
-  'artifact-diff-beta': {
-    artifact: {
-      id: 'artifact-diff-beta',
-      runId: 'run-beta',
-      taskId: 'task-review',
-      kind: 'diff',
-      path: 'artifacts/review/beta-handoff.diff',
-      contentType: 'text/x-diff',
-      url: null,
-      sizeBytes: 936,
-      sha256: null,
-      metadata: {},
-      createdAt: '2026-03-28T19:46:00.000Z',
-    },
-    contentState: 'available',
-    bodyText: `diff --git a/docs/user-guide.md b/docs/user-guide.md
-index 1234567..89abcde 100644
---- a/docs/user-guide.md
-+++ b/docs/user-guide.md
-@@ -81,7 +81,9 @@ Use the review console when a run is waiting on human or delegated approval:
-  1. Open \`Review\` and select the approval request from the left-side review list.
-  2. Read the requested context and structured payload before deciding.
--3. Inspect recent validations and artifacts in the same surface so approval is tied to current evidence.
-+3. Inspect the diff summary, changed files, recent validations, and linked artifacts in the same surface.
-+4. Confirm the changed files match the requested review scope before approving.
-  4. Record resolution feedback directly in the browser, then approve or reject from the action row.
-
-diff --git a/frontend/src/App.tsx b/frontend/src/App.tsx
-index aaaaaaa..bbbbbbb 100644
---- a/frontend/src/App.tsx
-+++ b/frontend/src/App.tsx
-@@ -2300,6 +2300,24 @@ function App() {
-+  <section className="diff-review-surface">
-+    <h4>Diff summary</h4>
-+    <p>Render changed-file evidence beside the approval decision controls.</p>
-+  </section>`,
-    diffSummary: {
-      title: '2 files changed',
-      changeSummary: '2 files changed, 12 insertions, 3 deletions',
-      filesChanged: 2,
-      insertions: 12,
-      deletions: 3,
-      truncated: false,
-      fileSummaries: [
-        {
-          path: 'docs/user-guide.md',
-          changeType: 'modified',
-          additions: 6,
-          deletions: 1,
-          summary: 'Review workflow updated for in-browser diff inspection.',
-          previousPath: null,
-          providerUrl: null,
-        },
-        {
-          path: 'frontend/src/App.tsx',
-          changeType: 'modified',
-          additions: 6,
-          deletions: 2,
-          summary: 'Review workspace now includes diff-summary evidence.',
-          previousPath: null,
-          providerUrl: null,
-        },
-      ],
-      diffPreview: `docs/user-guide.md
-  + Inspect the diff summary, changed files, recent validations, and linked artifacts
-
-frontend/src/App.tsx
-  + <section className="diff-review-surface">`,
-      rawDiff: null,
-      providerUrl: null,
-    },
-  },
 }
 
 const mockData: SwarmData = {
@@ -1169,6 +1102,26 @@ const mockData: SwarmData = {
 
 const taskStatusOrder: TaskStatus[] = ['pending', 'blocked', 'in_progress', 'awaiting_review', 'completed']
 
+function createEmptySwarmData(): SwarmData {
+  return {
+    repositories: [],
+    runs: [],
+    tasks: [],
+    agents: [],
+    sessions: [],
+    workerNodes: [],
+    approvals: [],
+    validations: [],
+    artifacts: [],
+    messages: [],
+    identity: null,
+    governance: null,
+    secretAccessPlan: null,
+    auditExport: null,
+    source: 'api',
+  }
+}
+
 const runStatusTone: Record<RunStatus, string> = {
   pending: 'muted',
   planning: 'warning',
@@ -1198,6 +1151,15 @@ const validationStatusTone: Record<ValidationStatus, string> = {
   pending: 'warning',
   passed: 'success',
   failed: 'danger',
+}
+
+const sessionStateTone: Record<WorkerSessionState, ActivityItem['tone']> = {
+  pending: 'warning',
+  active: 'active',
+  stopped: 'muted',
+  failed: 'danger',
+  stale: 'warning',
+  archived: 'muted',
 }
 
 const repositoryTrustTone: Record<RepositoryTrustLevel, ActivityItem['tone']> = {
@@ -1360,29 +1322,24 @@ async function loadRunAuditExport(runId: string): Promise<RunAuditExport> {
   return requestJson<RunAuditExport>(`/api/v1/runs/${encodeURIComponent(runId)}/audit-export`)
 }
 
+async function loadSessionTranscript(sessionId: string): Promise<SessionTranscriptEntry[]> {
+  return requestJson<SessionTranscriptEntry[]>(`/api/v1/sessions/${encodeURIComponent(sessionId)}/transcript`)
+}
+
 async function loadSwarmData(): Promise<SwarmData> {
   try {
     const repositories = await requestJson<Repository[]>('/api/v1/repositories')
     const runs = await requestJson<Run[]>('/api/v1/runs')
     const workerNodes = await requestJson<WorkerNode[]>('/api/v1/worker-nodes').catch(() => [])
-    const identity = await loadIdentity().catch(() => mockIdentity)
+    const identity = await loadIdentity().catch(() => null)
 
     if (repositories.length === 0 || runs.length === 0) {
       return {
-        ...mockData,
+        ...createEmptySwarmData(),
         repositories,
         runs,
-        tasks: [],
-        agents: [],
-        sessions: [],
         workerNodes,
-        approvals: [],
-        validations: [],
-        artifacts: [],
-        messages: [],
         identity,
-        secretAccessPlan: null,
-        auditExport: null,
         source: 'api',
       }
     }
@@ -1427,14 +1384,14 @@ async function loadSwarmData(): Promise<SwarmData> {
 
     const primaryRun = runs[0]
     const primaryRepository = repositories.find((repository) => repository.id === primaryRun?.repositoryId)
-    const governance = await loadGovernanceReport(primaryRun?.id).catch(() => mockGovernance)
+    const governance = await loadGovernanceReport(primaryRun?.id).catch(() => null)
     const secretAccessPlan =
       primaryRepository
-        ? await loadSecretAccessPlan(primaryRepository.id).catch(() => mockSecretAccessPlan)
+        ? await loadSecretAccessPlan(primaryRepository.id).catch(() => null)
         : null
     const auditExport =
       primaryRun
-        ? await loadRunAuditExport(primaryRun.id).catch(() => mockAuditExport)
+        ? await loadRunAuditExport(primaryRun.id).catch(() => null)
         : null
 
     return {
@@ -1460,17 +1417,7 @@ async function loadSwarmData(): Promise<SwarmData> {
     }
 
     return {
-      ...mockData,
-      repositories: [],
-      runs: [],
-      tasks: [],
-      agents: [],
-      sessions: [],
-      workerNodes: [],
-      approvals: [],
-      validations: [],
-      artifacts: [],
-      messages: [],
+      ...createEmptySwarmData(),
       source: 'api',
     }
   }
@@ -1604,7 +1551,7 @@ function describePlacement(session: Session, workerNode: WorkerNode | null, stic
 
 function formatActorLabel(actor: ActorIdentity | null | undefined) {
   if (!actor) {
-    return 'System-unresolved'
+    return 'Unavailable'
   }
 
   return `${actor.actorId} · ${actor.role}`
@@ -1696,19 +1643,27 @@ function deriveActivity(
 }
 
 function App() {
-  const [data, setData] = useState<SwarmData>(mockData)
-  const [selectedRunId, setSelectedRunId] = useState(mockData.runs[0]?.id ?? '')
+  const [data, setData] = useState<SwarmData>(createEmptySwarmData())
+  const [selectedRunId, setSelectedRunId] = useState('')
   const [selectedView, setSelectedView] = useState<ViewMode>('board')
   const [selectedApprovalId, setSelectedApprovalId] = useState<string>('')
   const [selectedReviewArtifactId, setSelectedReviewArtifactId] = useState<string>('')
   const [selectedApprovalDetail, setSelectedApprovalDetail] = useState<Approval | null>(null)
   const [selectedArtifactDetail, setSelectedArtifactDetail] = useState<ArtifactDetail | null>(null)
+  const [selectedTranscriptSessionId, setSelectedTranscriptSessionId] = useState<string>('')
+  const [selectedTranscript, setSelectedTranscript] = useState<SessionTranscriptEntry[]>([])
+  const [transcriptState, setTranscriptState] = useState<LoadState>('idle')
+  const [transcriptError, setTranscriptError] = useState('')
   const [reviewNotes, setReviewNotes] = useState('')
   const [taskQuery, setTaskQuery] = useState('')
   const [loading, setLoading] = useState(true)
   const [errorText, setErrorText] = useState<string>('')
+  const [approvalDetailState, setApprovalDetailState] = useState<LoadState>('idle')
+  const [approvalDetailError, setApprovalDetailError] = useState('')
   const [artifactDetailState, setArtifactDetailState] = useState<LoadState>('idle')
   const [artifactDetailError, setArtifactDetailError] = useState('')
+  const [adminSurfaceState, setAdminSurfaceState] = useState<LoadState>('idle')
+  const [adminSurfaceError, setAdminSurfaceError] = useState('')
   const [actionPending, setActionPending] = useState(false)
   const [repoDraftName, setRepoDraftName] = useState('codex-swarm')
   const [repoDraftUrl, setRepoDraftUrl] = useState('https://github.com/beisel-it/codex-swarm.git')
@@ -1824,6 +1779,13 @@ function App() {
     runApprovals.find((approval) => approval.id === selectedApprovalId) ??
     runApprovals.find((approval) => approval.status === 'pending') ??
     null
+  const selectedIdentity = data.identity
+  const selectedGovernance = data.governance
+  const selectedSecretAccessPlan = data.secretAccessPlan
+  const selectedAuditExport = data.auditExport
+  const governanceApprovalHistory = selectedGovernance?.approvals.history ?? []
+  const governanceRepositoryProfiles = selectedGovernance?.policies.repositoryProfiles ?? []
+  const reviewActionDisabled = !selectedApproval || actionPending || approvalDetailState !== 'ready'
   const approvalArtifactIds = extractArtifactIds(selectedApprovalDetail?.requestedPayload ?? selectedApproval?.requestedPayload)
   const reviewDiffArtifacts = runArtifacts.filter((artifact) =>
     artifact.kind === 'diff'
@@ -1853,14 +1815,29 @@ function App() {
   }, [selectedApprovalId, reviewDiffArtifacts])
 
   useEffect(() => {
+    setSelectedTranscriptSessionId((current) => {
+      if (runSessions.some((session) => session.id === current)) {
+        return current
+      }
+
+      return runSessions[0]?.id ?? ''
+    })
+  }, [runSessions])
+
+  useEffect(() => {
     let active = true
 
     async function hydrateApprovalDetail() {
       if (!selectedApprovalId || data.source !== 'api' || !isUuid(selectedApprovalId)) {
         setSelectedApprovalDetail(null)
+        setApprovalDetailState('idle')
+        setApprovalDetailError('')
         setReviewNotes('')
         return
       }
+
+      setApprovalDetailState('loading')
+      setApprovalDetailError('')
 
       try {
         const detail = await loadApprovalDetail(selectedApprovalId)
@@ -1869,15 +1846,17 @@ function App() {
         }
 
         setSelectedApprovalDetail(detail)
+        setApprovalDetailState('ready')
         setReviewNotes(String(detail.resolutionPayload?.feedback ?? ''))
-      } catch {
+      } catch (error) {
         if (!active) {
           return
         }
 
-        const fallback = runApprovals.find((approval) => approval.id === selectedApprovalId) ?? null
-        setSelectedApprovalDetail(fallback)
-        setReviewNotes(String(fallback?.resolutionPayload?.feedback ?? ''))
+        setSelectedApprovalDetail(null)
+        setApprovalDetailState('error')
+        setApprovalDetailError(error instanceof Error ? error.message : 'Unable to load approval detail')
+        setReviewNotes('')
       }
     }
 
@@ -1915,13 +1894,6 @@ function App() {
           return
         }
 
-        const fallback = mockArtifactDetails[selectedReviewArtifactId] ?? null
-        if (fallback) {
-          setSelectedArtifactDetail(fallback)
-          setArtifactDetailState('ready')
-          return
-        }
-
         setSelectedArtifactDetail(null)
         setArtifactDetailState('error')
         setArtifactDetailError(error instanceof Error ? error.message : 'Unable to load artifact detail')
@@ -1938,27 +1910,85 @@ function App() {
   useEffect(() => {
     let active = true
 
-    async function hydrateAdminSurface() {
-      if (data.source !== 'api' || !isUuid(selectedRunStableId) || !selectedRepositoryStableId) {
+    async function hydrateTranscript() {
+      if (!selectedTranscriptSessionId || data.source !== 'api' || !isUuid(selectedTranscriptSessionId)) {
+        setSelectedTranscript([])
+        setTranscriptState('idle')
+        setTranscriptError('')
         return
       }
 
-      const [governance, secretAccessPlan, auditExport] = await Promise.all([
-        loadGovernanceReport(selectedRunStableId).catch(() => mockGovernance),
-        loadSecretAccessPlan(selectedRepositoryStableId).catch(() => mockSecretAccessPlan),
-        loadRunAuditExport(selectedRunStableId).catch(() => mockAuditExport),
+      setTranscriptState('loading')
+      setTranscriptError('')
+
+      try {
+        const transcript = await loadSessionTranscript(selectedTranscriptSessionId)
+        if (!active) {
+          return
+        }
+
+        setSelectedTranscript(transcript)
+        setTranscriptState('ready')
+      } catch (error) {
+        if (!active) {
+          return
+        }
+
+        setSelectedTranscript([])
+        setTranscriptState('error')
+        setTranscriptError(error instanceof Error ? error.message : 'Unable to load transcript')
+      }
+    }
+
+    void hydrateTranscript()
+
+    return () => {
+      active = false
+    }
+  }, [data.source, selectedTranscriptSessionId])
+
+  useEffect(() => {
+    let active = true
+
+    async function hydrateAdminSurface() {
+      if (data.source !== 'api' || !isUuid(selectedRunStableId) || !selectedRepositoryStableId) {
+        setAdminSurfaceState('idle')
+        setAdminSurfaceError('')
+        return
+      }
+
+      setAdminSurfaceState('loading')
+      setAdminSurfaceError('')
+
+      const [governanceResult, secretAccessPlanResult, auditExportResult] = await Promise.allSettled([
+        loadGovernanceReport(selectedRunStableId),
+        loadSecretAccessPlan(selectedRepositoryStableId),
+        loadRunAuditExport(selectedRunStableId),
       ])
 
       if (!active) {
         return
       }
 
+      const surfaceErrors = [
+        governanceResult.status === 'rejected' ? 'governance report' : null,
+        secretAccessPlanResult.status === 'rejected' ? 'secret access plan' : null,
+        auditExportResult.status === 'rejected' ? 'audit export' : null,
+      ].filter(Boolean)
+
       setData((current) => ({
         ...current,
-        governance,
-        secretAccessPlan,
-        auditExport,
+        governance: governanceResult.status === 'fulfilled' ? governanceResult.value : null,
+        secretAccessPlan: secretAccessPlanResult.status === 'fulfilled' ? secretAccessPlanResult.value : null,
+        auditExport: auditExportResult.status === 'fulfilled' ? auditExportResult.value : null,
       }))
+
+      setAdminSurfaceState(surfaceErrors.length > 0 ? 'error' : 'ready')
+      setAdminSurfaceError(
+        surfaceErrors.length > 0
+          ? `Unable to load ${surfaceErrors.join(', ')} from the live API.`
+          : '',
+      )
     }
 
     void hydrateAdminSurface()
@@ -2892,6 +2922,58 @@ function App() {
                     ))}
                   </div>
                 </section>
+
+                <section className="panel panel-transcript">
+                  <div className="panel-header">
+                    <div>
+                      <p className="panel-kicker">Session transcript</p>
+                      <h2>Prompt and response history</h2>
+                    </div>
+                  </div>
+
+                  <div className="review-list">
+                    {runSessions.map((session) => (
+                      <button
+                        key={session.id}
+                        type="button"
+                        className={`review-card ${session.id === selectedTranscriptSessionId ? 'is-selected' : ''}`}
+                        onClick={() => setSelectedTranscriptSessionId(session.id)}
+                      >
+                        <div className="approval-title">
+                          <strong>{session.threadId}</strong>
+                          <span className={`tone-chip tone-${sessionStateTone[session.state]}`}>
+                            {formatLabel(session.state)}
+                          </span>
+                        </div>
+                        <p>{session.cwd}</p>
+                      </button>
+                    ))}
+                    {runSessions.length === 0 ? (
+                      <div className="empty-state">No sessions recorded for this run.</div>
+                    ) : null}
+                  </div>
+
+                  <div className="activity-list">
+                    {selectedTranscript.map((entry) => (
+                      <article key={entry.id} className="activity-card">
+                        <div className="activity-topline">
+                          <span className="role-chip">{entry.kind}</span>
+                          <span className="tone-chip tone-active">{formatDate(entry.createdAt)}</span>
+                        </div>
+                        <p>{entry.text}</p>
+                      </article>
+                    ))}
+                    {transcriptState === 'loading' ? (
+                      <div className="empty-state">Loading transcript…</div>
+                    ) : null}
+                    {transcriptState === 'error' ? (
+                      <div className="empty-state">{transcriptError || 'Transcript unavailable.'}</div>
+                    ) : null}
+                    {transcriptState !== 'loading' && transcriptState !== 'error' && selectedTranscriptSessionId && selectedTranscript.length === 0 ? (
+                      <div className="empty-state">No transcript entries recorded for this session yet.</div>
+                    ) : null}
+                  </div>
+                </section>
               </>
             ) : null}
 
@@ -2944,6 +3026,14 @@ function App() {
                           ? String(selectedApprovalDetail.requestedPayload?.summary ?? 'No request summary attached yet.')
                           : 'Choose an approval request to inspect its context and record a reviewer decision.'}
                       </p>
+                      {approvalDetailState === 'loading' ? (
+                        <div className="empty-state">Loading live approval detail for this review request.</div>
+                      ) : null}
+                      {approvalDetailState === 'error' ? (
+                        <div className="empty-state">
+                          Unable to load approval detail. {approvalDetailError || 'The live API did not return a usable approval payload.'}
+                        </div>
+                      ) : null}
                       <div className="contract-surface">
                         <div className="contract-card">
                           <span className="panel-kicker">Requested context</span>
@@ -3088,14 +3178,14 @@ function App() {
                           onChange={(event) => setReviewNotes(event.target.value)}
                           placeholder="Record the reviewer decision or rejection feedback"
                           rows={7}
-                          disabled={!selectedApproval || actionPending}
+                          disabled={reviewActionDisabled}
                         />
                       </label>
                       <div className="action-row">
                         <button
                           type="button"
                           className="action-button approve"
-                          disabled={!selectedApproval || actionPending}
+                          disabled={reviewActionDisabled}
                           onClick={() => void handleApprovalAction('approved')}
                         >
                           Approve request
@@ -3103,7 +3193,7 @@ function App() {
                         <button
                           type="button"
                           className="action-button reject"
-                          disabled={!selectedApproval || actionPending}
+                          disabled={reviewActionDisabled}
                           onClick={() => void handleApprovalAction('rejected')}
                         >
                           Reject with feedback
@@ -3180,26 +3270,36 @@ function App() {
                     </div>
                   </div>
 
+                  {adminSurfaceState === 'loading' ? (
+                    <div className="empty-state">Loading live governance, audit, and boundary data.</div>
+                  ) : null}
+
+                  {adminSurfaceState === 'error' ? (
+                    <div className="empty-state">
+                      {adminSurfaceError || 'One or more admin detail surfaces are unavailable from the live API.'}
+                    </div>
+                  ) : null}
+
                   <div className="provider-detail-grid">
                     <article className="detail-card">
                       <p className="panel-kicker">Principal</p>
-                      <strong>{data.identity.subject}</strong>
+                      <strong>{selectedIdentity?.subject ?? 'Identity unavailable'}</strong>
                       <div className="detail-list">
-                        <span>Principal: {data.identity.principal}</span>
-                        <span>Role: {data.identity.roles.join(', ')}</span>
-                        <span>Actor type: {data.identity.actorType}</span>
-                        <span>Email: {data.identity.email ?? 'No email asserted'}</span>
+                        <span>Principal: {selectedIdentity?.principal ?? 'No live identity returned'}</span>
+                        <span>Role: {selectedIdentity?.roles.join(', ') || 'No roles returned'}</span>
+                        <span>Actor type: {selectedIdentity?.actorType ?? 'Unavailable'}</span>
+                        <span>Email: {selectedIdentity?.email ?? 'No email asserted'}</span>
                       </div>
                     </article>
 
                     <article className="detail-card">
                       <p className="panel-kicker">Workspace boundary</p>
-                      <strong>{data.identity.workspace.name}</strong>
+                      <strong>{selectedIdentity?.workspace.name ?? 'Workspace unavailable'}</strong>
                       <div className="detail-list">
-                        <span>Workspace ID: {data.identity.workspace.id}</span>
-                        <span>Team: {data.identity.team.name}</span>
-                        <span>Team ID: {data.identity.team.id}</span>
-                        <span>Policy profile: {data.governance.requestedBy.policyProfile ?? 'standard'}</span>
+                        <span>Workspace ID: {selectedIdentity?.workspace.id ?? 'Unavailable'}</span>
+                        <span>Team: {selectedIdentity?.team.name ?? 'Unavailable'}</span>
+                        <span>Team ID: {selectedIdentity?.team.id ?? 'Unavailable'}</span>
+                        <span>Policy profile: {selectedGovernance?.requestedBy.policyProfile ?? 'Unavailable'}</span>
                       </div>
                     </article>
 
@@ -3210,7 +3310,9 @@ function App() {
                         <span>Repository profile: {selectedRepository?.approvalProfile ?? selectedRun.policyProfile ?? 'standard'}</span>
                         <span>Run policy: {selectedRun.policyProfile ?? 'standard'}</span>
                         <span>Delegation state: {runAgents.length} agents / {runSessions.length} sessions</span>
-                        <span>Workspace-scoped actor report generated {formatDate(data.governance.generatedAt)}</span>
+                        <span>
+                          Workspace-scoped actor report generated {selectedGovernance?.generatedAt ? formatDate(selectedGovernance.generatedAt) : 'Unavailable'}
+                        </span>
                       </div>
                     </article>
                   </div>
@@ -3227,31 +3329,31 @@ function App() {
                   <div className="admin-grid">
                     <article className="detail-card">
                       <p className="panel-kicker">Approvals</p>
-                      <strong>{data.governance.approvals.total} governed approvals</strong>
+                      <strong>{selectedGovernance?.approvals.total ?? 0} governed approvals</strong>
                       <div className="detail-list">
-                        <span>Pending: {data.governance.approvals.pending}</span>
-                        <span>Approved: {data.governance.approvals.approved}</span>
-                        <span>Rejected: {data.governance.approvals.rejected}</span>
+                        <span>Pending: {selectedGovernance?.approvals.pending ?? 'Unavailable'}</span>
+                        <span>Approved: {selectedGovernance?.approvals.approved ?? 'Unavailable'}</span>
+                        <span>Rejected: {selectedGovernance?.approvals.rejected ?? 'Unavailable'}</span>
                       </div>
                     </article>
 
                     <article className="detail-card">
                       <p className="panel-kicker">Retention</p>
-                      <strong>{data.governance.retention.policy.runsDays} day run window</strong>
+                      <strong>{selectedGovernance?.retention.policy.runsDays ?? 'Unavailable'} day run window</strong>
                       <div className="detail-list">
-                        <span>Runs retained: {data.governance.retention.runs.retained} / {data.governance.retention.runs.total}</span>
-                        <span>Artifacts retained: {data.governance.retention.artifacts.retained} / {data.governance.retention.artifacts.total}</span>
-                        <span>Events expired: {data.governance.retention.events.expired}</span>
+                        <span>Runs retained: {selectedGovernance ? `${selectedGovernance.retention.runs.retained} / ${selectedGovernance.retention.runs.total}` : 'Unavailable'}</span>
+                        <span>Artifacts retained: {selectedGovernance ? `${selectedGovernance.retention.artifacts.retained} / ${selectedGovernance.retention.artifacts.total}` : 'Unavailable'}</span>
+                        <span>Events expired: {selectedGovernance?.retention.events.expired ?? 'Unavailable'}</span>
                       </div>
                     </article>
 
                     <article className="detail-card">
                       <p className="panel-kicker">Secrets boundary</p>
-                      <strong>{data.governance.secrets.sourceMode}</strong>
+                      <strong>{selectedGovernance?.secrets.sourceMode ?? 'Unavailable'}</strong>
                       <div className="detail-list">
-                        <span>Policy-driven access: {data.governance.secrets.policyDrivenAccess ? 'enabled' : 'disabled'}</span>
-                        <span>Trust levels: {data.governance.secrets.allowedRepositoryTrustLevels.join(', ')}</span>
-                        <span>Credentials: {data.governance.secrets.remoteCredentialEnvNames.join(', ') || 'None listed'}</span>
+                        <span>Policy-driven access: {selectedGovernance ? (selectedGovernance.secrets.policyDrivenAccess ? 'enabled' : 'disabled') : 'Unavailable'}</span>
+                        <span>Trust levels: {selectedGovernance?.secrets.allowedRepositoryTrustLevels.join(', ') || 'Unavailable'}</span>
+                        <span>Credentials: {selectedGovernance?.secrets.remoteCredentialEnvNames.join(', ') || 'None listed'}</span>
                       </div>
                     </article>
                   </div>
@@ -3266,7 +3368,7 @@ function App() {
                   </div>
 
                   <div className="provenance-list">
-                    {data.governance.approvals.history.map((entry) => (
+                    {governanceApprovalHistory.map((entry) => (
                       <article key={entry.approvalId} className="placement-card">
                         <div className="dag-card-header">
                           <strong>{entry.kind}</strong>
@@ -3285,6 +3387,9 @@ function App() {
                         </div>
                       </article>
                     ))}
+                    {governanceApprovalHistory.length === 0 ? (
+                      <div className="empty-state">No live approval provenance was returned for this run.</div>
+                    ) : null}
                   </div>
                 </section>
 
@@ -3299,37 +3404,40 @@ function App() {
                   <div className="admin-grid">
                     <article className="detail-card">
                       <p className="panel-kicker">Secret access plan</p>
-                      <strong>{data.secretAccessPlan?.access ?? 'Unknown access'}</strong>
+                      <strong>{selectedSecretAccessPlan?.access ?? 'Unavailable'}</strong>
                       <div className="detail-list">
-                        <span>Repository: {data.secretAccessPlan?.repositoryName ?? selectedRepository?.name ?? 'Unknown'}</span>
-                        <span>Policy profile: {data.secretAccessPlan?.policyProfile ?? selectedRun.policyProfile ?? 'standard'}</span>
-                        <span>Credentials: {data.secretAccessPlan?.credentialEnvNames.join(', ') || 'None listed'}</span>
-                        <span>Boundary: {data.secretAccessPlan?.distributionBoundary.join(', ') || 'No boundary text returned'}</span>
-                        <span>Reason: {data.secretAccessPlan?.reason ?? 'No reason returned'}</span>
+                        <span>Repository: {selectedSecretAccessPlan?.repositoryName ?? selectedRepository?.name ?? 'Unknown'}</span>
+                        <span>Policy profile: {selectedSecretAccessPlan?.policyProfile ?? selectedRun.policyProfile ?? 'Unavailable'}</span>
+                        <span>Credentials: {selectedSecretAccessPlan?.credentialEnvNames.join(', ') || 'None listed'}</span>
+                        <span>Boundary: {selectedSecretAccessPlan?.distributionBoundary.join(', ') || 'No boundary text returned'}</span>
+                        <span>Reason: {selectedSecretAccessPlan?.reason ?? 'No reason returned'}</span>
                       </div>
                     </article>
 
                     <article className="detail-card">
                       <p className="panel-kicker">Audit export</p>
-                      <strong>{data.auditExport ? formatDate(data.auditExport.exportedAt) : 'Not exported'}</strong>
+                      <strong>{selectedAuditExport ? formatDate(selectedAuditExport.exportedAt) : 'Unavailable'}</strong>
                       <div className="detail-list">
-                        <span>Exported by: {data.auditExport ? formatActorLabel(data.auditExport.provenance.exportedBy) : 'Unknown'}</span>
-                        <span>Event actors: {data.auditExport?.provenance.eventActors.length ?? 0}</span>
-                        <span>Audit events: {data.auditExport?.events.length ?? 0}</span>
-                        <span>Approval entries: {data.auditExport?.provenance.approvals.length ?? 0}</span>
-                        <span>Run retention policy: {data.auditExport ? `${data.auditExport.retention.policy.runsDays} days` : 'Unknown'}</span>
+                        <span>Exported by: {selectedAuditExport ? formatActorLabel(selectedAuditExport.provenance.exportedBy) : 'Unavailable'}</span>
+                        <span>Event actors: {selectedAuditExport?.provenance.eventActors.length ?? 0}</span>
+                        <span>Audit events: {selectedAuditExport?.events.length ?? 0}</span>
+                        <span>Approval entries: {selectedAuditExport?.provenance.approvals.length ?? 0}</span>
+                        <span>Run retention policy: {selectedAuditExport ? `${selectedAuditExport.retention.policy.runsDays} days` : 'Unavailable'}</span>
                       </div>
                     </article>
 
                     <article className="detail-card">
                       <p className="panel-kicker">Repository profiles</p>
-                      <strong>{data.governance.policies.repositoryProfiles.length} active profiles</strong>
+                      <strong>{governanceRepositoryProfiles.length} active profiles</strong>
                       <div className="detail-list">
-                        {data.governance.policies.repositoryProfiles.map((profile) => (
+                        {governanceRepositoryProfiles.map((profile) => (
                           <span key={profile.profile}>
                             {profile.profile}: {profile.repositoryCount} repos / {profile.runCount} runs
                           </span>
                         ))}
+                        {governanceRepositoryProfiles.length === 0 ? (
+                          <span>No live repository profile summary returned.</span>
+                        ) : null}
                       </div>
                     </article>
                   </div>
@@ -3344,9 +3452,9 @@ function App() {
         <span>{loading ? 'Refreshing board state…' : 'Board data ready.'}</span>
         <span>
           {errorText
-            ? `API fallback active: ${errorText}`
+            ? `Live API issue: ${errorText}`
             : data.source === 'api'
-              ? 'Live repositories, worker nodes, governance/admin views, approvals, audits, and messages are polling.'
+              ? 'Live repositories, worker nodes, governance/admin views, approvals, audits, transcripts, and messages are polling.'
               : 'Using fallback seed data until the API is reachable.'}
         </span>
       </footer>
