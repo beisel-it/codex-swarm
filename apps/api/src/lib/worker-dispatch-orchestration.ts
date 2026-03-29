@@ -1,3 +1,5 @@
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import type {
   Repository,
   RunDetail,
@@ -20,6 +22,8 @@ import {
 
 import { runLeaderResliceLoop } from "./leader-planning-loop.js";
 import { checkpointRunBudget } from "./run-budget-guard.js";
+
+const execFileAsync = promisify(execFile);
 
 export interface WorkerDispatchOrchestrationRequest {
   <T>(method: string, path: string, payload?: Record<string, unknown>): Promise<T>;
@@ -231,6 +235,43 @@ async function failAssignment(
   );
 }
 
+async function detectWorkspaceBranch(cwd: string) {
+  try {
+    const { stdout } = await execFileAsync("git", ["rev-parse", "--abbrev-ref", "HEAD"], { cwd });
+    const branch = stdout.trim();
+
+    if (!branch || branch === "HEAD") {
+      return null;
+    }
+
+    return branch;
+  } catch {
+    return null;
+  }
+}
+
+async function synchronizeRunBranchContext(
+  request: WorkerDispatchOrchestrationRequest,
+  runDetail: RunDetail,
+  workspacePath: string
+) {
+  const branchName = await detectWorkspaceBranch(workspacePath);
+
+  if (!branchName || branchName === runDetail.branchName) {
+    return branchName;
+  }
+
+  await request(
+    "PATCH",
+    `/api/v1/runs/${runDetail.id}`,
+    {
+      branchName
+    }
+  );
+
+  return branchName;
+}
+
 export async function runManagedWorkerDispatch(
   input: WorkerDispatchOrchestrationInput
 ): Promise<WorkerDispatchOrchestrationResult | null> {
@@ -262,10 +303,11 @@ export async function runManagedWorkerDispatch(
     };
   }
 
+  const effectiveBranchName = runDetail.branchName ?? assignment.branchName ?? repository.defaultBranch;
   const workspace = await materializeRepositoryWorkspace({
     repository,
     destinationPath: assignment.worktreePath,
-    branch: assignment.branchName ?? repository.defaultBranch
+    branch: effectiveBranchName
   });
   const supervisor = new CodexServerSupervisor({
     config: {
@@ -394,6 +436,7 @@ export async function runManagedWorkerDispatch(
 
     if (responseOutput && assignment.taskId) {
       const outcome = parseWorkerTaskOutcome(responseOutput);
+      await synchronizeRunBranchContext(input.request, runDetail, workspace.path);
 
       await publishWorkerOutcomeMessages(
         input.request,
@@ -403,15 +446,17 @@ export async function runManagedWorkerDispatch(
         outcome
       );
 
-      await runLeaderResliceLoop({
-        request: input.request,
-        runId: assignment.runId,
-        parentTaskId: assignment.taskId,
-        actorId: assignment.agentId,
-        workerOutcome: outcome,
-        executeTool: input.executeTool,
-        ...(input.supervisorCommand ? { supervisorCommand: input.supervisorCommand } : {})
-      });
+      if (outcome.status === "needs_slicing") {
+        await runLeaderResliceLoop({
+          request: input.request,
+          runId: assignment.runId,
+          parentTaskId: assignment.taskId,
+          actorId: assignment.agentId,
+          workerOutcome: outcome,
+          executeTool: input.executeTool,
+          ...(input.supervisorCommand ? { supervisorCommand: input.supervisorCommand } : {})
+        });
+      }
     }
 
     if (assignment.taskId) {

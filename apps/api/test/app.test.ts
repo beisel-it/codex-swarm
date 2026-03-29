@@ -44,6 +44,7 @@ const controlPlane = {
   listRuns: vi.fn(),
   getRun: vi.fn(),
   createRun: vi.fn(),
+  updateRun: vi.fn(),
   updateRunStatus: vi.fn(),
   publishRunBranch: vi.fn(),
   createRunPullRequestHandoff: vi.fn(),
@@ -485,6 +486,19 @@ class FakeVerticalSliceControlPlane {
     const run = await this.getRun(runId, access);
     run.status = input.status;
     run.planArtifactPath = input.planArtifactPath ?? run.planArtifactPath;
+    return run;
+  }
+
+  async updateRun(runId: string, input: any, access?: any) {
+    const run = await this.getRun(runId, access);
+    run.goal = input.goal ?? run.goal;
+    run.branchName = input.branchName === undefined ? run.branchName : input.branchName;
+    run.budgetTokens = input.budgetTokens === undefined ? run.budgetTokens : input.budgetTokens;
+    run.budgetCostUsd = input.budgetCostUsd === undefined ? run.budgetCostUsd : input.budgetCostUsd;
+    run.concurrencyCap = input.concurrencyCap ?? run.concurrencyCap;
+    run.policyProfile = input.policyProfile === undefined ? run.policyProfile : input.policyProfile;
+    run.metadata = input.metadata === undefined ? run.metadata : input.metadata;
+    run.updatedAt = new Date();
     return run;
   }
 
@@ -5404,13 +5418,18 @@ describe("buildApp", () => {
         ],
         executeTool: async () => ({
           threadId: "thread-worker-managed",
-          output: "worker completed"
+          output: JSON.stringify({
+            summary: "worker completed",
+            status: "completed",
+            messages: [],
+            blockingIssues: []
+          })
         })
       });
 
       expect(successfulAttempt).toMatchObject({
         status: "completed",
-        output: "worker completed",
+        output: expect.stringContaining("\"status\":\"completed\""),
         supervisorStatus: "stopped"
       });
 
@@ -5444,7 +5463,7 @@ describe("buildApp", () => {
         expect.objectContaining({
           sessionId,
           kind: "response",
-          text: "worker completed"
+          text: expect.stringContaining("\"summary\":\"worker completed\"")
         })
       ]);
     } finally {
@@ -5606,13 +5625,18 @@ describe("buildApp", () => {
         ],
         executeTool: async () => ({
           threadId: "thread-worker-validation",
-          output: "worker completed"
+          output: JSON.stringify({
+            summary: "worker completed",
+            status: "completed",
+            messages: [],
+            blockingIssues: []
+          })
         })
       });
 
       expect(result).toMatchObject({
         status: "completed",
-        output: "worker completed"
+        output: expect.stringContaining("\"status\":\"completed\"")
       });
 
       const validationsResponse = await app.inject({
@@ -5790,13 +5814,18 @@ describe("buildApp", () => {
         ],
         executeTool: async () => ({
           threadId: "thread-worker-bootstrap",
-          output: "bootstrap completed"
+          output: JSON.stringify({
+            summary: "bootstrap completed",
+            status: "completed",
+            messages: [],
+            blockingIssues: []
+          })
         })
       });
 
       expect(result).toMatchObject({
         status: "completed",
-        output: "bootstrap completed",
+        output: expect.stringContaining("\"summary\":\"bootstrap completed\""),
         supervisorStatus: "stopped"
       });
 
@@ -5835,18 +5864,20 @@ describe("buildApp", () => {
       });
 
       expect(transcriptResponse.statusCode).toBe(200);
-      expect(transcriptResponse.json()).toEqual([
-        expect.objectContaining({
-          sessionId: createdSession.id,
-          kind: "prompt",
-          text: expect.stringContaining("Operator brief:\nBootstrap the worker session")
-        }),
-        expect.objectContaining({
-          sessionId: createdSession.id,
-          kind: "response",
-          text: "bootstrap completed"
-        })
-      ]);
+      expect(transcriptResponse.json()).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            sessionId: createdSession.id,
+            kind: "prompt",
+            text: expect.stringContaining("Operator brief:\nBootstrap the worker session")
+          }),
+          expect.objectContaining({
+            sessionId: createdSession.id,
+            kind: "response",
+            text: expect.stringContaining("\"summary\":\"bootstrap completed\"")
+          })
+        ])
+      );
     } finally {
       await rm(worktreeRoot, { recursive: true, force: true });
       await rm(repoRoot, { recursive: true, force: true });
@@ -6183,6 +6214,227 @@ describe("buildApp", () => {
     }
   });
 
+  it("does not create follow-on tasks when a worker reports blocked", async () => {
+    const verticalSlice = new FakeVerticalSliceControlPlane();
+    const app = await buildApp({
+      config: getConfig({
+        NODE_ENV: "test",
+        PORT: 3000,
+        HOST: "127.0.0.1",
+        DATABASE_URL: "postgres://unused/test",
+        DEV_AUTH_TOKEN: "test-token",
+        OPENAI_TRACING_DISABLED: true
+      }),
+      controlPlane: verticalSlice as unknown as ControlPlaneService
+    });
+
+    const headers = {
+      authorization: "Bearer test-token"
+    };
+    const repoRoot = await mkdtemp(join(tmpdir(), "codex-swarm-blocked-dispatch-repo-"));
+    const worktreeRoot = await mkdtemp(join(tmpdir(), "codex-swarm-blocked-dispatch-"));
+
+    try {
+      await writeFile(join(repoRoot, "README.md"), "blocked worker dispatch\n", "utf8");
+      execFileSync("git", ["init", "--initial-branch=main"], { cwd: repoRoot, stdio: "pipe" });
+      execFileSync("git", ["config", "user.name", "Codex Swarm"], { cwd: repoRoot, stdio: "pipe" });
+      execFileSync("git", ["config", "user.email", "codex-swarm@example.com"], { cwd: repoRoot, stdio: "pipe" });
+      execFileSync("git", ["add", "README.md"], { cwd: repoRoot, stdio: "pipe" });
+      execFileSync("git", ["commit", "-m", "initial"], { cwd: repoRoot, stdio: "pipe" });
+      (verticalSlice as any).repositories[0].url = repoRoot;
+
+      const request: LeaderPlanningLoopRequest = async <T>(
+        method: string,
+        path: string,
+        payload?: Record<string, unknown>
+      ) => {
+        const response = await (app.inject as any)({
+          method,
+          url: path,
+          headers,
+          ...(payload ? { payload } : {})
+        }) as {
+          statusCode: number;
+          body: string;
+          json(): T;
+        };
+
+        if (response.statusCode >= 400) {
+          throw new Error(`${method} ${path} failed: ${response.statusCode} ${response.body}`);
+        }
+
+        return response.json() as T;
+      };
+
+      await app.inject({
+        method: "POST",
+        url: "/api/v1/runs",
+        headers,
+        payload: {
+          repositoryId: ids.repository,
+          goal: "Verify blocked worker outcomes do not auto-reslice",
+          concurrencyCap: 2,
+          metadata: {}
+        }
+      });
+
+      const leaderResponse = await app.inject({
+        method: "POST",
+        url: "/api/v1/agents",
+        headers,
+        payload: {
+          runId: ids.run,
+          name: "leader",
+          role: "tech-lead",
+          status: "idle",
+          session: {
+            threadId: "thread-leader-blocked",
+            cwd: process.cwd(),
+            sandbox: "workspace-write",
+            approvalPolicy: "on-request",
+            includePlanTool: true,
+            metadata: {
+              source: "worker-blocked-test"
+            }
+          }
+        }
+      });
+
+      expect(leaderResponse.statusCode).toBe(201);
+      const leaderAgentId = leaderResponse.json().id as string;
+
+      const workerResponse = await app.inject({
+        method: "POST",
+        url: "/api/v1/agents",
+        headers,
+        payload: {
+          runId: ids.run,
+          name: "worker-primary",
+          role: "tester",
+          status: "idle",
+          session: {
+            threadId: "thread-worker-blocked",
+            cwd: process.cwd(),
+            sandbox: "workspace-write",
+            approvalPolicy: "on-request",
+            includePlanTool: false,
+            metadata: {
+              source: "worker-blocked-test"
+            }
+          }
+        }
+      });
+
+      expect(workerResponse.statusCode).toBe(201);
+      const workerAgentId = workerResponse.json().id as string;
+      const workerRunDetailResponse = await app.inject({
+        method: "GET",
+        url: `/api/v1/runs/${ids.run}`,
+        headers
+      });
+      const workerSessionId = workerRunDetailResponse.json().sessions.find((session: any) => session.agentId === workerAgentId).id as string;
+
+      const taskResponse = await app.inject({
+        method: "POST",
+        url: "/api/v1/tasks",
+        headers,
+        payload: {
+          runId: ids.run,
+          title: "Inspect blocked workspace state",
+          description: "Confirm the workspace state and report blockers without reslicing.",
+          role: "tester",
+          priority: 1,
+          dependencyIds: [],
+          acceptanceCriteria: ["reports a blocker without generating follow-on child tasks"],
+          validationTemplates: []
+        }
+      });
+
+      const taskId = taskResponse.json().id as string;
+
+      await app.inject({
+        method: "POST",
+        url: "/api/v1/worker-dispatch-assignments",
+        headers,
+        payload: {
+          runId: ids.run,
+          taskId,
+          agentId: workerAgentId,
+          sessionId: workerSessionId,
+          repositoryId: ids.repository,
+          repositoryName: "codex-swarm",
+          stickyNodeId: ids.workerNode,
+          requiredCapabilities: ["remote"],
+          worktreePath: join(worktreeRoot, "worker-blocked"),
+          prompt: "Primary worker dispatch prompt",
+          profile: "default",
+          sandbox: "workspace-write",
+          approvalPolicy: "on-request"
+        }
+      });
+
+      const result = await runManagedWorkerDispatch({
+        request,
+        nodeId: ids.workerNode,
+        workspaceRoot: process.cwd(),
+        supervisorCommand: [
+          process.execPath,
+          "--input-type=module",
+          "-e",
+          "setInterval(() => {}, 1000);"
+        ],
+        executeTool: async () => ({
+          threadId: "thread-worker-blocked",
+          output: JSON.stringify({
+            summary: "The required scaffold is missing in this workspace.",
+            status: "blocked",
+            messages: [
+              {
+                target: "leader",
+                body: "Blocked because the required scaffold is missing in this workspace."
+              }
+            ],
+            blockingIssues: [
+              "Current workspace does not contain the expected scaffold."
+            ]
+          })
+        })
+      });
+
+      expect(result).toMatchObject({ status: "completed" });
+
+      const tasksResponse = await app.inject({
+        method: "GET",
+        url: `/api/v1/tasks?runId=${ids.run}`,
+        headers
+      });
+
+      expect(tasksResponse.statusCode).toBe(200);
+      expect(tasksResponse.json().filter((task: any) => task.parentTaskId === taskId)).toEqual([]);
+
+      const messagesResponse = await app.inject({
+        method: "GET",
+        url: `/api/v1/messages?runId=${ids.run}`,
+        headers
+      });
+
+      expect(messagesResponse.statusCode).toBe(200);
+      expect(messagesResponse.json()).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            senderAgentId: workerAgentId,
+            recipientAgentId: leaderAgentId,
+            body: "Blocked because the required scaffold is missing in this workspace."
+          })
+        ])
+      );
+    } finally {
+      await rm(worktreeRoot, { recursive: true, force: true });
+      await rm(repoRoot, { recursive: true, force: true });
+      await app.close();
+    }
+  });
+
   it("pauses a run behind policy-exception approval when execution exceeds the budget cap", async () => {
     const verticalSlice = new FakeVerticalSliceControlPlane();
     const app = await buildApp({
@@ -6319,7 +6571,12 @@ describe("buildApp", () => {
         ],
         executeTool: async () => ({
           threadId: "thread-worker-budget",
-          output: "worker completed",
+          output: JSON.stringify({
+            summary: "worker completed",
+            status: "completed",
+            messages: [],
+            blockingIssues: []
+          }),
           metadata: {
             usage: {
               totalTokens: 120,

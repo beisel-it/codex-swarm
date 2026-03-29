@@ -286,7 +286,7 @@ export async function runLeaderPlanningLoop(input: LeaderPlanningLoopInput): Pro
 }
 
 export async function runLeaderResliceLoop(input: LeaderResliceLoopInput): Promise<LeaderResliceLoopResult | null> {
-  if (input.workerOutcome.status !== "needs_slicing" && input.workerOutcome.status !== "blocked") {
+  if (input.workerOutcome.status !== "needs_slicing") {
     return null;
   }
 
