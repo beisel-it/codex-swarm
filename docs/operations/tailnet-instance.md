@@ -21,6 +21,7 @@ This means:
 - `codex-swarm-redis.service`
 - `codex-swarm-api.service`
 - `codex-swarm-frontend.service`
+- `codex-swarm-worker.service`
 - `codex-swarm.target`
 
 The source templates live under `ops/systemd-user/`.
@@ -35,6 +36,8 @@ Install `%h/.config/codex-swarm/tailnet.env` from
 - loopback-only Postgres and Redis ports
 - DB password
 - auth token
+- absolute artifact and workspace root paths
+- worker node identity and Codex command
 
 ## Access shape
 
@@ -62,7 +65,7 @@ Use only:
 This hosted instance makes the control plane and operator surface available on
 the tailnet. The next development iteration should be driven against codex-swarm
 itself rather than clawteam, using the deployed API/frontend/TUI surfaces and
-the checked-in operator workflows.
+the checked-in operator workflows and the local worker daemon.
 
 ## Local operator commands
 
@@ -90,6 +93,43 @@ The hosted instance runs as enabled `systemd --user` services:
 - `codex-swarm-redis.service`
 - `codex-swarm-api.service`
 - `codex-swarm-frontend.service`
+- `codex-swarm-worker.service`
 
 With user lingering enabled, these services restart automatically on boot
 without exposing the database or cache beyond loopback.
+
+## Local worker daemon
+
+The local host should also run:
+
+- `codex-swarm-worker.service`
+
+This service registers a real worker node with the hosted control plane and
+executes claimed dispatch assignments on the local host.
+
+Required worker env:
+
+- `CODEX_SWARM_NODE_ID`
+- `CODEX_SWARM_NODE_NAME`
+- `CODEX_SWARM_CAPABILITIES`
+- `CODEX_SWARM_CODEX_COMMAND`
+- optional `CODEX_SWARM_WORKER_POLL_INTERVAL_MS`
+- optional `CODEX_SWARM_RECONCILE_ON_START`
+
+The worker service now:
+
+- registers the node
+- sends periodic heartbeats
+- reconciles stale leases on startup
+- claims queued dispatch assignments
+- materializes workspaces under `CODEX_SWARM_WORKSPACE_ROOT`
+- executes Codex requests locally via `codex exec`
+- reports completion or retry/failure state back to the control plane
+
+The checked-in daemon entrypoint is:
+
+- `apps/api/src/ops/local-worker-daemon.ts`
+
+There is no heartbeat-only fallback in this deployment path. If the local Codex
+executor or worker dependencies are not usable, the service fails instead of
+pretending the host is execution-ready.

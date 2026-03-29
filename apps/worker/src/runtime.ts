@@ -81,6 +81,16 @@ export interface StreamableHttpExecutorOptions {
   fetchImpl?: typeof fetch;
 }
 
+export interface LocalCodexCliExecutorOptions {
+  spawnImpl?: (
+    command: string,
+    args: readonly string[],
+    options: SpawnOptions
+  ) => ChildProcess;
+  command?: string | string[];
+  env?: NodeJS.ProcessEnv;
+}
+
 export interface PlanTaskDocument {
   title: string;
   role: string;
@@ -800,6 +810,77 @@ async function parseStreamableHttpBody(response: Response) {
   return response.json();
 }
 
+async function collectProcessResult(child: ChildProcess) {
+  let stdout = "";
+  let stderr = "";
+
+  child.stdout?.setEncoding("utf8");
+  child.stdout?.on("data", (chunk: string | Buffer) => {
+    stdout += String(chunk);
+  });
+
+  child.stderr?.setEncoding("utf8");
+  child.stderr?.on("data", (chunk: string | Buffer) => {
+    stderr += String(chunk);
+  });
+
+  const [code, signal] = await once(child, "exit") as [number | null, NodeJS.Signals | null];
+
+  return {
+    code,
+    signal,
+    stdout,
+    stderr
+  };
+}
+
+function parseCodexExecJsonl(stdout: string) {
+  let threadId: string | null = null;
+  let output: string | null = null;
+
+  for (const line of stdout.split(/\r?\n/)) {
+    const trimmed = line.trim();
+
+    if (!trimmed) {
+      continue;
+    }
+
+    let payload: unknown;
+
+    try {
+      payload = JSON.parse(trimmed);
+    } catch {
+      continue;
+    }
+
+    if (!payload || typeof payload !== "object") {
+      continue;
+    }
+
+    if ((payload as { type?: unknown }).type === "thread.started" && typeof (payload as { thread_id?: unknown }).thread_id === "string") {
+      threadId = (payload as { thread_id: string }).thread_id;
+      continue;
+    }
+
+    if (
+      (payload as { type?: unknown }).type === "item.completed"
+      && (payload as { item?: { type?: unknown; text?: unknown } }).item?.type === "agent_message"
+      && typeof (payload as { item: { text: string } }).item.text === "string"
+    ) {
+      output = (payload as { item: { text: string } }).item.text;
+    }
+  }
+
+  if (!threadId || !output) {
+    throw new Error("codex exec output did not contain thread.started and final agent_message events");
+  }
+
+  return {
+    threadId,
+    output
+  };
+}
+
 function normalizeCodexToolExecutionResult(payload: unknown, response: Response): CodexToolExecutionResult {
   const normalized = payload && typeof payload === "object" && "result" in payload
     ? (payload as { result: unknown }).result
@@ -845,6 +926,86 @@ export function createStreamableHttpToolExecutor(options: StreamableHttpExecutor
     }
 
     return normalizeCodexToolExecutionResult(await parseStreamableHttpBody(response), response);
+  };
+}
+
+export function createLocalCodexCliExecutor(options: LocalCodexCliExecutorOptions = {}): CodexToolExecutor {
+  const spawnImpl = options.spawnImpl ?? spawn;
+  const configuredCommand = options.command ?? "codex";
+  const command = Array.isArray(configuredCommand)
+    ? configuredCommand
+    : [configuredCommand];
+  const [executable, ...baseArgs] = command;
+
+  if (!executable) {
+    throw new Error("local Codex CLI executor requires a command executable");
+  }
+
+  return async (request) => {
+    if (!("tool" in request)) {
+      throw new Error("local Codex CLI executor requires a stdio codex request");
+    }
+
+    const tool = request.tool;
+    let args: string[] = [];
+    let cwd = process.cwd();
+
+    if (tool === "codex-reply") {
+      const input = request.input;
+
+      if (!input) {
+        throw new Error("codex-reply request requires input");
+      }
+
+      args = [
+        ...baseArgs,
+        "exec",
+        "resume",
+        "--json",
+        "--full-auto",
+        input.threadId,
+        input.prompt
+      ];
+    } else {
+      const input = request.input;
+
+      if (!input) {
+        throw new Error("codex request requires input");
+      }
+
+      args = [
+        ...baseArgs,
+        "exec",
+        "--json",
+        "--full-auto",
+        "-C",
+        input.cwd,
+        ...(input.profile ? ["-p", input.profile] : []),
+        "-s",
+        input.sandbox,
+        input.prompt
+      ];
+      cwd = input.cwd;
+    }
+
+    const child = spawnImpl(executable, args, {
+      cwd,
+      env: {
+        ...process.env,
+        ...options.env
+      },
+      stdio: ["ignore", "pipe", "pipe"]
+    });
+
+    const result = await collectProcessResult(child);
+
+    if (result.code !== 0) {
+      const rendered = [executable, ...args].join(" ");
+      const suffix = result.stderr.trim().length > 0 ? `: ${result.stderr.trim()}` : "";
+      throw new Error(`${rendered} failed with code ${result.code ?? "null"}${result.signal ? ` signal ${result.signal}` : ""}${suffix}`);
+    }
+
+    return parseCodexExecJsonl(result.stdout);
   };
 }
 

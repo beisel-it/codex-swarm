@@ -22,7 +22,8 @@ systemctl --user --no-pager --full status \
   codex-swarm-postgres.service \
   codex-swarm-redis.service \
   codex-swarm-api.service \
-  codex-swarm-frontend.service
+  codex-swarm-frontend.service \
+  codex-swarm-worker.service
 
 echo
 echo "listeners:"
@@ -33,3 +34,17 @@ echo "health:"
 curl -fsS "http://${CODEX_SWARM_TAILNET_DNS}:${CODEX_SWARM_API_PORT}/health"
 echo
 
+echo
+echo "worker nodes:"
+curl -fsS "http://${CODEX_SWARM_TAILNET_DNS}:${CODEX_SWARM_API_PORT}/api/v1/worker-nodes" \
+  -H "Authorization: Bearer ${CODEX_SWARM_API_TOKEN:-${CODEX_SWARM_DEV_AUTH_TOKEN}}" || true
+echo
+
+echo "recent worker logs:"
+journalctl --user -u codex-swarm-worker.service -n 20 --no-pager || true
+
+echo
+echo "worker dispatch assignments:"
+curl -fsS "http://${CODEX_SWARM_TAILNET_DNS}:${CODEX_SWARM_API_PORT}/api/v1/worker-dispatch-assignments" \
+  -H "Authorization: Bearer ${CODEX_SWARM_API_TOKEN:-${CODEX_SWARM_DEV_AUTH_TOKEN}}" || true
+echo

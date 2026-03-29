@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { PassThrough } from "node:stream";
 import { describe, expect, it } from "vitest";
 import type {
   Repository,
@@ -20,6 +21,7 @@ import {
   cleanupWorktreePaths,
   CodexSessionRuntime,
   CodexServerSupervisor,
+  createLocalCodexCliExecutor,
   createStreamableHttpToolExecutor,
   materializeRepositoryWorkspace,
   materializePlanArtifact,
@@ -735,6 +737,129 @@ describe("worker runtime helpers", () => {
         });
       });
     }
+  });
+
+  it("executes local codex start requests through the CLI", async () => {
+    const calls: Array<{ command: string; args: string[]; cwd: string | undefined }> = [];
+    const executeTool = createLocalCodexCliExecutor({
+      command: process.execPath,
+      spawnImpl: (command, args, options) => {
+        calls.push({
+          command,
+          args: [...args],
+          cwd: options.cwd?.toString()
+        });
+
+        const stdout = new PassThrough();
+        const stderr = new PassThrough();
+        const child = {
+          stdout,
+          stderr
+        } as any;
+
+        queueMicrotask(() => {
+          stdout.end([
+            JSON.stringify({ type: "thread.started", thread_id: "thread-cli-001" }),
+            JSON.stringify({ type: "item.completed", item: { id: "item-1", type: "agent_message", text: "cli-started" } }),
+            JSON.stringify({ type: "turn.completed", usage: { output_tokens: 1 } })
+          ].join("\n"));
+          child.emit("exit", 0, null);
+        });
+
+        Object.setPrototypeOf(child, PassThrough.prototype);
+        child.on = Function.prototype.bind.call((new PassThrough() as any).on, child);
+        child.once = Function.prototype.bind.call((new PassThrough() as any).once, child);
+        child.emit = Function.prototype.bind.call((new PassThrough() as any).emit, child);
+
+        return child;
+      }
+    });
+
+    const result = await executeTool(buildCodexSessionStartRequest({
+      prompt: "Start the worker",
+      config: {
+        cwd: "/tmp/run-001/backend-dev",
+        profile: "default",
+        sandbox: "workspace-write",
+        approvalPolicy: "on-request"
+      }
+    }));
+
+    expect(result).toEqual({
+      threadId: "thread-cli-001",
+      output: "cli-started"
+    });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.command).toBe(process.execPath);
+    expect(calls[0]?.args).toEqual([
+      "exec",
+      "--json",
+      "--full-auto",
+      "-C",
+      "/tmp/run-001/backend-dev",
+      "-p",
+      "default",
+      "-s",
+      "workspace-write",
+      "Start the worker"
+    ]);
+    expect(calls[0]?.cwd).toBe("/tmp/run-001/backend-dev");
+  });
+
+  it("executes local codex reply requests through the CLI", async () => {
+    const calls: Array<{ command: string; args: string[]; cwd: string | undefined }> = [];
+    const executeTool = createLocalCodexCliExecutor({
+      command: process.execPath,
+      spawnImpl: (command, args, options) => {
+        calls.push({
+          command,
+          args: [...args],
+          cwd: options.cwd?.toString()
+        });
+
+        const stdout = new PassThrough();
+        const stderr = new PassThrough();
+        const child = {
+          stdout,
+          stderr
+        } as any;
+
+        queueMicrotask(() => {
+          stdout.end([
+            JSON.stringify({ type: "thread.started", thread_id: "thread-cli-001" }),
+            JSON.stringify({ type: "item.completed", item: { id: "item-1", type: "agent_message", text: "cli-continued" } }),
+            JSON.stringify({ type: "turn.completed", usage: { output_tokens: 1 } })
+          ].join("\n"));
+          child.emit("exit", 0, null);
+        });
+
+        Object.setPrototypeOf(child, PassThrough.prototype);
+        child.on = Function.prototype.bind.call((new PassThrough() as any).on, child);
+        child.once = Function.prototype.bind.call((new PassThrough() as any).once, child);
+        child.emit = Function.prototype.bind.call((new PassThrough() as any).emit, child);
+
+        return child;
+      }
+    });
+
+    const result = await executeTool(buildCodexSessionReplyRequest({
+      threadId: "thread-cli-001",
+      prompt: "Continue the worker"
+    }));
+
+    expect(result).toEqual({
+      threadId: "thread-cli-001",
+      output: "cli-continued"
+    });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.args).toEqual([
+      "exec",
+      "resume",
+      "--json",
+      "--full-auto",
+      "thread-cli-001",
+      "Continue the worker"
+    ]);
   });
 
   it("executes codex start and reply flows with persisted thread reuse", async () => {

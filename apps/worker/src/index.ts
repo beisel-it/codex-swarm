@@ -1,5 +1,6 @@
 import {
   buildCodexServerCommand,
+  createLocalCodexCliExecutor,
   buildPlanMarkdown,
   CodexSessionRuntime,
   CodexServerSupervisor,
@@ -34,6 +35,7 @@ import {
 
 export {
   buildCodexServerCommand,
+  createLocalCodexCliExecutor,
   buildPlanMarkdown,
   CodexSessionRuntime,
   CodexServerSupervisor,
