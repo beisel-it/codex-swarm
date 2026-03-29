@@ -775,3 +775,28 @@ Evidence:
 Residual risks:
 
 - This verifies retry/refinement behavior at the dispatch and control-plane layers; it does not by itself prove production-scale load behavior, which remains a separate gap under `[093]`.
+
+## Task `8b1babd1`
+
+Roadmap entry:
+
+- Phase 3 deliverable: `Real repo onboarding flow`
+
+Verdict:
+
+- gap
+
+Evidence:
+
+- The current onboarding API is `POST /api/v1/repositories`, which persists repository name, URL, provider, default branch, local path, trust level, and approval profile in `apps/api/src/routes/repositories.ts` and `apps/api/src/services/control-plane-service.ts`.
+- The checked-in integration test only verifies that repository creation returns provider onboarding metadata for a GitHub example in `apps/api/test/app.test.ts`.
+- I found no implementation that validates provider connectivity, imports repository metadata from GitHub/GitLab, checks access, syncs branches, or performs any broader provider-backed onboarding workflow beyond storing the submitted repository record.
+- The user guide describes onboarding in terms of resulting repository state, but it does not provide a stronger executable flow than creating and then selecting a repository record in `docs/user-guide.md`.
+
+Residual risks:
+
+- Reviewers can support repository record creation with provider/trust metadata, but not the stronger roadmap deliverable implied by a real repo onboarding flow.
+
+Backlog follow-up:
+
+- Add a provider-backed onboarding flow with acceptance evidence, or intentionally narrow the roadmap deliverable to the currently implemented repository registration path.
