@@ -1727,6 +1727,10 @@ function App() {
   const [taskDraftRole, setTaskDraftRole] = useState('developer')
   const [showRepoControls, setShowRepoControls] = useState(false)
   const [showRunControls, setShowRunControls] = useState(false)
+  const [showDagSection, setShowDagSection] = useState(false)
+  const [showAgentSection, setShowAgentSection] = useState(false)
+  const [showAllRuns, setShowAllRuns] = useState(false)
+  const [showAllRepositories, setShowAllRepositories] = useState(false)
   const [sidebarWidth, setSidebarWidth] = useState(() => {
     if (typeof window === 'undefined') {
       return 344
@@ -2065,6 +2069,18 @@ function App() {
   }, [data.source, selectedRepositoryStableId, selectedRunStableId])
 
   const blockedTasks = runTasks.filter((task) => task.status === 'blocked')
+  const visibleLaneStatuses = taskStatusOrder.filter((status) =>
+    visibleTasks.some((task) => task.status === status),
+  )
+  const laneStatusesToRender = visibleLaneStatuses.length > 0 ? visibleLaneStatuses : taskStatusOrder
+  const repositoriesSorted = [...data.repositories].sort((left, right) => {
+    const leftTime = left.updatedAt ?? left.createdAt ?? ''
+    const rightTime = right.updatedAt ?? right.createdAt ?? ''
+    return rightTime.localeCompare(leftTime) || left.name.localeCompare(right.name)
+  })
+  const runsSorted = [...data.runs].sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
+  const visibleRepositories = showAllRepositories ? repositoriesSorted : repositoriesSorted.slice(0, 6)
+  const visibleRuns = showAllRuns ? runsSorted : runsSorted.slice(0, 8)
 
   async function handleApprovalAction(status: ApprovalStatus) {
     if (!selectedApproval) {
@@ -2497,9 +2513,14 @@ function App() {
                   <strong>Repositories</strong>
                   <span>{data.repositories.length} tracked</span>
                 </div>
+                {data.repositories.length > 6 ? (
+                  <button type="button" className="control-toggle" onClick={() => setShowAllRepositories((current) => !current)}>
+                    {showAllRepositories ? 'Less' : `All ${data.repositories.length}`}
+                  </button>
+                ) : null}
               </div>
               <div className="inventory-list">
-                {data.repositories.map((repository) => (
+                {visibleRepositories.map((repository) => (
                   <article key={repository.id} className="inventory-item">
                     <div>
                       <strong>{repository.name}</strong>
@@ -2526,7 +2547,7 @@ function App() {
           {errorText ? <p className="control-error control-error-inline">{errorText}</p> : null}
 
           <div className="run-stack">
-            {data.runs.map((run) => (
+            {visibleRuns.map((run) => (
               <div key={run.id} className={`run-entry ${run.id === selectedRun?.id ? 'is-selected' : ''}`}>
                 <button
                   type="button"
@@ -2538,35 +2559,27 @@ function App() {
                   <div className="run-card-topline">
                     <span className="run-timestamp">{formatDate(run.updatedAt)}</span>
                     <div className="run-status-badges">
-                      <div className="run-status-badge">
-                        <span className="badge-label">Run</span>
-                        <span className={`tone-chip tone-${runStatusTone[run.status]}`}>
-                          {formatLabel(run.status)}
-                        </span>
-                      </div>
-                      <div className="run-status-badge">
-                        <span className="badge-label">Handoff</span>
-                        <span className={`tone-chip tone-${handoffTone[run.handoffStatus]}`}>
-                          {formatLabel(run.handoffStatus)}
-                        </span>
-                      </div>
-                    </div>
+                  <div className="run-status-badge">
+                    <span className="badge-label">Run</span>
+                    <span className={`tone-chip tone-${runStatusTone[run.status]}`}>
+                      {formatLabel(run.status)}
+                    </span>
                   </div>
+                </div>
+              </div>
                   <h3>{run.goal}</h3>
                   <p>
                     {run.pullRequestUrl
                       ? `PR #${run.pullRequestNumber ?? 'pending'} · ${formatLabel(run.pullRequestStatus ?? 'open')}`
                       : run.publishedBranch ?? run.branchName ?? 'Branch not assigned yet'}
                   </p>
-                  <div className="run-card-meta">
-                    <span className="role-chip">
-                      {data.repositories.find((repository) => repository.id === run.repositoryId)?.provider ?? 'other'}
-                    </span>
-                    <span className="priority-chip">
-                      {run.publishedBranch ?? run.branchName ?? 'Branch not assigned yet'}
-                    </span>
-                  </div>
-                </button>
+              <div className="run-card-meta">
+                <span className="role-chip">
+                  {data.repositories.find((repository) => repository.id === run.repositoryId)?.provider ?? 'other'}
+                </span>
+                <span className="run-card-handoff">handoff {formatLabel(run.handoffStatus)}</span>
+              </div>
+            </button>
                 {run.id === selectedRun?.id ? (
                   <div className="run-card-actions">
                     <button type="button" className="action-button run-start-button" onClick={handleStartSelectedRun} disabled={actionPending || !selectedRun}>
@@ -2587,6 +2600,11 @@ function App() {
                 <strong>No active runs yet.</strong>
                 <p>Register a repository or create a run from this panel. The other views stay locked until a run exists.</p>
               </article>
+            ) : null}
+            {data.runs.length > 8 ? (
+              <button type="button" className="control-toggle list-toggle" onClick={() => setShowAllRuns((current) => !current)}>
+                {showAllRuns ? 'Show recent only' : `Show all ${data.runs.length} runs`}
+              </button>
             ) : null}
           </div>
 
@@ -2740,10 +2758,26 @@ function App() {
                   <div className="panel-header">
                     <div>
                       <p className="panel-kicker">Board signals</p>
-                      <h2>Pending approvals and recent validations</h2>
+                      <h2>{pendingApprovals.length === 0 && boardValidations.length === 0 ? 'No open approvals or recent validation activity' : 'Pending approvals and recent validations'}</h2>
                     </div>
                   </div>
 
+                  {pendingApprovals.length === 0 && boardValidations.length === 0 ? (
+                    <div className="signal-strip">
+                      <div className="signal-strip-item">
+                        <span className="signal-label">Pending approvals</span>
+                        <strong>0</strong>
+                      </div>
+                      <div className="signal-strip-item">
+                        <span className="signal-label">Recent validations</span>
+                        <strong>0</strong>
+                      </div>
+                      <div className="signal-strip-item">
+                        <span className="signal-label">Board posture</span>
+                        <strong>Quiet</strong>
+                      </div>
+                    </div>
+                  ) : (
                   <div className="board-signal-grid">
                     <article className="board-signal-card">
                       <div className="task-column-header">
@@ -2798,6 +2832,7 @@ function App() {
                       </div>
                     </article>
                   </div>
+                  )}
                 </section>
 
                 <section className="panel panel-board">
@@ -2841,7 +2876,7 @@ function App() {
                   </div>
 
                   <div className="task-columns">
-                    {taskStatusOrder.map((status) => {
+                    {laneStatusesToRender.map((status) => {
                       const laneTasks = visibleTasks.filter((task) => task.status === status)
 
                       return (
@@ -2893,8 +2928,12 @@ function App() {
                       <p className="panel-kicker">Task DAG</p>
                       <h2>Dependencies and unblock path</h2>
                     </div>
+                    <button type="button" className="control-toggle" onClick={() => setShowDagSection((current) => !current)}>
+                      {showDagSection ? 'Hide' : 'Show'}
+                    </button>
                   </div>
 
+                  {showDagSection ? (
                   <div className="dag-list">
                     {runTasks.map((task) => (
                       <article key={task.id} className="dag-card">
@@ -2924,6 +2963,12 @@ function App() {
                       </article>
                     ))}
                   </div>
+                  ) : (
+                    <div className="compact-summary-row">
+                      <span>{runTasks.length} tasks mapped</span>
+                      <span>{blockedTasks.length} blocked</span>
+                    </div>
+                  )}
                 </section>
 
                 <section className="panel panel-agents">
@@ -2932,8 +2977,12 @@ function App() {
                       <p className="panel-kicker">Agent lanes</p>
                       <h2>Worker ownership, placement, and session state</h2>
                     </div>
+                    <button type="button" className="control-toggle" onClick={() => setShowAgentSection((current) => !current)}>
+                      {showAgentSection ? 'Hide' : 'Show'}
+                    </button>
                   </div>
 
+                  {showAgentSection ? (
                   <div className="agent-lanes">
                     {runAgents.map((agent) => {
                       const agentTask = runTasks.find((task) => task.id === agent.currentTaskId)
@@ -2994,6 +3043,13 @@ function App() {
                       )
                     })}
                   </div>
+                  ) : (
+                    <div className="compact-summary-row">
+                      <span>{runAgents.length} agents tracked</span>
+                      <span>{runSessions.filter((session) => session.state === 'active').length} active sessions</span>
+                      <span>{runWorkerNodes.length} nodes in path</span>
+                    </div>
+                  )}
                 </section>
               </>
             ) : null}
@@ -3004,7 +3060,7 @@ function App() {
                   <div className="panel-header">
                     <div>
                       <p className="panel-kicker">Run detail</p>
-                      <h2>Lifecycle, placement, and handoff</h2>
+                      <h2>Lifecycle and handoff</h2>
                     </div>
                   </div>
 
@@ -3051,7 +3107,7 @@ function App() {
                   <div className="panel-header">
                     <div>
                       <p className="panel-kicker">Provider detail</p>
-                      <h2>Onboarding and PR reflection</h2>
+                      <h2>Provider and publish state</h2>
                     </div>
                   </div>
 
@@ -3097,7 +3153,7 @@ function App() {
                   <div className="panel-header">
                     <div>
                       <p className="panel-kicker">Placement surface</p>
-                      <h2>Session placement and node diagnostics</h2>
+                      <h2>Session placement</h2>
                     </div>
                   </div>
 
@@ -3143,7 +3199,7 @@ function App() {
                   <div className="panel-header">
                     <div>
                       <p className="panel-kicker">Recovery surface</p>
-                      <h2>Sessions, stale workers, and node impact</h2>
+                      <h2>Recovery and stale sessions</h2>
                     </div>
                   </div>
 
@@ -3178,7 +3234,7 @@ function App() {
                   <div className="panel-header">
                     <div>
                       <p className="panel-kicker">Activity</p>
-                      <h2>Recent run events</h2>
+                      <h2>Recent events</h2>
                     </div>
                   </div>
 
@@ -3200,7 +3256,7 @@ function App() {
                   <div className="panel-header">
                     <div>
                       <p className="panel-kicker">Session transcript</p>
-                      <h2>Prompt and response history</h2>
+                      <h2>Prompt and response log</h2>
                     </div>
                   </div>
 
@@ -3256,40 +3312,43 @@ function App() {
                   <div className="panel-header">
                     <div>
                       <p className="panel-kicker">Review workspace</p>
-                      <h2>Approvals and decision flow</h2>
+                      <h2>Approvals and evidence</h2>
                     </div>
                   </div>
 
-                  <div className="review-grid">
-                    <div className="review-list">
-                      {runApprovals.map((approval) => (
-                        <button
-                          key={approval.id}
-                          type="button"
-                          className={`review-card ${approval.id === selectedApproval?.id ? 'is-selected' : ''}`}
-                          onClick={() => setSelectedApprovalId(approval.id)}
-                        >
-                          <div className="approval-title">
-                            <strong>{approval.kind}</strong>
-                            <span className={`tone-chip tone-${approvalStatusTone[approval.status]}`}>
-                              {approval.status}
-                            </span>
-                          </div>
-                          <p>
-                            {approval.status === 'pending'
-                              ? String(approval.requestedPayload?.summary ?? 'Awaiting a reviewer decision.')
-                              : String(approval.resolutionPayload?.feedback ?? 'No resolution feedback returned.')}
-                          </p>
-                          <div className="approval-meta">
-                            <span>{approval.requestedBy}</span>
-                            <span>{approval.resolver ?? 'Reviewer unassigned'}</span>
-                          </div>
-                        </button>
-                      ))}
-                      {runApprovals.length === 0 ? (
+                  <div className={`review-grid ${runApprovals.length === 0 ? 'is-empty' : ''}`}>
+                    {runApprovals.length > 0 ? (
+                      <div className="review-list">
+                        {runApprovals.map((approval) => (
+                          <button
+                            key={approval.id}
+                            type="button"
+                            className={`review-card ${approval.id === selectedApproval?.id ? 'is-selected' : ''}`}
+                            onClick={() => setSelectedApprovalId(approval.id)}
+                          >
+                            <div className="approval-title">
+                              <strong>{approval.kind}</strong>
+                              <span className={`tone-chip tone-${approvalStatusTone[approval.status]}`}>
+                                {approval.status}
+                              </span>
+                            </div>
+                            <p>
+                              {approval.status === 'pending'
+                                ? String(approval.requestedPayload?.summary ?? 'Awaiting a reviewer decision.')
+                                : String(approval.resolutionPayload?.feedback ?? 'No resolution feedback returned.')}
+                            </p>
+                            <div className="approval-meta">
+                              <span>{approval.requestedBy}</span>
+                              <span>{approval.resolver ?? 'Reviewer unassigned'}</span>
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="review-empty-rail">
                         <div className="empty-state">No approvals returned for this run.</div>
-                      ) : null}
-                    </div>
+                      </div>
+                    )}
 
                     <div className="review-editor">
                       <p className="panel-kicker">Decision workspace</p>
@@ -3480,11 +3539,11 @@ function App() {
                   <div className="panel-header">
                     <div>
                       <p className="panel-kicker">Validation history</p>
-                      <h2>Recent checks and reports</h2>
+                      <h2>Checks</h2>
                     </div>
                   </div>
 
-                  <div className="validation-list">
+                  <div className={`validation-list ${runValidations.length === 0 ? 'is-empty' : ''}`}>
                     {runValidations.map((validation) => (
                       <article key={validation.id} className="validation-card">
                         <div className="validation-title">
@@ -3507,11 +3566,11 @@ function App() {
                   <div className="panel-header">
                     <div>
                       <p className="panel-kicker">Artifact review</p>
-                      <h2>Logs, reports, and handoff payloads</h2>
+                      <h2>Artifacts and handoff</h2>
                     </div>
                   </div>
 
-                  <div className="artifact-list">
+                  <div className={`artifact-list ${runArtifacts.length === 0 ? 'is-empty' : ''}`}>
                     {runArtifacts.map((artifact) => (
                       <article key={artifact.id} className="artifact-card">
                         <span className="role-chip">{artifact.kind}</span>
@@ -3539,7 +3598,7 @@ function App() {
                   <div className="panel-header">
                     <div>
                       <p className="panel-kicker">Admin context</p>
-                      <h2>Actor, workspace, and delegated policy state</h2>
+                      <h2>Actor and boundary</h2>
                     </div>
                   </div>
 
@@ -3595,7 +3654,7 @@ function App() {
                   <div className="panel-header">
                     <div>
                       <p className="panel-kicker">Governance report</p>
-                      <h2>Policy visibility and retention posture</h2>
+                      <h2>Policy and retention</h2>
                     </div>
                   </div>
 
@@ -3636,7 +3695,7 @@ function App() {
                   <div className="panel-header">
                     <div>
                       <p className="panel-kicker">Approval provenance</p>
-                      <h2>Who requested, delegated, and resolved approvals</h2>
+                      <h2>Approval trail</h2>
                     </div>
                   </div>
 
@@ -3670,7 +3729,7 @@ function App() {
                   <div className="panel-header">
                     <div>
                       <p className="panel-kicker">Audit and secrets</p>
-                      <h2>Run audit export and repository secret access</h2>
+                      <h2>Audit and secrets</h2>
                     </div>
                   </div>
 
@@ -3721,16 +3780,6 @@ function App() {
         ) : null}
       </main>
 
-      <footer className="footer-bar">
-        <span>{loading ? 'Refreshing board state…' : 'Board data ready.'}</span>
-        <span>
-          {errorText
-            ? `Live API issue: ${errorText}`
-            : data.source === 'api'
-              ? 'Live repositories, worker nodes, governance/admin views, approvals, audits, transcripts, and messages are polling.'
-              : 'Using fallback seed data until the API is reachable.'}
-        </span>
-      </footer>
     </div>
   )
 }
