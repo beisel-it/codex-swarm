@@ -47,9 +47,8 @@ M5 implementation is complete:
 
 ### M6
 
-M6 refinement and execution are now active:
+M6 implementation is complete:
 
-- `7ed82e5e` Refine Phase 6 roadmap into executable M6 delivery plan
 - SLOs, support boundaries, and observability envelope
 - backup, restore, and disaster recovery evidence
 - migration and upgrade safety
@@ -57,12 +56,30 @@ M6 refinement and execution are now active:
 - admin/developer/operator docs and reference deployments
 - GA release-candidate validation
 
+### M7
+
+M7 parity review is in progress:
+
+- each roadmap entry is being verified as parity, better, superseded, or gap
+- documented gaps are converted into explicit backlog items
+- roadmap and architecture wording is being tightened where supportability was overstated
+
+### M8
+
+M8 refinement is active:
+
+- external-operator Codex skill library
+- board/inbox/task-control skills
+- diagnostics and recovery skills
+- agent and skill authoring guidance
+- acceptance examples proving Codex can manage codex-swarm from the outside
+
 ## Dependency Order
 
 1. Complete roadmap phase refinement for the active milestone.
 2. Activate the concrete delivery tracks for that milestone.
 3. Close milestone implementation before opening the next roadmap refinement gate.
-4. Preserve a clean dependency chain from M3 to M6.
+4. Preserve a clean dependency chain from M3 to M8.
 
 ## Execution Rules
 
