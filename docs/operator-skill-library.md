@@ -29,6 +29,8 @@ surfaces used by this repo:
 - [`codex-swarm-recovery`](../.agents/skills/codex-swarm-recovery/SKILL.md)
 - [Agent and Skill Authoring Guide](./agent-skill-authoring.md)
 - [Checked-in skill index](../.agents/skills/README.md)
+- [Development team template](../templates/agent-teams/development-stack.md)
+- [Platform / ops team template](../templates/agent-teams/platform-ops-stack.md)
 
 These cover the currently checked-in external-operator slice:
 
@@ -38,6 +40,7 @@ These cover the currently checked-in external-operator slice:
 - agent coordination and loop-control commands
 - diagnostics and recovery investigation grounded in the live product surfaces
 - safe extension of the checked-in agent and skill pack
+- reusable team launch templates for product and platform work
 
 ## How to operate codex-swarm with this pack
 

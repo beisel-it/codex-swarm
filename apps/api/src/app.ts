@@ -21,6 +21,7 @@ import { repositoryRoutes } from "./routes/repositories.js";
 import { runRoutes } from "./routes/runs.js";
 import { sessionRoutes } from "./routes/sessions.js";
 import { taskRoutes } from "./routes/tasks.js";
+import { teamTemplateRoutes } from "./routes/team-templates.js";
 import { tuiRoutes } from "./routes/tui.js";
 import { validationRoutes } from "./routes/validations.js";
 import { workerDispatchAssignmentRoutes } from "./routes/worker-dispatch-assignments.js";
@@ -194,6 +195,7 @@ export async function buildApp(options: BuildAppOptions = {}) {
   await app.register(runRoutes, { prefix: "/api/v1" });
   await app.register(sessionRoutes, { prefix: "/api/v1" });
   await app.register(taskRoutes, { prefix: "/api/v1" });
+  await app.register(teamTemplateRoutes, { prefix: "/api/v1" });
   await app.register(tuiRoutes, { prefix: "/api/v1" });
   await app.register(agentRoutes, { prefix: "/api/v1" });
   await app.register(workerNodeRoutes, { prefix: "/api/v1" });

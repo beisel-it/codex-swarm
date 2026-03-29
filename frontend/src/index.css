@@ -201,12 +201,12 @@ code {
   align-items: center;
   column-gap: 8px;
   min-height: 0;
-  padding: 5px 9px;
+  padding: 7px 11px;
   border-radius: 6px;
   background: #161c29;
   color: var(--text-inverse);
   border: 1px solid rgba(255, 255, 255, 0.18);
-  min-width: 136px;
+  min-width: 156px;
 }
 
 .metric-card strong {
@@ -215,16 +215,17 @@ code {
   grid-column: 2;
   grid-row: 1;
   justify-self: end;
-  font-size: clamp(0.95rem, 1.2vw, 1.08rem);
+  font-size: clamp(1rem, 1.25vw, 1.14rem);
   line-height: 1;
   letter-spacing: -0.06em;
 }
 
 .metric-card p {
   margin: 0;
-  font-size: 0.58rem;
-  letter-spacing: 0.1em;
-  color: #f3cab8;
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  color: #fff2e8;
 }
 
 .metric-card strong {
@@ -801,6 +802,54 @@ code {
   font-family: var(--mono);
   font-size: 0.74rem;
   letter-spacing: 0.03em;
+}
+
+.template-preview {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 10px;
+  padding: 10px;
+  border-radius: 6px;
+  border: 1px solid rgba(18, 23, 35, 0.08);
+  background: rgba(18, 23, 35, 0.03);
+}
+
+.template-preview-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.template-preview > p {
+  margin: 0;
+  font-size: 0.82rem;
+  color: var(--text-subtle);
+}
+
+.member-chip-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(124px, 1fr));
+  gap: 8px;
+}
+
+.member-chip {
+  display: grid;
+  gap: 3px;
+  padding: 8px 9px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.72);
+  border: 1px solid rgba(18, 23, 35, 0.08);
+}
+
+.member-chip strong {
+  font-size: 0.8rem;
+  line-height: 1.1;
+}
+
+.member-chip span {
+  font-size: 0.68rem;
+  color: var(--text-subtle);
 }
 
 .action-row-inline {

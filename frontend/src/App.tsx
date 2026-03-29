@@ -41,6 +41,23 @@ type SessionTranscriptEntry = {
   metadata?: Record<string, unknown>
 }
 
+type TeamTemplateMember = {
+  key: string
+  displayName: string
+  roleProfile: string
+  responsibility: string
+}
+
+type TeamTemplate = {
+  id: string
+  name: string
+  summary: string
+  focus: 'delivery' | 'platform'
+  suggestedGoal: string
+  suggestedConcurrencyCap: number
+  members: TeamTemplateMember[]
+}
+
 type Repository = {
   id: string
   name: string
@@ -424,6 +441,43 @@ const MOCK_FALLBACK_ENABLED = import.meta.env.VITE_ENABLE_MOCK_FALLBACK === 'tru
 const REFRESH_MS = 15_000
 const UUID_PATTERN =
   /^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$/
+
+const defaultTeamTemplates: TeamTemplate[] = [
+  {
+    id: 'development-stack',
+    name: 'Development stack',
+    summary: 'Leader, design, frontend, backend, review, QA, and docs coverage for product delivery slices.',
+    focus: 'delivery',
+    suggestedGoal: 'Ship the next product iteration through codex-swarm with real implementation, review, and verification evidence.',
+    suggestedConcurrencyCap: 4,
+    members: [
+      { key: 'leader', displayName: 'Leader', roleProfile: 'leader', responsibility: 'Own sequencing, task DAG updates, and milestone acceptance.' },
+      { key: 'designer', displayName: 'Designer', roleProfile: 'designer', responsibility: 'Define information architecture, interaction states, and screenshot-backed UI targets.' },
+      { key: 'frontend', displayName: 'Frontend Developer', roleProfile: 'frontend-developer', responsibility: 'Implement browser and TUI product surfaces against live contracts.' },
+      { key: 'backend', displayName: 'Backend Developer', roleProfile: 'backend-developer', responsibility: 'Implement API, orchestration, runtime, and persistence slices.' },
+      { key: 'reviewer', displayName: 'Reviewer', roleProfile: 'reviewer', responsibility: 'Find correctness, regression, and integration defects before closure.' },
+      { key: 'tester', displayName: 'Tester', roleProfile: 'tester', responsibility: 'Prove acceptance with repeatable checks and end-to-end evidence.' },
+      { key: 'writer', displayName: 'Technical Writer', roleProfile: 'technical-writer', responsibility: 'Keep operator and rollout docs aligned to shipped behavior.' },
+    ],
+  },
+  {
+    id: 'platform-ops-stack',
+    name: 'Platform / ops stack',
+    summary: 'Leader, infrastructure, backend, review, QA, and docs coverage for deployment and runtime reliability work.',
+    focus: 'platform',
+    suggestedGoal: 'Deploy, harden, and verify codex-swarm runtime topology without exposing unintended services.',
+    suggestedConcurrencyCap: 3,
+    members: [
+      { key: 'leader', displayName: 'Leader', roleProfile: 'leader', responsibility: 'Own rollout sequencing, unblock dependencies, and close the operational objective.' },
+      { key: 'architect', displayName: 'Architect', roleProfile: 'architect', responsibility: 'Define topology, contracts, and durable operational boundaries.' },
+      { key: 'infra', displayName: 'Infrastructure Engineer', roleProfile: 'infrastructure-engineer', responsibility: 'Implement service packaging, CI/CD, runtime config, and private exposure rules.' },
+      { key: 'backend', displayName: 'Backend Developer', roleProfile: 'backend-developer', responsibility: 'Close runtime and orchestration gaps exposed by the platform goal.' },
+      { key: 'reviewer', displayName: 'Reviewer', roleProfile: 'reviewer', responsibility: 'Review rollout, regression, and operational risk.' },
+      { key: 'tester', displayName: 'Tester', roleProfile: 'tester', responsibility: 'Prove deployment, recovery, and service behavior in the target topology.' },
+      { key: 'writer', displayName: 'Technical Writer', roleProfile: 'technical-writer', responsibility: 'Update runbooks, operator docs, and recovery guidance.' },
+    ],
+  },
+]
 
 const mockIdentity: IdentityContext = {
   principal: 'dev-user',
@@ -1229,6 +1283,34 @@ function isUuid(value: string | null | undefined) {
   return Boolean(value && UUID_PATTERN.test(value))
 }
 
+function getRunTemplateId(run: Run | null | undefined) {
+  const value = run?.metadata?.teamTemplateId
+  return typeof value === 'string' ? value : ''
+}
+
+function getRunTemplateName(run: Run | null | undefined) {
+  const value = run?.metadata?.teamTemplateName
+  return typeof value === 'string' ? value : null
+}
+
+function buildRunTemplateMetadata(template: TeamTemplate | null) {
+  if (!template) {
+    return {}
+  }
+
+  return {
+    teamTemplateId: template.id,
+    teamTemplateName: template.name,
+    teamTemplateFocus: template.focus,
+    teamTemplateMembers: template.members.map((member) => ({
+      key: member.key,
+      displayName: member.displayName,
+      roleProfile: member.roleProfile,
+      responsibility: member.responsibility,
+    })),
+  }
+}
+
 async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
   const headers = new Headers(init?.headers ?? {})
   if (!headers.has('Content-Type')) {
@@ -1307,10 +1389,16 @@ async function deleteRepository(repositoryId: string): Promise<void> {
   })
 }
 
+async function loadTeamTemplates(): Promise<TeamTemplate[]> {
+  return requestJson<TeamTemplate[]>('/api/v1/team-templates')
+}
+
 async function createRun(input: {
   repositoryId: string
   goal: string
   branchName?: string
+  concurrencyCap?: number
+  metadata?: Record<string, unknown>
 }): Promise<Run> {
   return requestJson<Run>('/api/v1/runs', {
     method: 'POST',
@@ -1323,6 +1411,8 @@ async function updateRun(
   input: {
     goal?: string
     branchName?: string | null
+    concurrencyCap?: number
+    metadata?: Record<string, unknown>
   },
 ): Promise<Run> {
   return requestJson<Run>(`/api/v1/runs/${encodeURIComponent(runId)}`, {
@@ -1708,6 +1798,7 @@ function deriveActivity(
 
 function App() {
   const [data, setData] = useState<SwarmData>(createEmptySwarmData())
+  const [teamTemplates, setTeamTemplates] = useState<TeamTemplate[]>(defaultTeamTemplates)
   const [selectedRunId, setSelectedRunId] = useState('')
   const [selectedView, setSelectedView] = useState<ViewMode>('board')
   const [selectedApprovalId, setSelectedApprovalId] = useState<string>('')
@@ -1735,8 +1826,10 @@ function App() {
   const [repoDraftProvider, setRepoDraftProvider] = useState<RepositoryProvider>('github')
   const [editingRepositoryId, setEditingRepositoryId] = useState<string | null>(null)
   const [runDraftRepositoryId, setRunDraftRepositoryId] = useState('')
-  const [runDraftGoal, setRunDraftGoal] = useState('Ship the next iteration through codex-swarm.')
+  const [selectedTeamTemplateId, setSelectedTeamTemplateId] = useState(defaultTeamTemplates[0]?.id ?? '')
+  const [runDraftGoal, setRunDraftGoal] = useState(defaultTeamTemplates[0]?.suggestedGoal ?? 'Ship the next iteration through codex-swarm.')
   const [runDraftBranchName, setRunDraftBranchName] = useState('main')
+  const [runDraftConcurrencyCap, setRunDraftConcurrencyCap] = useState(String(defaultTeamTemplates[0]?.suggestedConcurrencyCap ?? 1))
   const [editingRunId, setEditingRunId] = useState<string | null>(null)
   const [taskDraftTitle, setTaskDraftTitle] = useState('')
   const [taskDraftDescription, setTaskDraftDescription] = useState('')
@@ -1858,10 +1951,37 @@ function App() {
     }
   }, [])
 
+  useEffect(() => {
+    let active = true
+
+    async function hydrateTemplates() {
+      try {
+        const templates = await loadTeamTemplates()
+        if (active && templates.length > 0) {
+          setTeamTemplates(templates)
+          setSelectedTeamTemplateId((current) => current || templates[0]?.id || '')
+        }
+      } catch {
+        if (active) {
+          setTeamTemplates(defaultTeamTemplates)
+        }
+      }
+    }
+
+    void hydrateTemplates()
+
+    return () => {
+      active = false
+    }
+  }, [])
+
   const selectedRun =
     data.runs.find((run) => run.id === selectedRunId) ??
     data.runs[0] ??
     null
+  const selectedTeamTemplate = selectedTeamTemplateId
+    ? teamTemplates.find((template) => template.id === selectedTeamTemplateId) ?? null
+    : null
 
   const selectedRepository = data.repositories.find(
     (repository) => repository.id === selectedRun?.repositoryId,
@@ -2232,6 +2352,16 @@ function App() {
     }
   }
 
+  function applyTeamTemplate(template: TeamTemplate) {
+    setSelectedTeamTemplateId(template.id)
+    setRunDraftGoal(template.suggestedGoal)
+    setRunDraftConcurrencyCap(String(template.suggestedConcurrencyCap))
+    setShowRunControls(true)
+    setHighlightedPanel('run')
+    setRunFormNotice(`${template.name} applied to the run draft.`)
+    setErrorText('')
+  }
+
   async function handleCreateRun(autoStart: boolean) {
     if (!runDraftRepositoryId || !runDraftGoal.trim()) {
       setErrorText('Repository and run goal are required.')
@@ -2241,15 +2371,22 @@ function App() {
     setActionPending(true)
 
     try {
+      const parsedConcurrencyCap = Math.max(1, Number.parseInt(runDraftConcurrencyCap, 10) || 1)
+      const selectedTemplate = teamTemplates.find((template) => template.id === selectedTeamTemplateId) ?? null
+      const metadata = buildRunTemplateMetadata(selectedTemplate)
       const run = editingRunId
         ? await updateRun(editingRunId, {
             goal: runDraftGoal.trim(),
             branchName: runDraftBranchName.trim() || null,
+            concurrencyCap: parsedConcurrencyCap,
+            metadata,
           })
         : await createRun({
             repositoryId: runDraftRepositoryId,
             goal: runDraftGoal.trim(),
             branchName: runDraftBranchName.trim() || undefined,
+            concurrencyCap: parsedConcurrencyCap,
+            metadata,
           })
 
       if (autoStart && !editingRunId) {
@@ -2345,6 +2482,8 @@ function App() {
     setRunDraftRepositoryId(run.repositoryId)
     setRunDraftGoal(run.goal)
     setRunDraftBranchName(run.branchName ?? '')
+    setRunDraftConcurrencyCap(String(run.concurrencyCap ?? 1))
+    setSelectedTeamTemplateId(getRunTemplateId(run) || (teamTemplates[0]?.id ?? ''))
     setShowRunControls(true)
     setRunFormNotice(`Editing ${run.goal}`)
     setHighlightedPanel('run')
@@ -2354,7 +2493,7 @@ function App() {
   function handleUseRepository(repository: Repository) {
     setRunDraftRepositoryId(repository.id)
     setShowRunControls(true)
-    setRunFormNotice(`Using ${repository.name}`)
+    setRunFormNotice(`Using ${repository.name} in the run draft`)
     setHighlightedPanel('run')
     setErrorText('')
   }
@@ -2542,6 +2681,41 @@ function App() {
               {showRunControls ? (
                 <>
                   <label className="control-field">
+                    <span>Team template</span>
+                    <select value={selectedTeamTemplateId} onChange={(event) => setSelectedTeamTemplateId(event.target.value)}>
+                      <option value="">No template</option>
+                      {teamTemplates.map((template) => (
+                        <option key={template.id} value={template.id}>
+                          {template.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  {selectedTeamTemplate ? (
+                    <div className="template-preview">
+                      <div className="template-preview-header">
+                        <strong>{selectedTeamTemplate.name}</strong>
+                        <button
+                          type="button"
+                          className="table-action"
+                          onClick={() => applyTeamTemplate(selectedTeamTemplate)}
+                          disabled={actionPending}
+                        >
+                          Apply template
+                        </button>
+                      </div>
+                      <p>{selectedTeamTemplate.summary}</p>
+                      <div className="member-chip-grid">
+                        {selectedTeamTemplate.members.map((member) => (
+                          <article key={member.key} className="member-chip">
+                            <strong>{member.displayName}</strong>
+                            <span>{member.roleProfile}</span>
+                          </article>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
+                  <label className="control-field">
                     <span>Repository</span>
                     <select value={runDraftRepositoryId} onChange={(event) => setRunDraftRepositoryId(event.target.value)}>
                       <option value="">Select repository</option>
@@ -2560,6 +2734,15 @@ function App() {
                     <span>Branch</span>
                     <input value={runDraftBranchName} onChange={(event) => setRunDraftBranchName(event.target.value)} />
                   </label>
+                  <label className="control-field">
+                    <span>Concurrency cap</span>
+                    <input
+                      type="number"
+                      min={1}
+                      value={runDraftConcurrencyCap}
+                      onChange={(event) => setRunDraftConcurrencyCap(event.target.value)}
+                    />
+                  </label>
                   <div className="action-row">
                     {editingRunId ? (
                       <button
@@ -2567,8 +2750,10 @@ function App() {
                         className="action-button action-button-secondary"
                         onClick={() => {
                           setEditingRunId(null)
-                          setRunDraftGoal('Ship the next iteration through codex-swarm.')
+                          setSelectedTeamTemplateId(teamTemplates[0]?.id ?? '')
+                          setRunDraftGoal(teamTemplates[0]?.suggestedGoal ?? 'Ship the next iteration through codex-swarm.')
                           setRunDraftBranchName('main')
+                          setRunDraftConcurrencyCap(String(teamTemplates[0]?.suggestedConcurrencyCap ?? 1))
                         }}
                         disabled={actionPending}
                       >
@@ -3173,6 +3358,16 @@ function App() {
                   </div>
 
                   <div className="detail-grid">
+                    <article className="detail-card">
+                      <p className="panel-kicker">Team template</p>
+                      <strong>{getRunTemplateName(selectedRun) ?? 'Ad hoc run'}</strong>
+                      <p>
+                        {getRunTemplateName(selectedRun)
+                          ? `This run was launched with the ${getRunTemplateName(selectedRun)} roster shape.`
+                          : 'No launch template metadata was recorded for this run.'}
+                      </p>
+                    </article>
+
                     <article className="detail-card">
                       <p className="panel-kicker">Repository</p>
                       <strong>{selectedRepository ? `${selectedRepository.provider} / ${selectedRepository.name}` : 'Repository missing'}</strong>

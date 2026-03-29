@@ -70,6 +70,23 @@ export const validationTemplateSchema = z.object({
   artifactPath: z.string().min(1).optional()
 });
 
+export const agentTeamTemplateMemberSchema = z.object({
+  key: z.string().min(1),
+  displayName: z.string().min(1),
+  roleProfile: z.string().min(1),
+  responsibility: z.string().min(1)
+});
+
+export const agentTeamTemplateSchema = z.object({
+  id: z.string().min(1),
+  name: z.string().min(1),
+  summary: z.string().min(1),
+  focus: z.enum(["delivery", "platform"]),
+  suggestedGoal: z.string().min(1),
+  suggestedConcurrencyCap: z.number().int().positive(),
+  members: z.array(agentTeamTemplateMemberSchema).min(1)
+});
+
 export const repositoryCreateSchema = z.object({
   name: z.string().min(1),
   url: z.string().url(),
@@ -1062,6 +1079,8 @@ export type RunCreateInput = z.infer<typeof runCreateSchema>;
 export type RunUpdateInput = z.infer<typeof runUpdateSchema>;
 export type RunStatusUpdateInput = z.infer<typeof runStatusUpdateSchema>;
 export type RunBudgetCheckpointInput = z.infer<typeof runBudgetCheckpointSchema>;
+export type AgentTeamTemplateMember = z.infer<typeof agentTeamTemplateMemberSchema>;
+export type AgentTeamTemplate = z.infer<typeof agentTeamTemplateSchema>;
 export type TaskCreateInput = z.infer<typeof taskCreateSchema>;
 export type TaskStatusUpdateInput = z.infer<typeof taskStatusUpdateSchema>;
 export type AgentCreateInput = z.infer<typeof agentCreateSchema>;

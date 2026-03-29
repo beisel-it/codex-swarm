@@ -5,6 +5,28 @@ extending `codex-swarm`.
 
 ## Skill groups
 
+## Checked-in role and team templates
+
+### Individual agent roles
+
+- `.codex/agents/leader.toml`
+- `.codex/agents/architect.toml`
+- `.codex/agents/designer.toml`
+- `.codex/agents/frontend-developer.toml`
+- `.codex/agents/backend-developer.toml`
+- `.codex/agents/infrastructure-engineer.toml`
+- `.codex/agents/reviewer.toml`
+- `.codex/agents/tester.toml`
+- `.codex/agents/technical-writer.toml`
+
+### Launchable team templates
+
+- `templates/agent-teams/development-stack.md`
+- `templates/agent-teams/platform-ops-stack.md`
+
+Use these when the next run needs a pre-shaped team instead of ad hoc role
+selection.
+
 ### External operator skills
 
 - `codex-swarm-board-triage`

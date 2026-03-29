@@ -64,6 +64,8 @@ Choose the entry point that matches how you are approaching the system:
 - [docs/operator-guide.md](./docs/operator-guide.md) for external Codex operation of this repo
 - [docs/operator-skill-library.md](./docs/operator-skill-library.md) for the codex-swarm operator skill pack
 - [docs/operator-skill-workflows.md](./docs/operator-skill-workflows.md) for grounded board, planning, recovery, and coordination workflows
+- [templates/agent-teams/development-stack.md](./templates/agent-teams/development-stack.md) for a reusable product-delivery team shape
+- [templates/agent-teams/platform-ops-stack.md](./templates/agent-teams/platform-ops-stack.md) for a reusable platform/ops team shape
 - [docs/user-guide.md](./docs/user-guide.md) for end-user product flows
 - [docs/admin-guide.md](./docs/admin-guide.md) for governance and admin surfaces
 - [docs/support-playbooks.md](./docs/support-playbooks.md) for support and recovery playbooks
@@ -181,6 +183,7 @@ This repo ships codex-swarm-specific operator assets, not just generic role prom
 
 - [AGENTS.md](./AGENTS.md) for repo-level guidance
 - `.codex/config.toml` and `.codex/agents/*.toml` for the checked-in role pack
+- `templates/agent-teams/*.md` for reusable run-team launch templates
 - [.agents/skills/README.md](./.agents/skills/README.md) for the skill index
 - `.agents/skills/*/SKILL.md` for reusable codex-swarm workflows
 - [docs/operator-skill-library.md](./docs/operator-skill-library.md) for discoverability
