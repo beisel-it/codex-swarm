@@ -24,6 +24,10 @@ import {
   type RetentionReconcileReport,
   type RetentionWindowSummary,
   type RunCreateInput,
+  type TuiAlert,
+  type TuiOverview,
+  type TuiOverviewRun,
+  type TuiRunDrilldown,
   type SecretIntegrationBoundary,
   type SecretAccessPlan,
   type WorkerDispatchAssignment,
@@ -381,6 +385,57 @@ function normalizeValidationTemplates(templates: TaskCreate["validationTemplates
 
 function isApprovedHandoffApproval(approval: Approval | null | undefined, kind: Approval["kind"], runId: string) {
   return approval?.runId === runId && approval.kind === kind && approval.status === "approved";
+}
+
+function createEmptyTuiTaskCounts(): TuiOverviewRun["taskCounts"] {
+  return {
+    pending: 0,
+    blocked: 0,
+    inProgress: 0,
+    awaitingReview: 0,
+    completed: 0,
+    failed: 0,
+    cancelled: 0
+  };
+}
+
+function createEmptyTuiApprovalCounts(): TuiOverviewRun["approvalCounts"] {
+  return {
+    pending: 0,
+    approved: 0,
+    rejected: 0
+  };
+}
+
+function createEmptyTuiValidationCounts(): TuiOverviewRun["validationCounts"] {
+  return {
+    pending: 0,
+    passed: 0,
+    failed: 0
+  };
+}
+
+function createEmptyTuiDispatchCounts(): TuiOverviewRun["dispatchCounts"] {
+  return {
+    queued: 0,
+    claimed: 0,
+    completed: 0,
+    retrying: 0,
+    failed: 0
+  };
+}
+
+function isActiveRunStatus(status: Run["status"]) {
+  return status === "pending"
+    || status === "planning"
+    || status === "in_progress"
+    || status === "awaiting_approval";
+}
+
+function pushUnique(values: string[], value: string | null | undefined) {
+  if (value && !values.includes(value)) {
+    values.push(value);
+  }
 }
 
 const policyExceptionDecisionSchema = z.object({
@@ -1655,6 +1710,278 @@ export class ControlPlaneService {
 
     await this.assertRunExists(artifact.runId, access);
     return this.mapArtifact(artifact);
+  }
+
+  async getTuiOverview(access?: AccessBoundary): Promise<TuiOverview> {
+    const now = this.clock.now();
+    const [repositoriesList, runsList, approvalsList, workerNodesList, dispatchAssignments] = await Promise.all([
+      this.listRepositories(access),
+      this.listRuns(undefined, access),
+      this.listApprovals(undefined, access),
+      this.listWorkerNodes(),
+      this.listWorkerDispatchAssignments()
+    ]);
+    const runIds = new Set(runsList.map((run) => run.id));
+    const scopedDispatchAssignments = dispatchAssignments.filter((assignment) => runIds.has(assignment.runId));
+    const [runDetails, validationsByRun] = await Promise.all([
+      Promise.all(runsList.map((run) => this.getRun(run.id, access))),
+      Promise.all(runsList.map((run) => this.listValidations(run.id, access)))
+    ]);
+    const repositoriesById = new Map(repositoriesList.map((repository) => [repository.id, repository] as const));
+    const approvalsByRunId = new Map<string, Approval[]>();
+    const dispatchByRunId = new Map<string, WorkerDispatchAssignment[]>();
+
+    for (const approval of approvalsList) {
+      approvalsByRunId.set(approval.runId, [...(approvalsByRunId.get(approval.runId) ?? []), approval]);
+    }
+
+    for (const assignment of scopedDispatchAssignments) {
+      dispatchByRunId.set(assignment.runId, [...(dispatchByRunId.get(assignment.runId) ?? []), assignment]);
+    }
+
+    const runSummaries = runsList.map((run, index): TuiOverviewRun => {
+      const repository = repositoriesById.get(run.repositoryId);
+
+      if (!repository) {
+        throw new HttpError(500, `repository ${run.repositoryId} missing from TUI overview aggregation`);
+      }
+
+      const runDetail = runDetails[index]!;
+      const validations = validationsByRun[index]!;
+      const runApprovals = approvalsByRunId.get(run.id) ?? [];
+      const runDispatchAssignments = dispatchByRunId.get(run.id) ?? [];
+      const taskCounts = createEmptyTuiTaskCounts();
+      const approvalCounts = createEmptyTuiApprovalCounts();
+      const validationCounts = createEmptyTuiValidationCounts();
+      const dispatchCounts = createEmptyTuiDispatchCounts();
+      const workerNodeIds: string[] = [];
+
+      for (const task of runDetail.tasks) {
+        if (task.status === "pending") {
+          taskCounts.pending += 1;
+        } else if (task.status === "blocked") {
+          taskCounts.blocked += 1;
+        } else if (task.status === "in_progress") {
+          taskCounts.inProgress += 1;
+        } else if (task.status === "awaiting_review") {
+          taskCounts.awaitingReview += 1;
+        } else if (task.status === "completed") {
+          taskCounts.completed += 1;
+        } else if (task.status === "failed") {
+          taskCounts.failed += 1;
+        } else if (task.status === "cancelled") {
+          taskCounts.cancelled += 1;
+        }
+      }
+
+      for (const approval of runApprovals) {
+        if (approval.status === "pending") {
+          approvalCounts.pending += 1;
+        } else if (approval.status === "approved") {
+          approvalCounts.approved += 1;
+        } else if (approval.status === "rejected") {
+          approvalCounts.rejected += 1;
+        }
+      }
+
+      for (const validation of validations) {
+        if (validation.status === "pending") {
+          validationCounts.pending += 1;
+        } else if (validation.status === "passed") {
+          validationCounts.passed += 1;
+        } else if (validation.status === "failed") {
+          validationCounts.failed += 1;
+        }
+      }
+
+      for (const assignment of runDispatchAssignments) {
+        if (assignment.state === "queued") {
+          dispatchCounts.queued += 1;
+        } else if (assignment.state === "claimed") {
+          dispatchCounts.claimed += 1;
+        } else if (assignment.state === "completed") {
+          dispatchCounts.completed += 1;
+        } else if (assignment.state === "retrying") {
+          dispatchCounts.retrying += 1;
+        } else if (assignment.state === "failed") {
+          dispatchCounts.failed += 1;
+        }
+
+        pushUnique(workerNodeIds, assignment.claimedByNodeId);
+        pushUnique(workerNodeIds, assignment.stickyNodeId);
+        pushUnique(workerNodeIds, assignment.preferredNodeId);
+      }
+
+      for (const session of runDetail.sessions) {
+        pushUnique(workerNodeIds, session.workerNodeId);
+        pushUnique(workerNodeIds, session.stickyNodeId);
+      }
+
+      return {
+        run,
+        repository: {
+          id: repository.id,
+          name: repository.name,
+          provider: repository.provider,
+          trustLevel: repository.trustLevel,
+          approvalProfile: repository.approvalProfile
+        },
+        taskCounts,
+        approvalCounts,
+        validationCounts,
+        dispatchCounts,
+        activeSessionCount: runDetail.sessions.filter((session) => session.state === "active").length,
+        workerNodeIds,
+        blockedTaskIds: runDetail.tasks.filter((task) => task.status === "blocked").map((task) => task.id),
+        pendingApprovalIds: runApprovals.filter((approval) => approval.status === "pending").map((approval) => approval.id),
+        failedValidationIds: validations.filter((validation) => validation.status === "failed").map((validation) => validation.id)
+      };
+    });
+
+    const alerts: TuiAlert[] = [];
+
+    for (const runSummary of runSummaries) {
+      if (runSummary.run.status === "awaiting_approval" || runSummary.approvalCounts.pending > 0) {
+        alerts.push({
+          kind: "run_awaiting_approval",
+          severity: "warning",
+          runId: runSummary.run.id,
+          entityId: runSummary.pendingApprovalIds[0] ?? runSummary.run.id,
+          summary: `${runSummary.run.goal} is waiting on ${runSummary.approvalCounts.pending} approval${runSummary.approvalCounts.pending === 1 ? "" : "s"}`
+        });
+      }
+
+      for (const task of runDetails.find((detail) => detail.id === runSummary.run.id)?.tasks ?? []) {
+        if (task.status === "blocked") {
+          alerts.push({
+            kind: "task_blocked",
+            severity: "warning",
+            runId: runSummary.run.id,
+            entityId: task.id,
+            summary: `Task ${task.title} is blocked`
+          });
+        }
+      }
+
+      for (const validation of validationsByRun[runsList.findIndex((run) => run.id === runSummary.run.id)] ?? []) {
+        if (validation.status === "failed") {
+          alerts.push({
+            kind: "validation_failed",
+            severity: "critical",
+            runId: runSummary.run.id,
+            entityId: validation.id,
+            summary: `Validation ${validation.name} failed`
+          });
+        }
+      }
+    }
+
+    for (const workerNode of workerNodesList) {
+      if (workerNode.status === "degraded") {
+        alerts.push({
+          kind: "worker_node_degraded",
+          severity: "warning",
+          runId: null,
+          entityId: workerNode.id,
+          summary: `Worker node ${workerNode.name} is degraded`
+        });
+      }
+
+      if (workerNode.status === "offline") {
+        alerts.push({
+          kind: "worker_node_offline",
+          severity: "critical",
+          runId: null,
+          entityId: workerNode.id,
+          summary: `Worker node ${workerNode.name} is offline`
+        });
+      }
+    }
+
+    for (const assignment of scopedDispatchAssignments) {
+      if (assignment.state === "retrying") {
+        alerts.push({
+          kind: "dispatch_retrying",
+          severity: "warning",
+          runId: assignment.runId,
+          entityId: assignment.id,
+          summary: `Dispatch ${assignment.id} is retrying`
+        });
+      }
+
+      if (assignment.state === "failed") {
+        alerts.push({
+          kind: "dispatch_failed",
+          severity: "critical",
+          runId: assignment.runId,
+          entityId: assignment.id,
+          summary: `Dispatch ${assignment.id} failed`
+        });
+      }
+    }
+
+    return {
+      generatedAt: now,
+      summary: {
+        repositories: repositoriesList.length,
+        runsTotal: runsList.length,
+        runsActive: runsList.filter((run) => isActiveRunStatus(run.status)).length,
+        approvalsPending: approvalsList.filter((approval) => approval.status === "pending").length,
+        validationsFailed: validationsByRun.flat().filter((validation) => validation.status === "failed").length,
+        tasksBlocked: runDetails.flatMap((runDetail) => runDetail.tasks).filter((task) => task.status === "blocked").length,
+        workerNodesOnline: workerNodesList.filter((workerNode) => workerNode.status === "online").length,
+        workerNodesDegraded: workerNodesList.filter((workerNode) => workerNode.status === "degraded").length,
+        workerNodesOffline: workerNodesList.filter((workerNode) => workerNode.status === "offline").length,
+        dispatchQueued: scopedDispatchAssignments.filter((assignment) => assignment.state === "queued").length,
+        dispatchRetrying: scopedDispatchAssignments.filter((assignment) => assignment.state === "retrying").length
+      },
+      runs: runSummaries,
+      fleet: {
+        workerNodes: workerNodesList,
+        dispatchAssignments: scopedDispatchAssignments
+      },
+      alerts
+    };
+  }
+
+  async getTuiRunDrilldown(runId: string, access?: AccessBoundary): Promise<TuiRunDrilldown> {
+    const [runDetail, approvalsList, validationsList, artifactsList, allWorkerNodes, dispatchAssignments, eventRows] = await Promise.all([
+      this.getRun(runId, access),
+      this.listApprovals(runId, access),
+      this.listValidations(runId, access),
+      this.listArtifacts(runId, access),
+      this.listWorkerNodes(),
+      this.listWorkerDispatchAssignments({ runId }),
+      this.db.select().from(controlPlaneEvents)
+        .where(eq(controlPlaneEvents.runId, runId))
+        .orderBy(asc(controlPlaneEvents.createdAt))
+    ]);
+    const repositoryRecord = await this.assertRepositoryExists(runDetail.repositoryId, access);
+    const generatedAt = this.clock.now();
+    const workerNodeIds: string[] = [];
+
+    for (const session of runDetail.sessions) {
+      pushUnique(workerNodeIds, session.workerNodeId);
+      pushUnique(workerNodeIds, session.stickyNodeId);
+    }
+
+    for (const assignment of dispatchAssignments) {
+      pushUnique(workerNodeIds, assignment.claimedByNodeId);
+      pushUnique(workerNodeIds, assignment.stickyNodeId);
+      pushUnique(workerNodeIds, assignment.preferredNodeId);
+    }
+
+    return {
+      generatedAt,
+      repository: this.mapRepository(repositoryRecord),
+      run: runDetail,
+      approvals: approvalsList,
+      validations: validationsList,
+      artifacts: artifactsList,
+      workerNodes: allWorkerNodes.filter((workerNode) => workerNodeIds.includes(workerNode.id)),
+      dispatchAssignments,
+      events: eventRows.map((event) => controlPlaneEventSchema.parse(normalizeLegacyEventActor(event)))
+    };
   }
 
   async exportRunAudit(runId: string, exportedBy: ActorIdentity, retentionPolicy: RetentionPolicy, access?: AccessBoundary): Promise<RunAuditExport> {

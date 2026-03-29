@@ -911,6 +911,107 @@ export const runAuditExportSchema = z.object({
   exportedAt: z.date()
 });
 
+export const tuiRunTaskCountsSchema = z.object({
+  pending: z.number().int().nonnegative(),
+  blocked: z.number().int().nonnegative(),
+  inProgress: z.number().int().nonnegative(),
+  awaitingReview: z.number().int().nonnegative(),
+  completed: z.number().int().nonnegative(),
+  failed: z.number().int().nonnegative(),
+  cancelled: z.number().int().nonnegative()
+});
+
+export const tuiRunApprovalCountsSchema = z.object({
+  pending: z.number().int().nonnegative(),
+  approved: z.number().int().nonnegative(),
+  rejected: z.number().int().nonnegative()
+});
+
+export const tuiRunValidationCountsSchema = z.object({
+  pending: z.number().int().nonnegative(),
+  passed: z.number().int().nonnegative(),
+  failed: z.number().int().nonnegative()
+});
+
+export const tuiRunDispatchCountsSchema = z.object({
+  queued: z.number().int().nonnegative(),
+  claimed: z.number().int().nonnegative(),
+  completed: z.number().int().nonnegative(),
+  retrying: z.number().int().nonnegative(),
+  failed: z.number().int().nonnegative()
+});
+
+export const tuiOverviewRunSchema = z.object({
+  run: runSchema,
+  repository: repositorySchema.pick({
+    id: true,
+    name: true,
+    provider: true,
+    trustLevel: true,
+    approvalProfile: true
+  }),
+  taskCounts: tuiRunTaskCountsSchema,
+  approvalCounts: tuiRunApprovalCountsSchema,
+  validationCounts: tuiRunValidationCountsSchema,
+  dispatchCounts: tuiRunDispatchCountsSchema,
+  activeSessionCount: z.number().int().nonnegative(),
+  workerNodeIds: z.array(z.string().min(1)).default([]),
+  blockedTaskIds: z.array(z.uuid()).default([]),
+  pendingApprovalIds: z.array(z.uuid()).default([]),
+  failedValidationIds: z.array(z.uuid()).default([])
+});
+
+export const tuiAlertSchema = z.object({
+  kind: z.enum([
+    "run_awaiting_approval",
+    "task_blocked",
+    "validation_failed",
+    "worker_node_degraded",
+    "worker_node_offline",
+    "dispatch_retrying",
+    "dispatch_failed"
+  ]),
+  severity: z.enum(["info", "warning", "critical"]),
+  runId: z.uuid().nullable().default(null),
+  entityId: z.string().min(1).nullable().default(null),
+  summary: z.string().min(1)
+});
+
+export const tuiOverviewSchema = z.object({
+  generatedAt: z.date(),
+  summary: z.object({
+    repositories: z.number().int().nonnegative(),
+    runsTotal: z.number().int().nonnegative(),
+    runsActive: z.number().int().nonnegative(),
+    approvalsPending: z.number().int().nonnegative(),
+    validationsFailed: z.number().int().nonnegative(),
+    tasksBlocked: z.number().int().nonnegative(),
+    workerNodesOnline: z.number().int().nonnegative(),
+    workerNodesDegraded: z.number().int().nonnegative(),
+    workerNodesOffline: z.number().int().nonnegative(),
+    dispatchQueued: z.number().int().nonnegative(),
+    dispatchRetrying: z.number().int().nonnegative()
+  }),
+  runs: z.array(tuiOverviewRunSchema),
+  fleet: z.object({
+    workerNodes: z.array(workerNodeSchema),
+    dispatchAssignments: z.array(workerDispatchAssignmentSchema)
+  }),
+  alerts: z.array(tuiAlertSchema)
+});
+
+export const tuiRunDrilldownSchema = z.object({
+  generatedAt: z.date(),
+  repository: repositorySchema,
+  run: runDetailSchema,
+  approvals: z.array(approvalSchema),
+  validations: z.array(validationHistoryEntrySchema),
+  artifacts: z.array(artifactSchema),
+  workerNodes: z.array(workerNodeSchema),
+  dispatchAssignments: z.array(workerDispatchAssignmentSchema),
+  events: z.array(controlPlaneEventSchema)
+});
+
 export type RepositoryCreateInput = z.infer<typeof repositoryCreateSchema>;
 export type RunCreateInput = z.infer<typeof runCreateSchema>;
 export type RunStatusUpdateInput = z.infer<typeof runStatusUpdateSchema>;
@@ -935,6 +1036,10 @@ export type ArtifactDiffSummary = z.infer<typeof artifactDiffSummarySchema>;
 export type ArtifactDetail = z.infer<typeof artifactDetailSchema>;
 export type RunDetail = z.infer<typeof runDetailSchema>;
 export type RunAuditExport = z.infer<typeof runAuditExportSchema>;
+export type TuiOverviewRun = z.infer<typeof tuiOverviewRunSchema>;
+export type TuiAlert = z.infer<typeof tuiAlertSchema>;
+export type TuiOverview = z.infer<typeof tuiOverviewSchema>;
+export type TuiRunDrilldown = z.infer<typeof tuiRunDrilldownSchema>;
 export type ApprovalsListQuery = z.infer<typeof approvalsListQuerySchema>;
 export type WorkerNodeRegisterInput = z.infer<typeof workerNodeRegisterSchema>;
 export type WorkerNodeHeartbeatInput = z.infer<typeof workerNodeHeartbeatSchema>;

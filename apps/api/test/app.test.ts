@@ -48,6 +48,8 @@ const controlPlane = {
   publishRunBranch: vi.fn(),
   createRunPullRequestHandoff: vi.fn(),
   exportRunAudit: vi.fn(),
+  getTuiOverview: vi.fn(),
+  getTuiRunDrilldown: vi.fn(),
   getGovernanceAdminReport: vi.fn(),
   reconcileGovernanceRetention: vi.fn(),
   getRepositorySecretAccessPlan: vi.fn(),
@@ -1310,6 +1312,245 @@ describe("buildApp", () => {
     expect(response.json()).toEqual({
       error: "missing or invalid bearer token",
       details: null
+    });
+
+    await app.close();
+  });
+
+  it("serves the TUI overview aggregate from the control plane", async () => {
+    controlPlane.getTuiOverview.mockResolvedValue({
+      generatedAt: new Date("2026-03-29T08:00:00.000Z"),
+      summary: {
+        repositories: 1,
+        runsTotal: 1,
+        runsActive: 1,
+        approvalsPending: 1,
+        validationsFailed: 0,
+        tasksBlocked: 1,
+        workerNodesOnline: 1,
+        workerNodesDegraded: 0,
+        workerNodesOffline: 0,
+        dispatchQueued: 1,
+        dispatchRetrying: 0
+      },
+      runs: [
+        {
+          run: {
+            id: ids.run,
+            repositoryId: ids.repository,
+            workspaceId: defaultBoundary.workspaceId,
+            teamId: defaultBoundary.teamId,
+            goal: "Ship the TUI drilldown aggregate",
+            status: "in_progress",
+            branchName: null,
+            planArtifactPath: null,
+            budgetTokens: null,
+            budgetCostUsd: null,
+            concurrencyCap: 1,
+            policyProfile: "standard",
+            publishedBranch: null,
+            branchPublishedAt: null,
+            branchPublishApprovalId: null,
+            pullRequestUrl: null,
+            pullRequestNumber: null,
+            pullRequestStatus: null,
+            pullRequestApprovalId: null,
+            handoffStatus: "pending",
+            completedAt: null,
+            metadata: {},
+            createdBy: "backend-dev",
+            createdAt: new Date("2026-03-29T07:30:00.000Z"),
+            updatedAt: new Date("2026-03-29T07:45:00.000Z")
+          },
+          repository: {
+            id: ids.repository,
+            name: "codex-swarm",
+            provider: "github",
+            trustLevel: "trusted",
+            approvalProfile: "standard"
+          },
+          taskCounts: {
+            pending: 0,
+            blocked: 1,
+            inProgress: 1,
+            awaitingReview: 0,
+            completed: 0,
+            failed: 0,
+            cancelled: 0
+          },
+          approvalCounts: {
+            pending: 1,
+            approved: 0,
+            rejected: 0
+          },
+          validationCounts: {
+            pending: 0,
+            passed: 0,
+            failed: 0
+          },
+          dispatchCounts: {
+            queued: 1,
+            claimed: 0,
+            completed: 0,
+            retrying: 0,
+            failed: 0
+          },
+          activeSessionCount: 1,
+          workerNodeIds: [ids.workerNode],
+          blockedTaskIds: [ids.taskB],
+          pendingApprovalIds: [ids.agent],
+          failedValidationIds: []
+        }
+      ],
+      fleet: {
+        workerNodes: [],
+        dispatchAssignments: []
+      },
+      alerts: [
+        {
+          kind: "task_blocked",
+          severity: "warning",
+          runId: ids.run,
+          entityId: ids.taskB,
+          summary: "Task is blocked"
+        }
+      ]
+    });
+
+    const app = await buildApp({
+      controlPlane: controlPlane as unknown as ControlPlaneService
+    });
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/api/v1/tui/overview",
+      headers: {
+        authorization: "Bearer codex-swarm-dev-token"
+      }
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(controlPlane.getTuiOverview).toHaveBeenCalledWith(expect.objectContaining({
+      workspaceId: defaultBoundary.workspaceId,
+      teamId: defaultBoundary.teamId
+    }));
+    expect(response.json()).toMatchObject({
+      summary: {
+        approvalsPending: 1,
+        tasksBlocked: 1
+      },
+      runs: [
+        {
+          run: {
+            id: ids.run
+          },
+          repository: {
+            name: "codex-swarm"
+          }
+        }
+      ],
+      alerts: [
+        {
+          kind: "task_blocked",
+          entityId: ids.taskB
+        }
+      ]
+    });
+
+    await app.close();
+  });
+
+  it("serves the TUI run drilldown aggregate from the control plane", async () => {
+    controlPlane.getTuiRunDrilldown.mockResolvedValue({
+      generatedAt: new Date("2026-03-29T08:05:00.000Z"),
+      repository: {
+        id: ids.repository,
+        workspaceId: defaultBoundary.workspaceId,
+        teamId: defaultBoundary.teamId,
+        name: "codex-swarm",
+        url: "https://example.com/codex-swarm.git",
+        provider: "github",
+        defaultBranch: "main",
+        localPath: null,
+        trustLevel: "trusted",
+        approvalProfile: "standard",
+        providerSync: {
+          connectivityStatus: "validated",
+          validatedAt: new Date("2026-03-29T07:00:00.000Z"),
+          defaultBranch: "main",
+          branches: ["main"],
+          providerRepoUrl: "https://example.com/codex-swarm",
+          lastError: null
+        },
+        createdAt: new Date("2026-03-29T07:00:00.000Z"),
+        updatedAt: new Date("2026-03-29T07:00:00.000Z")
+      },
+      run: {
+        id: ids.run,
+        repositoryId: ids.repository,
+        workspaceId: defaultBoundary.workspaceId,
+        teamId: defaultBoundary.teamId,
+        goal: "Ship the TUI drilldown aggregate",
+        status: "awaiting_approval",
+        branchName: null,
+        planArtifactPath: null,
+        budgetTokens: null,
+        budgetCostUsd: null,
+        concurrencyCap: 1,
+        policyProfile: "standard",
+        publishedBranch: null,
+        branchPublishedAt: null,
+        branchPublishApprovalId: null,
+        pullRequestUrl: null,
+        pullRequestNumber: null,
+        pullRequestStatus: null,
+        pullRequestApprovalId: null,
+        handoffStatus: "pending",
+        completedAt: null,
+        metadata: {},
+        createdBy: "backend-dev",
+        createdAt: new Date("2026-03-29T07:30:00.000Z"),
+        updatedAt: new Date("2026-03-29T08:00:00.000Z"),
+        tasks: [],
+        agents: [],
+        sessions: []
+      },
+      approvals: [],
+      validations: [],
+      artifacts: [],
+      workerNodes: [],
+      dispatchAssignments: [],
+      events: []
+    });
+
+    const app = await buildApp({
+      controlPlane: controlPlane as unknown as ControlPlaneService
+    });
+
+    const response = await app.inject({
+      method: "GET",
+      url: `/api/v1/tui/runs/${ids.run}`,
+      headers: {
+        authorization: "Bearer codex-swarm-dev-token"
+      }
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(controlPlane.getTuiRunDrilldown).toHaveBeenCalledWith(
+      ids.run,
+      expect.objectContaining({
+        workspaceId: defaultBoundary.workspaceId,
+        teamId: defaultBoundary.teamId
+      })
+    );
+    expect(response.json()).toMatchObject({
+      repository: {
+        id: ids.repository
+      },
+      run: {
+        id: ids.run,
+        status: "awaiting_approval"
+      }
     });
 
     await app.close();

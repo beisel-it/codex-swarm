@@ -19,6 +19,7 @@ import { metricsRoutes } from "./routes/metrics.js";
 import { repositoryRoutes } from "./routes/repositories.js";
 import { runRoutes } from "./routes/runs.js";
 import { taskRoutes } from "./routes/tasks.js";
+import { tuiRoutes } from "./routes/tui.js";
 import { validationRoutes } from "./routes/validations.js";
 import { workerDispatchAssignmentRoutes } from "./routes/worker-dispatch-assignments.js";
 import { workerNodeRoutes } from "./routes/worker-nodes.js";
@@ -189,6 +190,7 @@ export async function buildApp(options: BuildAppOptions = {}) {
   await app.register(repositoryRoutes, { prefix: "/api/v1" });
   await app.register(runRoutes, { prefix: "/api/v1" });
   await app.register(taskRoutes, { prefix: "/api/v1" });
+  await app.register(tuiRoutes, { prefix: "/api/v1" });
   await app.register(agentRoutes, { prefix: "/api/v1" });
   await app.register(workerNodeRoutes, { prefix: "/api/v1" });
   await app.register(workerDispatchAssignmentRoutes, { prefix: "/api/v1" });
