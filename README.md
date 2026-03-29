@@ -1,14 +1,11 @@
-<h1 align="center">🧠🐝 Codex Swarm</h1>
+# Codex Swarm
+
+Codex Swarm is a multi-agent software delivery control plane. It combines a workflow-oriented API, a worker runtime that supervises Codex sessions in isolated worktrees, and operator interfaces for planning, execution, review, approvals, governance, and publish handoff.
 
 <p align="center">
-  <strong>A GitHub-oriented control plane for Codex-backed planning, execution, review, approvals, validations, and distributed worker orchestration.</strong>
-</p>
-
-<p align="center">
-  <a href="https://github.com/beisel-it/codex-swarm"><img src="https://img.shields.io/badge/GitHub-beisel--it%2Fcodex--swarm-171515?style=for-the-badge&logo=github" alt="GitHub repository"></a>
-  <a href="./docs/README.md"><img src="https://img.shields.io/badge/docs-release_facing-0A66C2?style=for-the-badge" alt="Release docs"></a>
+  <a href="./"><img src="https://img.shields.io/badge/GitHub-beisel--it%2Fcodex--swarm-171515?style=for-the-badge&logo=github" alt="GitHub repository"></a>
+  <a href="./docs/README.md"><img src="https://img.shields.io/badge/docs-product_and_ops-0A66C2?style=for-the-badge" alt="Product and operations docs"></a>
   <a href="./docs/operator-guide.md"><img src="https://img.shields.io/badge/operator_guide-external_codex-1D9BF0?style=for-the-badge" alt="Operator guide"></a>
-  <a href="./ROADMAP.md"><img src="https://img.shields.io/badge/roadmap-through_M10-0F766E?style=for-the-badge" alt="Roadmap status"></a>
 </p>
 
 <p align="center">
@@ -17,90 +14,137 @@
   <img src="https://img.shields.io/badge/api-Fastify-000000?logo=fastify&logoColor=white" alt="Fastify">
   <img src="https://img.shields.io/badge/frontend-React_%2B_Vite-646CFF?logo=vite&logoColor=white" alt="React and Vite">
   <img src="https://img.shields.io/badge/database-Postgres-4169E1?logo=postgresql&logoColor=white" alt="Postgres">
-  <img src="https://img.shields.io/badge/e2e-M9_validated-15803D" alt="M9 validated">
 </p>
+
+Codex Swarm is built for a concrete operator loop:
+
+- onboard a repository with trust, policy, and provider context
+- define a delivery goal and dependency-safe task graph
+- dispatch slices across Codex-backed agent sessions and worker nodes
+- monitor progress, approvals, validations, artifacts, and worker placement in one control surface
+- review evidence, resolve approvals, and track branch publish or PR handoff state
+- prove governance posture, retention policy, secret boundary, and audit export evidence without dropping to raw storage
+
+## What Ships In This Repo
+
+Codex Swarm ships a working product and the operator materials needed to run it:
+
+- `apps/api`: control-plane API for repositories, runs, tasks, agents, sessions, approvals, validations, artifacts, worker fleet state, cleanup, governance, and audit export
+- `apps/worker`: worker runtime for worktree provisioning, Codex session supervision, validation execution, session recovery, and local or distributed dispatch
+- `frontend`: browser console for board triage, run detail, review, admin governance, fleet visibility, and publish handoff tracking
+- `apps/tui`: terminal UI for operator workflows and capture support
+- `packages/contracts`: shared Zod schemas and API contract types
+- `packages/orchestration`: planning and orchestration helpers for dependency-safe execution
+- `packages/database`: shared database package and Prisma schema support
+- `.codex/agents` and `.agents/skills`: checked-in role pack and reusable operator workflows for running codex-swarm from Codex
+
+The control-plane contract direction is documented in [docs/architecture/control-plane-api-contract.md](./docs/architecture/control-plane-api-contract.md).
+
+## Major UI Surfaces
+
+### Board
+
+The board is the default operating surface. It combines run inventory, task lanes, approval pressure, validation signals, fleet health, and publish state in one place so operators can triage the next unblock path quickly.
 
 <p align="center">
-  Codex Swarm is no longer a scaffold. It ships a real workflow-oriented control plane, worker runtime, review UI, governance stack, operator skill library, and a validated end-to-end product run.
+  <img src="./docs/assets/screenshots/readme-board-desktop.png" alt="Desktop board view showing run inventory, task lanes, fleet signals, and publish state" width="78%">
+  <img src="./docs/assets/screenshots/readme-board-mobile.png" alt="Mobile board view showing the operator shell and active run board" width="18%">
 </p>
 
----
+### Run Detail
 
-## ✨ What This Repo Ships
+Run detail is where operators inspect placement, sticky-node ownership, session recovery state, transcripts, artifacts, activity history, and repository handoff context before retrying work or escalating a runtime issue.
 
-Codex Swarm is built around a workflow API rather than generic CRUD. The product now includes:
+<p align="center">
+  <img src="./docs/assets/screenshots/readme-run-detail-desktop.png" alt="Desktop run detail view showing placement diagnostics, activity, transcript context, and handoff state" width="78%">
+  <img src="./docs/assets/screenshots/readme-run-detail-mobile.png" alt="Mobile run detail view showing run context and session diagnostics" width="18%">
+</p>
 
-- a Fastify control-plane API for repositories, runs, tasks, agents, sessions, approvals, validations, artifacts, audit export, and worker fleet management
-- a worker runtime that supervises Codex sessions, provisions isolated worktrees, runs validations, and supports distributed dispatch
-- a React/Vite frontend for board views, run detail, governance visibility, publish flows, and a review console with diff evidence
-- governance features including RBAC, workspace and team isolation, approval delegation, policy exceptions, audit export, and retention context
-- codex-swarm-specific external operator docs, skills, and authoring guidance for real repo operation
+### Review
 
-The current API-contract direction is documented in [docs/architecture/control-plane-api-contract.md](./docs/architecture/control-plane-api-contract.md).
+The review console ties approval decisions to current evidence. Approval requests, diff summaries, changed files, raw diff preview, validations, and artifacts are available in the same workspace so reviewers can approve or reject with the relevant context in view.
 
----
+<p align="center">
+  <img src="./docs/assets/screenshots/readme-review-desktop.png" alt="Desktop review console showing approval context, diff summary, validations, and artifacts" width="78%">
+</p>
 
-## 📸 Product Surfaces
+### Admin
 
-| Board | Run Detail |
-|---|---|
-| ![Board overview](./docs/assets/screenshots/user-board-overview.png) | ![Run detail](./docs/assets/screenshots/user-run-detail.png) |
+The admin surface exposes actor identity, workspace boundary, governance summaries, approval provenance, retention posture, secret-access boundaries, and audit export status for support, signoff, and policy-sensitive runs.
 
-| Review Console | Governance |
-|---|---|
-| ![Review console](./docs/assets/screenshots/user-review-console.png) | ![Admin governance view](./docs/assets/screenshots/admin-governance-view.png) |
+<p align="center">
+  <img src="./docs/assets/screenshots/readme-admin-desktop.png" alt="Desktop admin view showing governance reporting, approval provenance, retention posture, and audit context" width="78%">
+</p>
 
-| Distributed Fleet |
-|---|
-| ![Reference multinode board](./docs/assets/screenshots/reference-multinode-board.png) |
+## Core Capabilities
 
----
+### Workflow-first control plane
 
-## 🚀 Start Here
+Codex Swarm models delivery state directly instead of forcing operators to reconstruct it from generic CRUD records:
 
-Choose the entry point that matches how you are approaching the system:
+- repositories carry provider, trust, workspace, and policy posture
+- runs hold goal, branch, handoff status, concurrency, budget posture, and completion state
+- tasks persist a dependency-safe DAG instead of a flat checklist
+- approvals, validations, artifacts, and audit exports are first-class evidence
 
-- [docs/README.md](./docs/README.md) for the release-facing documentation hub
-- [docs/operator-guide.md](./docs/operator-guide.md) for external Codex operation of this repo
-- [docs/operator-skill-library.md](./docs/operator-skill-library.md) for the codex-swarm operator skill pack
-- [docs/operator-skill-workflows.md](./docs/operator-skill-workflows.md) for grounded board, planning, recovery, and coordination workflows
-- [templates/agent-teams/development-stack.md](./templates/agent-teams/development-stack.md) for a reusable product-delivery team shape
-- [templates/agent-teams/platform-ops-stack.md](./templates/agent-teams/platform-ops-stack.md) for a reusable platform/ops team shape
-- [docs/user-guide.md](./docs/user-guide.md) for end-user product flows
-- [docs/admin-guide.md](./docs/admin-guide.md) for governance and admin surfaces
-- [docs/support-playbooks.md](./docs/support-playbooks.md) for support and recovery playbooks
+### Codex-backed execution with supervised workers
 
----
+The worker runtime covers the difficult execution path:
 
-## 🧭 Milestone Status
+- isolated worktree materialization
+- Codex session launch and thread tracking
+- validation execution and artifact persistence
+- local or distributed node dispatch with heartbeat, drain, and placement awareness
+- session recovery cues for stale or failed work
 
-The project has been carried through M10:
+### Operator interfaces for browser and terminal workflows
 
-- `M7` parity review closed
-- `M8` codex-swarm external-operator pack closed
-- `M9` real codex-swarm end-to-end scenario completed with persisted artifacts, validations, screenshots, and audit export
-- `M10` project-level README redesign completed
+The shipped interfaces are organized around the real operating loop:
 
-The M9 scenario was executed as a real codex-swarm product run in an isolated workspace, not as a synthetic backlog-only exercise.
+- browser board triage for active and blocked runs
+- run-level diagnostics and transcript context
+- review and approval handling with diff evidence
+- governance, provenance, retention, and audit visibility
+- terminal workflows through `apps/tui` and the root `pnpm tui` helpers
 
----
+### Checked-in operator pack
 
-## ⚡ Quick Local Bring-Up
+This repo also ships the assets needed to operate codex-swarm from Codex:
+
+- [AGENTS.md](./AGENTS.md) for repo-level operating guidance
+- [.agents/skills/README.md](./.agents/skills/README.md) for the checked-in skill index
+- [docs/operator-guide.md](./docs/operator-guide.md) for the external operator entrypoint
+- [docs/operator-skill-library.md](./docs/operator-skill-library.md) and [docs/operator-skill-workflows.md](./docs/operator-skill-workflows.md) for grounded control flows
+
+## Operator Workflow
+
+1. Onboard or select a repository with provider, trust, and policy metadata.
+2. Create a run with a concrete goal, branch context, and dependency-safe task graph.
+3. Dispatch work across agents and worker nodes while the board tracks blockers, approvals, validations, and handoff state.
+4. Use run detail to inspect placement, transcript history, artifacts, and recovery clues when a slice stalls or fails.
+5. Use review to resolve approvals against diff evidence, validation status, and artifact output.
+6. Use admin to confirm governance posture, approval provenance, retention state, and audit export evidence.
+7. Publish the branch and attach provider PR metadata or a manual handoff artifact when the run is ready for external review.
+
+## Quick Start
+
+Install dependencies, configure local environment, and start the main services:
 
 ```bash
 corepack pnpm install
 cp .env.example .env
-corepack pnpm --dir apps/api dev
-corepack pnpm --dir frontend dev
+corepack pnpm dev:api
+corepack pnpm dev:worker
+corepack pnpm dev:frontend
 ```
 
-Set these in `.env`:
+Important local environment values include:
 
 - `DATABASE_URL`
 - `DEV_AUTH_TOKEN`
-- artifact storage settings appropriate to your deployment mode
+- artifact storage settings for your deployment mode
 
-For remote or shared-worker deployments, also set:
+If you are running remote or shared-worker deployments, also set:
 
 - `ARTIFACT_STORAGE_ROOT`
 - `ARTIFACT_BASE_URL`
@@ -111,153 +155,69 @@ All `/api/v1/*` requests use:
 Authorization: Bearer <DEV_AUTH_TOKEN>
 ```
 
----
-
-## 🔬 Verification
-
-### Core workspace checks
+For deterministic README-style frontend demos and screenshot capture, use:
 
 ```bash
+corepack pnpm dev:frontend:readme-capture
+```
+
+The repeatable capture flow and preset URLs are documented in [docs/operations/frontend-readme-screenshot-capture.md](./docs/operations/frontend-readme-screenshot-capture.md).
+
+## Verification
+
+Workspace-level checks:
+
+```bash
+corepack pnpm run ci:lint
 corepack pnpm run ci:typecheck
 corepack pnpm run ci:test
 corepack pnpm run ci:build
 ```
 
-### Useful targeted checks
+Useful targeted commands:
 
 ```bash
 corepack pnpm --dir apps/api typecheck
 corepack pnpm --dir apps/api test
+corepack pnpm --dir apps/worker test
+corepack pnpm --dir frontend build
 corepack pnpm --dir packages/contracts typecheck
 corepack pnpm --dir packages/orchestration typecheck
 ```
 
-### Operator and scenario helpers
+Operator helpers:
 
 ```bash
 corepack pnpm tui
 corepack pnpm tui:capture
 corepack pnpm ops:smoke
-corepack pnpm ops:m9:prepare
-corepack pnpm ops:perf
 corepack pnpm ops:backup
 corepack pnpm ops:restore
 corepack pnpm ops:drill
+corepack pnpm ops:tailnet:status
 ```
 
-The TUI launch path is documented in [docs/operations/tui-launch-and-capture.md](./docs/operations/tui-launch-and-capture.md). Set `CODEX_SWARM_API_BASE_URL` and `CODEX_SWARM_API_TOKEN` for live API mode; otherwise the TUI starts with its built-in mock fallback so packaging and rendering can still be verified offline.
-
----
-
-## 🏗️ System Shape
-
-### Control plane
-
-- repositories are onboarded with provider and trust metadata
-- runs hold goal, policy posture, budget posture, placement, and completion state
-- tasks persist a dependency-safe DAG
-- agents and sessions persist Codex execution state, including durable `threadId`
-- approvals, validations, and artifacts are first-class review evidence
-
-### Distributed execution
-
-- worker nodes register capabilities and heartbeat into the control plane
-- dispatch uses capability, stickiness, queue depth, active claims, utilization, and heartbeat freshness
-- leader placement is explicit in distributed runs
-- worker runtime supports local `stdio` Codex MCP and remote streamable HTTP transport
-- repository materialization supports trusted local-path mounts and cloned checkouts
-
-### Governance and review
-
-- workspace and team isolation
-- RBAC for run creation, review, and admin actions
-- approval delegation and structured policy-exception decisions
-- durable audit export with provenance, approvals, validations, artifacts, events, and retention context
-- review UI with diff summary, changed-file evidence, reviewer context, and raw diff preview
-
----
-
-## 🧰 Operator Pack
-
-This repo ships codex-swarm-specific operator assets, not just generic role prompts:
-
-- [AGENTS.md](./AGENTS.md) for repo-level guidance
-- `.codex/config.toml` and `.codex/agents/*.toml` for the checked-in role pack
-- `templates/agent-teams/*.md` for reusable run-team launch templates
-- [.agents/skills/README.md](./.agents/skills/README.md) for the skill index
-- `.agents/skills/*/SKILL.md` for reusable codex-swarm workflows
-- [docs/operator-skill-library.md](./docs/operator-skill-library.md) for discoverability
-- [docs/operator-skill-workflows.md](./docs/operator-skill-workflows.md) for grounded control flows
-- [docs/agent-skill-authoring.md](./docs/agent-skill-authoring.md) for extending the pack
-
----
-
-## 🗂️ Repository Layout
+## Repository Layout
 
 | Path | Responsibility |
-|---|---|
+| --- | --- |
 | `apps/api` | Control-plane API, persistence, governance, audit, scheduling, cleanup |
-| `apps/worker` | Worker runtime, provisioning, Codex supervision, validation runner |
-| `frontend` | Board, run detail, review, governance, and publish UI |
-| `packages/contracts` | Shared Zod schemas and API contract types |
+| `apps/worker` | Worker runtime, worktree provisioning, Codex supervision, validation runner |
+| `apps/tui` | Terminal UI, run summaries, and capture-oriented operator views |
+| `frontend` | Browser board, run detail, review, admin, and fleet visibility UI |
+| `packages/contracts` | Shared schemas and API contract types |
 | `packages/orchestration` | DAG and orchestration helpers |
-| `templates/repo-profiles` | Starter repo profiles by stack |
+| `packages/database` | Shared database package and schema assets |
 | `.codex/agents` | Checked-in role pack |
-| `.agents/skills` | Checked-in codex-swarm skill library |
-| `docs` | Release docs, operations references, architecture notes |
+| `.agents/skills` | Checked-in codex-swarm workflow skills |
+| `templates/repo-profiles` | Starter repository profiles by stack |
+| `docs` | Product, operator, architecture, operations, and support docs |
 
----
+## Read Next
 
-## 📚 Documentation Index
-
-### Product and operator docs
-
-- [docs/README.md](./docs/README.md)
-- [docs/user-guide.md](./docs/user-guide.md)
-- [docs/admin-guide.md](./docs/admin-guide.md)
-- [docs/operator-guide.md](./docs/operator-guide.md)
-- [docs/operator-skill-library.md](./docs/operator-skill-library.md)
-- [docs/operator-skill-workflows.md](./docs/operator-skill-workflows.md)
-- [docs/agent-skill-authoring.md](./docs/agent-skill-authoring.md)
-- [docs/support-playbooks.md](./docs/support-playbooks.md)
-- [docs/reference-deployments.md](./docs/reference-deployments.md)
-
-### Operations
-
-- [docs/operations/security.md](./docs/operations/security.md)
-- [docs/operations/slo-support.md](./docs/operations/slo-support.md)
-- [docs/operations/cicd.md](./docs/operations/cicd.md)
-- [docs/operations/backup-restore-dr.md](./docs/operations/backup-restore-dr.md)
-- [docs/operations/m9-readiness.md](./docs/operations/m9-readiness.md)
-- [docs/operations/tui-launch-and-capture.md](./docs/operations/tui-launch-and-capture.md)
-- [docs/operations/upgrade-path.md](./docs/operations/upgrade-path.md)
-- [docs/operations/cost-usage-performance.md](./docs/operations/cost-usage-performance.md)
-
-### Architecture and planning
-
-- [PRD.md](./PRD.md)
-- [ROADMAP.md](./ROADMAP.md)
-- [docs/architecture/m0-m1-architecture.md](./docs/architecture/m0-m1-architecture.md)
-- [docs/architecture/control-plane-api-contract.md](./docs/architecture/control-plane-api-contract.md)
-- [docs/architecture/system-context-and-sequences.md](./docs/architecture/system-context-and-sequences.md)
-
----
-
-## 🧪 GitHub-Oriented Demo Flow
-
-If you want a quick GitHub-style evaluation path through the repo:
-
-1. Scan this README and the screenshots.
-2. Read [docs/operator-guide.md](./docs/operator-guide.md).
-3. Run `corepack pnpm run ci:typecheck && corepack pnpm run ci:test && corepack pnpm run ci:build`.
-4. Run `corepack pnpm ops:smoke`.
-5. Review [docs/reference-deployments.md](./docs/reference-deployments.md) and [docs/operations/upgrade-path.md](./docs/operations/upgrade-path.md).
-6. If you want the validated scenario setup, inspect [docs/operations/m9-readiness.md](./docs/operations/m9-readiness.md).
-
----
-
-## 🔗 Reference
-
-- Project roadmap: [ROADMAP.md](./ROADMAP.md)
-- Product requirements: [PRD.md](./PRD.md)
-- GitHub repository: https://github.com/beisel-it/codex-swarm
+- [docs/README.md](./docs/README.md) for the documentation hub
+- [docs/user-guide.md](./docs/user-guide.md) for a walkthrough of the main operator surfaces
+- [docs/admin-guide.md](./docs/admin-guide.md) for governance and admin workflows
+- [docs/operator-guide.md](./docs/operator-guide.md) for external Codex operation of this repo
+- [docs/reference-deployments.md](./docs/reference-deployments.md) for deployment shapes and multi-node guidance
+- [docs/operations/frontend-readme-screenshot-capture.md](./docs/operations/frontend-readme-screenshot-capture.md) for the deterministic screenshot setup used by this README

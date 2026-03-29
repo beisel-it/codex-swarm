@@ -436,18 +436,47 @@ type RuntimeConfig = {
   apiToken?: string
 }
 
+type DemoMode = 'auto' | 'mock'
+type CapturePreset = {
+  view: ViewMode
+  runId?: string
+  approvalId?: string
+  artifactId?: string
+  transcriptSessionId?: string
+  theme?: string
+  sidebarWidth?: number
+  showDagSection?: boolean
+  showAgentSection?: boolean
+}
+
+type UrlState = {
+  demoMode: DemoMode
+  captureId: string | null
+  view: ViewMode
+  runId: string
+  approvalId: string
+  artifactId: string
+  transcriptSessionId: string
+  theme: string | null
+  sidebarWidth: number | null
+  showDagSection: boolean | null
+  showAgentSection: boolean | null
+}
+
 const runtimeConfig = (
   window as typeof window & {
     __CODEX_SWARM_CONFIG__?: RuntimeConfig
   }
 ).__CODEX_SWARM_CONFIG__
 
-const API_BASE_URL = (
-  runtimeConfig?.apiBaseUrl
+let currentRuntimeConfig: RuntimeConfig = runtimeConfig ?? {}
+
+let API_BASE_URL = (
+  currentRuntimeConfig.apiBaseUrl
   ?? import.meta.env.VITE_API_BASE_URL
   ?? `${window.location.protocol}//${window.location.hostname}:4300`
 ).replace(/\/$/, '')
-const API_TOKEN = (runtimeConfig?.apiToken ?? import.meta.env.VITE_API_TOKEN ?? '').trim()
+let API_TOKEN = (currentRuntimeConfig.apiToken ?? import.meta.env.VITE_API_TOKEN ?? '').trim()
 const APPROVAL_RESOLVER = import.meta.env.VITE_APPROVAL_RESOLVER ?? 'frontend-dev'
 const MOCK_FALLBACK_ENABLED = import.meta.env.VITE_ENABLE_MOCK_FALLBACK === 'true'
 const REFRESH_MS = 15_000
@@ -707,6 +736,188 @@ const mockAuditExport: RunAuditExport = {
   },
   retention: mockGovernance.retention,
   exportedAt: '2026-03-28T22:17:00.000Z',
+}
+
+const mockApprovalDetails: Record<string, Approval> = {
+  'approval-plan': {
+    id: 'approval-plan',
+    runId: 'run-beta',
+    taskId: 'task-review',
+    kind: 'plan',
+    status: 'pending',
+    requestedBy: 'tech-lead',
+    requestedPayload: {
+      summary: 'Need explicit reviewer approval before the beta handoff opens.',
+      target: 'beta handoff',
+      rationale: 'The beta docs run is blocked on reviewer signoff because the recovery follow-up still depends on this decision.',
+      artifactIds: ['artifact-diff-beta'],
+      validationIds: ['validation-recovery'],
+    },
+    resolutionPayload: {},
+    resolver: null,
+    resolvedAt: null,
+    createdAt: '2026-03-28T19:40:00.000Z',
+    updatedAt: '2026-03-28T19:40:00.000Z',
+  },
+  'approval-policy': {
+    id: 'approval-policy',
+    runId: 'run-alpha',
+    taskId: 'task-runtime',
+    kind: 'policy_exception',
+    status: 'rejected',
+    requestedBy: 'backend-dev',
+    requestedPayload: {
+      summary: 'Request temporary network access for runtime smoke tests.',
+      target: 'runtime bootstrap',
+    },
+    resolutionPayload: {
+      feedback: 'Network smoke tests remain disallowed until the bootstrap path is stable.',
+    },
+    resolver: 'security',
+    resolvedAt: '2026-03-28T20:03:00.000Z',
+    createdAt: '2026-03-28T18:35:00.000Z',
+    updatedAt: '2026-03-28T20:03:00.000Z',
+  },
+}
+
+const mockArtifactDetails: Record<string, ArtifactDetail> = {
+  'artifact-diff-beta': {
+    artifact: {
+      id: 'artifact-diff-beta',
+      runId: 'run-beta',
+      taskId: 'task-review',
+      kind: 'diff',
+      path: 'artifacts/review/beta-handoff.diff',
+      contentType: 'text/x-diff',
+      url: 'https://github.com/example/codex-swarm/pull/52/files',
+      sizeBytes: 7168,
+      sha256: '9df4df6425852d5ceec44943f4b8bf35d29ac0bd713f5acb39974856db7560f7',
+      createdAt: '2026-03-28T19:46:00.000Z',
+    },
+    contentState: 'available',
+    bodyText: [
+      'Beta handoff diff focuses on the restart-recovery notes and reviewer guidance.',
+      '',
+      '- documents stale-session symptoms on the degraded node',
+      '- adds the reviewer checklist needed before reopening the handoff',
+      '- clarifies follow-up validation expectations for restart recovery',
+    ].join('\n'),
+    diffSummary: {
+      title: 'Beta handoff reviewer packet',
+      changeSummary: '3 files changed across recovery notes, reviewer checklist text, and the handoff summary.',
+      filesChanged: 3,
+      insertions: 48,
+      deletions: 9,
+      truncated: false,
+      providerUrl: 'https://github.com/example/codex-swarm/pull/52/files',
+      fileSummaries: [
+        {
+          path: 'docs/operator-guide.md',
+          changeType: 'modified',
+          additions: 18,
+          deletions: 2,
+          summary: 'Adds explicit reviewer handoff checkpoints and degraded-node escalation wording.',
+          previousPath: null,
+          providerUrl: 'https://github.com/example/codex-swarm/pull/52/files#diff-operator-guide',
+        },
+        {
+          path: 'docs/support-playbooks.md',
+          changeType: 'modified',
+          additions: 15,
+          deletions: 4,
+          summary: 'Documents restart recovery checks before the beta run can continue.',
+          previousPath: null,
+          providerUrl: 'https://github.com/example/codex-swarm/pull/52/files#diff-support-playbooks',
+        },
+        {
+          path: '.swarm/review.md',
+          changeType: 'modified',
+          additions: 15,
+          deletions: 3,
+          summary: 'Refreshes the approval summary and ties the recovery blocker to reviewer signoff.',
+          previousPath: null,
+          providerUrl: 'https://github.com/example/codex-swarm/pull/52/files#diff-review-md',
+        },
+      ],
+      diffPreview: [
+        '@@ -10,7 +10,12 @@',
+        ' - recovery follow-up remains blocked',
+        ' + reviewer must confirm stale session ownership and degraded-node visibility',
+        ' + add restart verification checklist before handoff opens',
+        '',
+        '@@ -24,6 +29,11 @@',
+        ' + Capture degraded-node evidence in the operator guide',
+        ' + Link validation failure to the approval context',
+      ].join('\n'),
+      rawDiff: [
+        'diff --git a/docs/operator-guide.md b/docs/operator-guide.md',
+        'index 1111111..2222222 100644',
+        '--- a/docs/operator-guide.md',
+        '+++ b/docs/operator-guide.md',
+        '@@ -10,7 +10,12 @@',
+        '- recovery follow-up remains blocked',
+        '+ reviewer must confirm stale session ownership and degraded-node visibility',
+        '+ add restart verification checklist before handoff opens',
+        '',
+        'diff --git a/.swarm/review.md b/.swarm/review.md',
+        'index 3333333..4444444 100644',
+        '--- a/.swarm/review.md',
+        '+++ b/.swarm/review.md',
+        '@@ -24,6 +29,11 @@',
+        '+ Capture degraded-node evidence in the operator guide',
+        '+ Link validation failure to the approval context',
+      ].join('\n'),
+    },
+  },
+}
+
+const mockSessionTranscripts: Record<string, SessionTranscriptEntry[]> = {
+  'session-frontend': [
+    {
+      id: 'transcript-frontend-1',
+      sessionId: 'session-frontend',
+      kind: 'prompt',
+      text: 'Prepare the fleet-visibility board surface for README documentation screenshots.',
+      createdAt: '2026-03-28T20:40:00.000Z',
+    },
+    {
+      id: 'transcript-frontend-2',
+      sessionId: 'session-frontend',
+      kind: 'response',
+      text: 'Updated the board layout with node utilization, drain indicators, and placement context. Build passed locally.',
+      createdAt: '2026-03-28T20:46:00.000Z',
+    },
+    {
+      id: 'transcript-frontend-3',
+      sessionId: 'session-frontend',
+      kind: 'system',
+      text: 'Validation queued: npm --prefix frontend run build',
+      createdAt: '2026-03-28T20:47:00.000Z',
+    },
+  ],
+  'session-reviewer': [
+    {
+      id: 'transcript-reviewer-1',
+      sessionId: 'session-reviewer',
+      kind: 'prompt',
+      text: 'Review the beta handoff diff and confirm whether recovery notes are explicit enough for the operator guide.',
+      createdAt: '2026-03-28T19:42:00.000Z',
+    },
+    {
+      id: 'transcript-reviewer-2',
+      sessionId: 'session-reviewer',
+      kind: 'response',
+      text: 'Diff is focused, but the degraded-node restart guidance still needs a clear reviewer checklist before approval.',
+      createdAt: '2026-03-28T19:48:00.000Z',
+    },
+    {
+      id: 'transcript-reviewer-3',
+      sessionId: 'session-reviewer',
+      kind: 'system',
+      text: 'Heartbeat degraded during reconnect; session marked stale on node-remote-b.',
+      createdAt: '2026-03-28T20:15:00.000Z',
+    },
+  ],
 }
 
 const mockData: SwarmData = {
@@ -1283,12 +1494,212 @@ const workerSessionTone: Record<WorkerSessionState, ActivityItem['tone']> = {
   archived: 'muted',
 }
 
+const capturePresets: Record<string, CapturePreset> = {
+  'board-desktop': {
+    view: 'board',
+    runId: 'run-alpha',
+    theme: 'system',
+    sidebarWidth: 344,
+    showDagSection: false,
+    showAgentSection: false,
+  },
+  'board-mobile': {
+    view: 'board',
+    runId: 'run-alpha',
+    theme: 'system',
+    showDagSection: false,
+    showAgentSection: false,
+  },
+  'detail-desktop': {
+    view: 'detail',
+    runId: 'run-alpha',
+    theme: 'system',
+    transcriptSessionId: 'session-frontend',
+  },
+  'detail-mobile': {
+    view: 'detail',
+    runId: 'run-alpha',
+    theme: 'system',
+    transcriptSessionId: 'session-reviewer',
+  },
+  'review-desktop': {
+    view: 'review',
+    runId: 'run-beta',
+    approvalId: 'approval-plan',
+    artifactId: 'artifact-diff-beta',
+    theme: 'system',
+  },
+  'review-mobile': {
+    view: 'review',
+    runId: 'run-beta',
+    approvalId: 'approval-plan',
+    artifactId: 'artifact-diff-beta',
+    theme: 'system',
+  },
+  'admin-desktop': {
+    view: 'admin',
+    runId: 'run-alpha',
+    theme: 'system',
+  },
+  'admin-mobile': {
+    view: 'admin',
+    runId: 'run-alpha',
+    theme: 'system',
+  },
+}
+
 const SIDEBAR_WIDTH_STORAGE_KEY = 'codex-swarm.sidebar-width'
 const SIDEBAR_MIN_WIDTH = 280
 const SIDEBAR_MAX_WIDTH = 560
 
 function buildApiUrl(path: string) {
   return `${API_BASE_URL}${path}`
+}
+
+function parseViewMode(value: string | null): ViewMode {
+  return value === 'board' || value === 'detail' || value === 'review' || value === 'admin'
+    ? value
+    : 'board'
+}
+
+function parseBooleanParam(value: string | null) {
+  if (value === null) {
+    return null
+  }
+
+  return value === '1' || value === 'true'
+}
+
+function parseSidebarWidth(value: string | null) {
+  const parsed = Number(value)
+  if (!Number.isFinite(parsed)) {
+    return null
+  }
+
+  return Math.min(SIDEBAR_MAX_WIDTH, Math.max(SIDEBAR_MIN_WIDTH, parsed))
+}
+
+function readUrlState(): UrlState {
+  if (typeof window === 'undefined') {
+    return {
+      demoMode: 'auto',
+      captureId: null,
+      view: 'board',
+      runId: '',
+      approvalId: '',
+      artifactId: '',
+      transcriptSessionId: '',
+      theme: null,
+      sidebarWidth: null,
+      showDagSection: null,
+      showAgentSection: null,
+    }
+  }
+
+  const params = new URLSearchParams(window.location.search)
+  const captureId = params.get('capture')
+  const preset = captureId ? capturePresets[captureId] : undefined
+
+  return {
+    demoMode: params.get('demo') === 'mock' ? 'mock' : 'auto',
+    captureId,
+    view: parseViewMode(params.get('view') ?? preset?.view ?? null),
+    runId: params.get('run') ?? preset?.runId ?? '',
+    approvalId: params.get('approval') ?? preset?.approvalId ?? '',
+    artifactId: params.get('artifact') ?? preset?.artifactId ?? '',
+    transcriptSessionId: params.get('transcript') ?? preset?.transcriptSessionId ?? '',
+    theme: params.get('theme') ?? preset?.theme ?? null,
+    sidebarWidth: parseSidebarWidth(params.get('sidebar')) ?? preset?.sidebarWidth ?? null,
+    showDagSection: parseBooleanParam(params.get('dag')) ?? preset?.showDagSection ?? null,
+    showAgentSection: parseBooleanParam(params.get('agents')) ?? preset?.showAgentSection ?? null,
+  }
+}
+
+function replaceUrlState(state: {
+  demoMode: DemoMode
+  captureId: string | null
+  view: ViewMode
+  runId: string
+  approvalId: string
+  artifactId: string
+  transcriptSessionId: string
+  theme: string
+}) {
+  if (typeof window === 'undefined') {
+    return
+  }
+
+  const params = new URLSearchParams(window.location.search)
+
+  if (state.demoMode === 'mock') {
+    params.set('demo', 'mock')
+  } else {
+    params.delete('demo')
+  }
+
+  if (state.captureId) {
+    params.set('capture', state.captureId)
+  } else {
+    params.delete('capture')
+  }
+
+  params.set('view', state.view)
+
+  if (state.runId) {
+    params.set('run', state.runId)
+  } else {
+    params.delete('run')
+  }
+
+  if (state.approvalId) {
+    params.set('approval', state.approvalId)
+  } else {
+    params.delete('approval')
+  }
+
+  if (state.artifactId) {
+    params.set('artifact', state.artifactId)
+  } else {
+    params.delete('artifact')
+  }
+
+  if (state.transcriptSessionId) {
+    params.set('transcript', state.transcriptSessionId)
+  } else {
+    params.delete('transcript')
+  }
+
+  if (state.theme) {
+    params.set('theme', state.theme)
+  } else {
+    params.delete('theme')
+  }
+
+  const nextSearch = params.toString()
+  const nextUrl = `${window.location.pathname}${nextSearch ? `?${nextSearch}` : ''}${window.location.hash}`
+  window.history.replaceState(null, '', nextUrl)
+}
+
+function applyRuntimeConfig(config: RuntimeConfig) {
+  currentRuntimeConfig = config
+  API_BASE_URL = (
+    config.apiBaseUrl
+    ?? import.meta.env.VITE_API_BASE_URL
+    ?? `${window.location.protocol}//${window.location.hostname}:4300`
+  ).replace(/\/$/, '')
+  API_TOKEN = (config.apiToken ?? import.meta.env.VITE_API_TOKEN ?? '').trim()
+}
+
+async function refreshRuntimeConfig() {
+  const response = await fetch(`/runtime-config.json?ts=${Date.now()}`, {
+    cache: 'no-store',
+  })
+
+  if (!response.ok) {
+    throw new Error(`Runtime config refresh failed: ${response.status}`)
+  }
+
+  applyRuntimeConfig((await response.json()) as RuntimeConfig)
 }
 
 function isUuid(value: string | null | undefined) {
@@ -1323,7 +1734,7 @@ function buildRunTemplateMetadata(template: TeamTemplate | null) {
   }
 }
 
-async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
+async function requestJson<T>(path: string, init?: RequestInit, allowRetry = true): Promise<T> {
   const headers = new Headers(init?.headers ?? {})
   if (init?.body !== undefined && !headers.has('Content-Type')) {
     headers.set('Content-Type', 'application/json')
@@ -1336,6 +1747,11 @@ async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
     ...init,
     headers,
   })
+
+  if (response.status === 401 && allowRetry) {
+    await refreshRuntimeConfig()
+    return requestJson<T>(path, init, false)
+  }
 
   if (!response.ok) {
     throw new Error(`Request failed: ${response.status}`)
@@ -1808,16 +2224,19 @@ function deriveActivity(
 }
 
 function App() {
+  const initialUrlState = readUrlState()
   const { activeTheme, setActiveTheme, themes } = useTheme()
+  const [demoMode] = useState<DemoMode>(initialUrlState.demoMode)
+  const [captureId] = useState<string | null>(initialUrlState.captureId)
   const [data, setData] = useState<SwarmData>(createEmptySwarmData())
   const [teamTemplates, setTeamTemplates] = useState<TeamTemplate[]>(defaultTeamTemplates)
-  const [selectedRunId, setSelectedRunId] = useState('')
-  const [selectedView, setSelectedView] = useState<ViewMode>('board')
-  const [selectedApprovalId, setSelectedApprovalId] = useState<string>('')
-  const [selectedReviewArtifactId, setSelectedReviewArtifactId] = useState<string>('')
+  const [selectedRunId, setSelectedRunId] = useState(initialUrlState.runId)
+  const [selectedView, setSelectedView] = useState<ViewMode>(initialUrlState.view)
+  const [selectedApprovalId, setSelectedApprovalId] = useState<string>(initialUrlState.approvalId)
+  const [selectedReviewArtifactId, setSelectedReviewArtifactId] = useState<string>(initialUrlState.artifactId)
   const [selectedApprovalDetail, setSelectedApprovalDetail] = useState<Approval | null>(null)
   const [selectedArtifactDetail, setSelectedArtifactDetail] = useState<ArtifactDetail | null>(null)
-  const [selectedTranscriptSessionId, setSelectedTranscriptSessionId] = useState<string>('')
+  const [selectedTranscriptSessionId, setSelectedTranscriptSessionId] = useState<string>(initialUrlState.transcriptSessionId)
   const [selectedTranscript, setSelectedTranscript] = useState<SessionTranscriptEntry[]>([])
   const [transcriptState, setTranscriptState] = useState<LoadState>('idle')
   const [transcriptError, setTranscriptError] = useState('')
@@ -1850,8 +2269,8 @@ function App() {
   const [showRunControls, setShowRunControls] = useState(false)
   const [showRepositoryInventory, setShowRepositoryInventory] = useState(true)
   const [showRunInventory, setShowRunInventory] = useState(true)
-  const [showDagSection, setShowDagSection] = useState(false)
-  const [showAgentSection, setShowAgentSection] = useState(false)
+  const [showDagSection, setShowDagSection] = useState(initialUrlState.showDagSection ?? false)
+  const [showAgentSection, setShowAgentSection] = useState(initialUrlState.showAgentSection ?? false)
   const [showAllRuns, setShowAllRuns] = useState(false)
   const [showAllRepositories, setShowAllRepositories] = useState(false)
   const [runFormNotice, setRunFormNotice] = useState('')
@@ -1870,6 +2289,10 @@ function App() {
       return 344
     }
 
+    if (initialUrlState.sidebarWidth) {
+      return initialUrlState.sidebarWidth
+    }
+
     const storedWidth = Number(window.localStorage.getItem(SIDEBAR_WIDTH_STORAGE_KEY))
     if (!Number.isFinite(storedWidth)) {
       return 344
@@ -1883,6 +2306,12 @@ function App() {
   useEffect(() => {
     window.localStorage.setItem(SIDEBAR_WIDTH_STORAGE_KEY, String(sidebarWidth))
   }, [sidebarWidth])
+
+  useEffect(() => {
+    if (initialUrlState.theme && themes.some((theme) => theme.value === initialUrlState.theme)) {
+      setActiveTheme(initialUrlState.theme as typeof activeTheme)
+    }
+  }, [activeTheme, initialUrlState.theme, setActiveTheme, themes])
 
   useEffect(() => {
     function handleResize() {
@@ -1928,7 +2357,7 @@ function App() {
 
     async function hydrate() {
       try {
-        const nextData = await loadSwarmData()
+        const nextData = demoMode === 'mock' ? mockData : await loadSwarmData()
 
         if (!active) {
           return
@@ -1962,7 +2391,7 @@ function App() {
       active = false
       window.clearInterval(intervalId)
     }
-  }, [])
+  }, [demoMode])
 
   useEffect(() => {
     let active = true
@@ -1987,6 +2416,28 @@ function App() {
       active = false
     }
   }, [])
+
+  useEffect(() => {
+    replaceUrlState({
+      demoMode,
+      captureId,
+      view: selectedView,
+      runId: selectedRunId,
+      approvalId: selectedApprovalId,
+      artifactId: selectedReviewArtifactId,
+      transcriptSessionId: selectedTranscriptSessionId,
+      theme: activeTheme,
+    })
+  }, [
+    activeTheme,
+    captureId,
+    demoMode,
+    selectedApprovalId,
+    selectedReviewArtifactId,
+    selectedRunId,
+    selectedTranscriptSessionId,
+    selectedView,
+  ])
 
   const selectedRun =
     data.runs.find((run) => run.id === selectedRunId) ??
@@ -2096,7 +2547,24 @@ function App() {
     let active = true
 
     async function hydrateApprovalDetail() {
-      if (!selectedApprovalId || data.source !== 'api' || !isUuid(selectedApprovalId)) {
+      if (!selectedApprovalId) {
+        setSelectedApprovalDetail(null)
+        setApprovalDetailState('idle')
+        setApprovalDetailError('')
+        setReviewNotes('')
+        return
+      }
+
+      if (data.source === 'mock') {
+        const detail = mockApprovalDetails[selectedApprovalId]
+        setSelectedApprovalDetail(detail ?? null)
+        setApprovalDetailState(detail ? 'ready' : 'error')
+        setApprovalDetailError(detail ? '' : 'Mock approval detail is unavailable for this request.')
+        setReviewNotes(String(detail?.resolutionPayload?.feedback ?? ''))
+        return
+      }
+
+      if (!isUuid(selectedApprovalId)) {
         setSelectedApprovalDetail(null)
         setApprovalDetailState('idle')
         setApprovalDetailError('')
@@ -2139,7 +2607,22 @@ function App() {
     let active = true
 
     async function hydrateArtifactDetail() {
-      if (!selectedReviewArtifactId || data.source !== 'api' || !isUuid(selectedReviewArtifactId)) {
+      if (!selectedReviewArtifactId) {
+        setSelectedArtifactDetail(null)
+        setArtifactDetailState('idle')
+        setArtifactDetailError('')
+        return
+      }
+
+      if (data.source === 'mock') {
+        const detail = mockArtifactDetails[selectedReviewArtifactId]
+        setSelectedArtifactDetail(detail ?? null)
+        setArtifactDetailState(detail ? 'ready' : 'error')
+        setArtifactDetailError(detail ? '' : 'Mock artifact detail is unavailable for this artifact.')
+        return
+      }
+
+      if (!isUuid(selectedReviewArtifactId)) {
         setSelectedArtifactDetail(null)
         setArtifactDetailState('idle')
         setArtifactDetailError('')
@@ -2179,7 +2662,22 @@ function App() {
     let active = true
 
     async function hydrateTranscript() {
-      if (!selectedTranscriptSessionId || data.source !== 'api' || !isUuid(selectedTranscriptSessionId)) {
+      if (!selectedTranscriptSessionId) {
+        setSelectedTranscript([])
+        setTranscriptState('idle')
+        setTranscriptError('')
+        return
+      }
+
+      if (data.source === 'mock') {
+        const transcript = mockSessionTranscripts[selectedTranscriptSessionId] ?? []
+        setSelectedTranscript(transcript)
+        setTranscriptState('ready')
+        setTranscriptError('')
+        return
+      }
+
+      if (!isUuid(selectedTranscriptSessionId)) {
         setSelectedTranscript([])
         setTranscriptState('idle')
         setTranscriptError('')
@@ -2219,7 +2717,13 @@ function App() {
     let active = true
 
     async function hydrateAdminSurface() {
-      if (data.source !== 'api' || !isUuid(selectedRunStableId) || !selectedRepositoryStableId) {
+      if (data.source === 'mock') {
+        setAdminSurfaceState('ready')
+        setAdminSurfaceError('')
+        return
+      }
+
+      if (!isUuid(selectedRunStableId) || !selectedRepositoryStableId) {
         setAdminSurfaceState('idle')
         setAdminSurfaceError('')
         return
@@ -2303,7 +2807,7 @@ function App() {
   }
 
   async function refreshSwarmData(nextSelectedRunId?: string) {
-    const nextData = await loadSwarmData()
+    const nextData = demoMode === 'mock' ? mockData : await loadSwarmData()
     setData(nextData)
     setSelectedRunId(() => {
       if (nextSelectedRunId && nextData.runs.some((run) => run.id === nextSelectedRunId)) {
@@ -2662,7 +3166,9 @@ function App() {
               <p className="panel-kicker">Active runs</p>
               <h2>Execution tracks</h2>
             </div>
-            <span className="data-pill">{errorText ? 'API issue' : 'Live API'}</span>
+            <span className="data-pill">
+              {data.source === 'mock' ? 'Demo snapshot' : errorText ? 'API issue' : 'Live API'}
+            </span>
           </div>
 
           <div className="control-stack">
@@ -3032,7 +3538,7 @@ function App() {
                 </div>
                 <div>
                   <p className="signal-label">Hydration</p>
-                  <strong>{loading ? 'Refreshing' : data.source === 'api' ? `Polling every ${REFRESH_MS / 1000}s` : 'Fallback snapshot'}</strong>
+                  <strong>{loading ? 'Refreshing' : data.source === 'api' ? `Polling every ${REFRESH_MS / 1000}s` : 'Demo snapshot'}</strong>
                 </div>
               </div>
             </section>

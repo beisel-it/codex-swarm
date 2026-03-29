@@ -409,8 +409,8 @@ function dedupeActors(actors: Array<ActorIdentity | null | undefined>) {
   return result;
 }
 
-function normalizeValidationTemplates(templates: TaskCreate["validationTemplates"]) {
-  return templates.map((template) => ({
+function normalizeValidationTemplates(templates: TaskCreate["validationTemplates"] | undefined) {
+  return (templates ?? []).map((template) => ({
     name: template.name,
     command: template.command,
     ...(template.summary ? { summary: template.summary } : {}),

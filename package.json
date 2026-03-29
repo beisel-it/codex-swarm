@@ -14,6 +14,7 @@
     "dev:api": "pnpm --dir apps/api dev",
     "dev:worker": "pnpm --dir apps/worker dev",
     "dev:frontend": "pnpm --dir frontend dev",
+    "dev:frontend:readme-capture": "pnpm --dir frontend dev:readme-capture",
     "tui": "node ./scripts/tui/start.mjs",
     "tui:capture": "node ./scripts/tui/capture.mjs",
     "ci:lint": "node ./scripts/ci/run-stage.mjs lint",

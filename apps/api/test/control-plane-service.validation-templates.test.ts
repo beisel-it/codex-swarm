@@ -67,6 +67,25 @@ class FakeValidationTemplateDb {
   }
 }
 
+class FakeTaskCreationDb {
+  insertedTaskValues: Array<Record<string, unknown>> = [];
+
+  insert(table: unknown) {
+    return {
+      values: (values: Record<string, unknown>) => ({
+        returning: async () => {
+          if (table !== tasks) {
+            throw new Error("unexpected insert table");
+          }
+
+          this.insertedTaskValues.push(values);
+          return [values];
+        }
+      })
+    };
+  }
+}
+
 describe("ControlPlaneService validation templates", () => {
   it("materializes a validation from a named task template", async () => {
     const db = new FakeValidationTemplateDb();
@@ -135,6 +154,41 @@ describe("ControlPlaneService validation templates", () => {
       name: "unit-override",
       command: "pnpm vitest run",
       summary: "Use the override path"
+    });
+  });
+
+  it("defaults missing task validation templates to an empty array during task creation", async () => {
+    const db = new FakeTaskCreationDb();
+    const service = new ControlPlaneService(db as never, {
+      now: () => new Date("2026-03-29T15:10:00.000Z")
+    });
+
+    (service as any).assertRunExists = async () => ({
+      id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      workspaceId: "acme",
+      teamId: "platform",
+      status: "planning"
+    });
+    (service as any).assertDependenciesBelongToRun = async () => undefined;
+    (service as any).areDependenciesSatisfied = async () => true;
+
+    const task = await service.createTask({
+      runId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      title: "Implement dark mode foundation",
+      description: "Create the first dark mode theme slice.",
+      role: "frontend-developer",
+      priority: 3,
+      dependencyIds: [],
+      acceptanceCriteria: []
+    } as any);
+
+    expect(task).toMatchObject({
+      title: "Implement dark mode foundation",
+      validationTemplates: []
+    });
+    expect(db.insertedTaskValues.at(-1)).toMatchObject({
+      title: "Implement dark mode foundation",
+      validationTemplates: []
     });
   });
 });

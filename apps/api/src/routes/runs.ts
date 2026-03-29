@@ -1,4 +1,4 @@
-import { mkdir } from "node:fs/promises";
+import { mkdir, rm } from "node:fs/promises";
 
 import type { FastifyPluginAsync } from "fastify";
 import { createLocalCodexCliExecutor, createWorktreePath, materializeRepositoryWorkspace } from "@codex-swarm/worker";
@@ -175,6 +175,10 @@ export const runRoutes: FastifyPluginAsync = async (app) => {
           repositorySlug: repository.name,
           runId: run.id,
           agentId: "leader"
+        });
+        await rm(leaderWorkspace, {
+          recursive: true,
+          force: true
         });
         await materializeRepositoryWorkspace({
           repository,
