@@ -20,6 +20,7 @@ import { runManagedWorkerDispatch } from "../src/lib/worker-dispatch-orchestrati
 import { HttpError } from "../src/lib/http-error.js";
 
 const ids = {
+  project: "10101010-1010-4010-8010-101010101010",
   repository: "11111111-1111-4111-8111-111111111111",
   run: "22222222-2222-4222-8222-222222222222",
   taskA: "33333333-3333-4333-8333-333333333333",
@@ -39,6 +40,11 @@ const defaultBoundary = {
 } as const;
 
 const controlPlane = {
+  listProjects: vi.fn(),
+  getProject: vi.fn(),
+  createProject: vi.fn(),
+  updateProject: vi.fn(),
+  deleteProject: vi.fn(),
   listRepositories: vi.fn(),
   createRepository: vi.fn(),
   listRuns: vi.fn(),
@@ -1437,7 +1443,7 @@ describe("buildApp", () => {
     expect(response.json()).toMatchObject({
       status: "ok",
       versions: {
-        schema: "2026-03-29",
+        schema: "2026-03-30",
         config: "1"
       }
     });
@@ -1904,6 +1910,133 @@ describe("buildApp", () => {
       provider: "github",
       trustLevel: "trusted"
     }, expect.objectContaining({
+      workspaceId: defaultBoundary.workspaceId,
+      teamId: defaultBoundary.teamId
+    }));
+
+    await app.close();
+  });
+
+  it("supports project CRUD routes", async () => {
+    controlPlane.listProjects.mockResolvedValueOnce([
+      {
+        id: ids.project,
+        workspaceId: defaultBoundary.workspaceId,
+        teamId: defaultBoundary.teamId,
+        name: "Platform Refresh",
+        description: "Main delivery stream",
+        repositoryCount: 1,
+        runCount: 2,
+        latestRunAt: "2026-03-28T12:00:00.000Z",
+        createdAt: "2026-03-28T10:00:00.000Z",
+        updatedAt: "2026-03-28T10:00:00.000Z"
+      }
+    ]);
+    controlPlane.createProject.mockResolvedValueOnce({
+      id: ids.project,
+      workspaceId: defaultBoundary.workspaceId,
+      teamId: defaultBoundary.teamId,
+      name: "Platform Refresh",
+      description: "Main delivery stream",
+      createdAt: "2026-03-28T10:00:00.000Z",
+      updatedAt: "2026-03-28T10:00:00.000Z"
+    });
+    controlPlane.getProject.mockResolvedValueOnce({
+      id: ids.project,
+      workspaceId: defaultBoundary.workspaceId,
+      teamId: defaultBoundary.teamId,
+      name: "Platform Refresh",
+      description: "Main delivery stream",
+      repositoryCount: 1,
+      runCount: 1,
+      latestRunAt: "2026-03-28T12:00:00.000Z",
+      repositoryAssignments: [],
+      runAssignments: [],
+      createdAt: "2026-03-28T10:00:00.000Z",
+      updatedAt: "2026-03-28T10:00:00.000Z"
+    });
+    controlPlane.updateProject.mockResolvedValueOnce({
+      id: ids.project,
+      workspaceId: defaultBoundary.workspaceId,
+      teamId: defaultBoundary.teamId,
+      name: "Platform Refresh",
+      description: "Updated scope",
+      createdAt: "2026-03-28T10:00:00.000Z",
+      updatedAt: "2026-03-28T11:00:00.000Z"
+    });
+    controlPlane.deleteProject.mockResolvedValueOnce(undefined);
+
+    const app = await buildApp({
+      controlPlane: controlPlane as unknown as ControlPlaneService
+    });
+
+    const headers = {
+      authorization: "Bearer codex-swarm-dev-token"
+    };
+
+    const listResponse = await app.inject({
+      method: "GET",
+      url: "/api/v1/projects",
+      headers
+    });
+    expect(listResponse.statusCode).toBe(200);
+    expect(controlPlane.listProjects).toHaveBeenCalledWith(expect.objectContaining({
+      workspaceId: defaultBoundary.workspaceId,
+      teamId: defaultBoundary.teamId
+    }));
+
+    const createResponse = await app.inject({
+      method: "POST",
+      url: "/api/v1/projects",
+      headers,
+      payload: {
+        name: "Platform Refresh",
+        description: "Main delivery stream"
+      }
+    });
+    expect(createResponse.statusCode).toBe(201);
+    expect(controlPlane.createProject).toHaveBeenCalledWith({
+      name: "Platform Refresh",
+      description: "Main delivery stream"
+    }, expect.objectContaining({
+      workspaceId: defaultBoundary.workspaceId,
+      teamId: defaultBoundary.teamId
+    }));
+
+    const detailResponse = await app.inject({
+      method: "GET",
+      url: `/api/v1/projects/${ids.project}`,
+      headers
+    });
+    expect(detailResponse.statusCode).toBe(200);
+    expect(controlPlane.getProject).toHaveBeenCalledWith(ids.project, expect.objectContaining({
+      workspaceId: defaultBoundary.workspaceId,
+      teamId: defaultBoundary.teamId
+    }));
+
+    const updateResponse = await app.inject({
+      method: "PATCH",
+      url: `/api/v1/projects/${ids.project}`,
+      headers,
+      payload: {
+        description: "Updated scope"
+      }
+    });
+    expect(updateResponse.statusCode).toBe(200);
+    expect(controlPlane.updateProject).toHaveBeenCalledWith(ids.project, {
+      description: "Updated scope"
+    }, expect.objectContaining({
+      workspaceId: defaultBoundary.workspaceId,
+      teamId: defaultBoundary.teamId
+    }));
+
+    const deleteResponse = await app.inject({
+      method: "DELETE",
+      url: `/api/v1/projects/${ids.project}`,
+      headers
+    });
+    expect(deleteResponse.statusCode).toBe(204);
+    expect(controlPlane.deleteProject).toHaveBeenCalledWith(ids.project, expect.objectContaining({
       workspaceId: defaultBoundary.workspaceId,
       teamId: defaultBoundary.teamId
     }));

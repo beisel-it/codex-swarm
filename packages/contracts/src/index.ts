@@ -95,6 +95,7 @@ export const repositoryCreateSchema = z.object({
   provider: z.enum(repositoryProviders).optional(),
   defaultBranch: z.string().min(1).optional(),
   localPath: z.string().min(1).optional(),
+  projectId: z.uuid().nullable().optional(),
   trustLevel: z.enum(repositoryTrustLevels).default("trusted"),
   approvalProfile: z.string().min(1).optional()
 });
@@ -105,6 +106,7 @@ export const repositoryUpdateSchema = z.object({
   provider: z.enum(repositoryProviders).optional(),
   defaultBranch: z.string().min(1).optional(),
   localPath: z.string().min(1).nullable().optional(),
+  projectId: z.uuid().nullable().optional(),
   trustLevel: z.enum(repositoryTrustLevels).optional(),
   approvalProfile: z.string().min(1).optional()
 }).refine((value) => Object.keys(value).length > 0, {
@@ -155,6 +157,7 @@ export const identityContextSchema = z.object({
 
 export const runCreateSchema = z.object({
   repositoryId: z.uuid(),
+  projectId: z.uuid().nullable().optional(),
   goal: z.string().min(1),
   branchName: z.string().min(1).optional(),
   planArtifactPath: z.string().min(1).optional(),
@@ -166,6 +169,7 @@ export const runCreateSchema = z.object({
 });
 
 export const runUpdateSchema = z.object({
+  projectId: z.uuid().nullable().optional(),
   goal: z.string().min(1).optional(),
   branchName: z.string().min(1).nullable().optional(),
   budgetTokens: z.number().int().positive().nullable().optional(),
@@ -270,6 +274,7 @@ export const repositorySchema = repositoryCreateSchema.extend({
   provider: z.enum(repositoryProviders),
   defaultBranch: z.string().min(1),
   localPath: z.string().min(1).nullable(),
+  projectId: z.uuid().nullable().default(null),
   trustLevel: z.enum(repositoryTrustLevels),
   approvalProfile: z.string().min(1),
   providerSync: repositoryProviderSyncSchema,
@@ -281,6 +286,7 @@ export const runSchema = runCreateSchema.extend({
   id: z.uuid(),
   workspaceId: z.string().min(1),
   teamId: z.string().min(1),
+  projectId: z.uuid().nullable().default(null),
   status: z.enum(runStatuses),
   branchName: z.string().min(1).nullable(),
   planArtifactPath: z.string().min(1).nullable(),
@@ -791,6 +797,90 @@ export const cleanupJobReportSchema = z.object({
   completedAt: z.date()
 });
 
+export const projectCreateSchema = z.object({
+  name: z.string().min(1),
+  description: z.string().min(1).nullable().optional()
+});
+
+export const projectUpdateSchema = z.object({
+  name: z.string().min(1).optional(),
+  description: z.string().min(1).nullable().optional()
+}).refine((value) => Object.keys(value).length > 0, {
+  message: "at least one project field must be updated"
+});
+
+export const projectSchema = projectCreateSchema.extend({
+  id: z.uuid(),
+  workspaceId: z.string().min(1),
+  teamId: z.string().min(1),
+  description: z.string().min(1).nullable().default(null),
+  createdAt: z.date(),
+  updatedAt: z.date()
+});
+
+export const projectRepositoryAssignmentSchema = z.object({
+  projectId: z.uuid(),
+  repositoryId: z.uuid(),
+  repository: repositorySchema.pick({
+    id: true,
+    name: true,
+    url: true,
+    provider: true,
+    defaultBranch: true,
+    localPath: true,
+    projectId: true,
+    trustLevel: true,
+    approvalProfile: true,
+    providerSync: true,
+    createdAt: true,
+    updatedAt: true
+  })
+});
+
+export const projectRunAssignmentSchema = z.object({
+  projectId: z.uuid(),
+  runId: z.uuid(),
+  run: runSchema.pick({
+    id: true,
+    repositoryId: true,
+    workspaceId: true,
+    teamId: true,
+    projectId: true,
+    goal: true,
+    status: true,
+    branchName: true,
+    planArtifactPath: true,
+    budgetTokens: true,
+    budgetCostUsd: true,
+    concurrencyCap: true,
+    policyProfile: true,
+    publishedBranch: true,
+    branchPublishedAt: true,
+    branchPublishApprovalId: true,
+    pullRequestUrl: true,
+    pullRequestNumber: true,
+    pullRequestStatus: true,
+    pullRequestApprovalId: true,
+    handoffStatus: true,
+    completedAt: true,
+    metadata: true,
+    createdBy: true,
+    createdAt: true,
+    updatedAt: true
+  })
+});
+
+export const projectSummarySchema = projectSchema.extend({
+  repositoryCount: z.number().int().nonnegative(),
+  runCount: z.number().int().nonnegative(),
+  latestRunAt: z.date().nullable().default(null)
+});
+
+export const projectDetailSchema = projectSummarySchema.extend({
+  repositoryAssignments: z.array(projectRepositoryAssignmentSchema),
+  runAssignments: z.array(projectRunAssignmentSchema)
+});
+
 export const workerDispatchAssignmentSchema = z.object({
   id: z.uuid(),
   runId: z.uuid(),
@@ -1158,6 +1248,8 @@ export const tuiRunDrilldownSchema = z.object({
 
 export type RepositoryCreateInput = z.infer<typeof repositoryCreateSchema>;
 export type RepositoryUpdateInput = z.infer<typeof repositoryUpdateSchema>;
+export type ProjectCreateInput = z.infer<typeof projectCreateSchema>;
+export type ProjectUpdateInput = z.infer<typeof projectUpdateSchema>;
 export type RunCreateInput = z.infer<typeof runCreateSchema>;
 export type RunUpdateInput = z.infer<typeof runUpdateSchema>;
 export type RunStatusUpdateInput = z.infer<typeof runStatusUpdateSchema>;
@@ -1168,6 +1260,11 @@ export type TaskCreateInput = z.infer<typeof taskCreateSchema>;
 export type TaskStatusUpdateInput = z.infer<typeof taskStatusUpdateSchema>;
 export type AgentCreateInput = z.infer<typeof agentCreateSchema>;
 export type Repository = z.infer<typeof repositorySchema>;
+export type Project = z.infer<typeof projectSchema>;
+export type ProjectRepositoryAssignment = z.infer<typeof projectRepositoryAssignmentSchema>;
+export type ProjectRunAssignment = z.infer<typeof projectRunAssignmentSchema>;
+export type ProjectSummary = z.infer<typeof projectSummarySchema>;
+export type ProjectDetail = z.infer<typeof projectDetailSchema>;
 export type Run = z.infer<typeof runSchema>;
 export type RunBudgetState = z.infer<typeof runBudgetStateSchema>;
 export type Workspace = z.infer<typeof workspaceSchema>;

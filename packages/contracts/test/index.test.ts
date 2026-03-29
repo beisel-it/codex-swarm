@@ -13,6 +13,8 @@ import {
   controlPlaneMetricsSchema,
   governanceAdminReportSchema,
   identityEntrypointSchema,
+  projectDetailSchema,
+  projectSummarySchema,
   repositoryCreateSchema,
   remoteWorkerBootstrapSchema,
   retentionReconcileReportSchema,
@@ -90,6 +92,119 @@ describe("runCreateSchema", () => {
     });
 
     expect(run.metadata).toEqual({});
+  });
+
+  it("allows runs to stay explicitly unassigned from projects", () => {
+    const run = runCreateSchema.parse({
+      repositoryId: "550e8400-e29b-41d4-a716-446655440000",
+      projectId: null,
+      goal: "Ship alpha"
+    });
+
+    expect(run.projectId).toBeNull();
+  });
+});
+
+describe("project schemas", () => {
+  it("accepts project summaries with aggregated counts", () => {
+    const now = new Date("2026-03-30T09:00:00.000Z");
+    const project = projectSummarySchema.parse({
+      id: "550e8400-e29b-41d4-a716-446655440050",
+      workspaceId: "workspace-1",
+      teamId: "team-1",
+      name: "Platform Refresh",
+      description: "Main delivery stream",
+      repositoryCount: 2,
+      runCount: 5,
+      latestRunAt: now,
+      createdAt: now,
+      updatedAt: now
+    });
+
+    expect(project.repositoryCount).toBe(2);
+    expect(project.runCount).toBe(5);
+  });
+
+  it("captures repository and run assignments in project detail", () => {
+    const now = new Date("2026-03-30T09:00:00.000Z");
+    const project = projectDetailSchema.parse({
+      id: "550e8400-e29b-41d4-a716-446655440050",
+      workspaceId: "workspace-1",
+      teamId: "team-1",
+      name: "Platform Refresh",
+      description: "Main delivery stream",
+      repositoryCount: 1,
+      runCount: 1,
+      latestRunAt: now,
+      repositoryAssignments: [
+        {
+          projectId: "550e8400-e29b-41d4-a716-446655440050",
+          repositoryId: "550e8400-e29b-41d4-a716-446655440051",
+          repository: {
+            id: "550e8400-e29b-41d4-a716-446655440051",
+            workspaceId: "workspace-1",
+            teamId: "team-1",
+            name: "codex-swarm",
+            url: "https://example.com/repo.git",
+            provider: "github",
+            defaultBranch: "main",
+            localPath: null,
+            projectId: "550e8400-e29b-41d4-a716-446655440050",
+            trustLevel: "trusted",
+            approvalProfile: "standard",
+            providerSync: {
+              connectivityStatus: "validated",
+              validatedAt: now,
+              defaultBranch: "main",
+              branches: ["main"],
+              providerRepoUrl: "https://example.com/repo.git",
+              lastError: null
+            },
+            createdAt: now,
+            updatedAt: now
+          }
+        }
+      ],
+      runAssignments: [
+        {
+          projectId: "550e8400-e29b-41d4-a716-446655440050",
+          runId: "550e8400-e29b-41d4-a716-446655440052",
+          run: {
+            id: "550e8400-e29b-41d4-a716-446655440052",
+            repositoryId: "550e8400-e29b-41d4-a716-446655440051",
+            workspaceId: "workspace-1",
+            teamId: "team-1",
+            projectId: "550e8400-e29b-41d4-a716-446655440050",
+            goal: "Ship projects",
+            status: "pending",
+            branchName: null,
+            planArtifactPath: null,
+            budgetTokens: null,
+            budgetCostUsd: null,
+            concurrencyCap: 1,
+            policyProfile: null,
+            publishedBranch: null,
+            branchPublishedAt: null,
+            branchPublishApprovalId: null,
+            pullRequestUrl: null,
+            pullRequestNumber: null,
+            pullRequestStatus: null,
+            pullRequestApprovalId: null,
+            handoffStatus: "pending",
+            completedAt: null,
+            metadata: {},
+            createdBy: "leader",
+            createdAt: now,
+            updatedAt: now
+          }
+        }
+      ],
+      createdAt: now,
+      updatedAt: now
+    });
+
+    expect(project.repositoryAssignments).toHaveLength(1);
+    expect(project.runAssignments).toHaveLength(1);
   });
 });
 
