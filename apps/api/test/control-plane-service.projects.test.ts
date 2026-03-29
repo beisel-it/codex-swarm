@@ -366,6 +366,12 @@ describe("ControlPlaneService projects", () => {
       workspaceId: "workspace-1",
       teamId: "team-1"
     });
+    (service as any).assertRepositoryExists = async () => ({
+      id: "repo-1",
+      workspaceId: "workspace-1",
+      teamId: "team-1",
+      projectId: null
+    });
 
     const updatedRun = await service.updateRun("run-1", {
       projectId: "project-1"

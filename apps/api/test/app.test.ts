@@ -39,6 +39,16 @@ const defaultBoundary = {
   teamName: "Codex Swarm"
 } as const;
 
+const defaultRunContext = {
+  kind: "ad_hoc",
+  projectId: null,
+  projectSlug: null,
+  projectName: null,
+  projectDescription: null,
+  jobId: null,
+  jobName: null
+} as const;
+
 const controlPlane = {
   listProjects: vi.fn(),
   getProject: vi.fn(),
@@ -48,6 +58,7 @@ const controlPlane = {
   listRepositories: vi.fn(),
   createRepository: vi.fn(),
   listRuns: vi.fn(),
+  listRunsByJobScope: vi.fn(),
   getRun: vi.fn(),
   createRun: vi.fn(),
   updateRun: vi.fn(),
@@ -475,7 +486,11 @@ class FakeVerticalSliceControlPlane {
       pullRequestApprovalId: null,
       handoffStatus: "pending",
       completedAt: null,
-      metadata: input.metadata,
+      context: input.context ?? defaultRunContext,
+      metadata: {
+        ...(input.metadata ?? {}),
+        runContext: input.context ?? defaultRunContext
+      },
       createdBy,
       createdAt: new Date("2026-03-28T00:00:00.000Z"),
       updatedAt: new Date("2026-03-28T00:00:00.000Z"),
@@ -503,7 +518,13 @@ class FakeVerticalSliceControlPlane {
     run.budgetCostUsd = input.budgetCostUsd === undefined ? run.budgetCostUsd : input.budgetCostUsd;
     run.concurrencyCap = input.concurrencyCap ?? run.concurrencyCap;
     run.policyProfile = input.policyProfile === undefined ? run.policyProfile : input.policyProfile;
-    run.metadata = input.metadata === undefined ? run.metadata : input.metadata;
+    run.context = input.context === undefined ? run.context : input.context;
+    run.metadata = input.metadata === undefined
+      ? run.metadata
+      : {
+          ...input.metadata,
+          runContext: input.context ?? run.context
+        };
     run.updatedAt = new Date();
     return run;
   }
@@ -1744,6 +1765,81 @@ describe("buildApp", () => {
     await app.close();
   });
 
+  it("returns grouped project and ad-hoc runs when requested", async () => {
+    controlPlane.listRunsByJobScope.mockResolvedValueOnce({
+      projectJobs: [
+        {
+          id: "run-project-1",
+          goal: "Ship projects",
+          jobScope: {
+            kind: "project",
+            projectId: "550e8400-e29b-41d4-a716-446655440010",
+            repositoryProjectId: "550e8400-e29b-41d4-a716-446655440010",
+            reason: "run_assigned"
+          }
+        }
+      ],
+      adHocJobs: [
+        {
+          id: "run-ad-hoc-1",
+          goal: "Legacy job",
+          jobScope: {
+            kind: "ad_hoc",
+            projectId: null,
+            repositoryProjectId: null,
+            reason: "repository_unassigned"
+          }
+        }
+      ]
+    });
+
+    const app = await buildApp({
+      controlPlane: controlPlane as unknown as ControlPlaneService
+    });
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/api/v1/runs?view=job_scope",
+      headers: {
+        authorization: "Bearer codex-swarm-dev-token"
+      }
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({
+      projectJobs: [
+        {
+          id: "run-project-1",
+          goal: "Ship projects",
+          jobScope: {
+            kind: "project",
+            projectId: "550e8400-e29b-41d4-a716-446655440010",
+            repositoryProjectId: "550e8400-e29b-41d4-a716-446655440010",
+            reason: "run_assigned"
+          }
+        }
+      ],
+      adHocJobs: [
+        {
+          id: "run-ad-hoc-1",
+          goal: "Legacy job",
+          jobScope: {
+            kind: "ad_hoc",
+            projectId: null,
+            repositoryProjectId: null,
+            reason: "repository_unassigned"
+          }
+        }
+      ]
+    });
+    expect(controlPlane.listRunsByJobScope).toHaveBeenCalledWith(undefined, expect.objectContaining({
+      workspaceId: defaultBoundary.workspaceId,
+      teamId: defaultBoundary.teamId
+    }));
+
+    await app.close();
+  });
+
   it("exposes the authenticated identity entrypoint", async () => {
     const app = await buildApp({
       controlPlane: controlPlane as unknown as ControlPlaneService
@@ -1817,6 +1913,7 @@ describe("buildApp", () => {
 
     controlPlane.listRepositories.mockRejectedValueOnce(bootstrapError);
     controlPlane.listRuns.mockRejectedValueOnce(bootstrapError);
+    controlPlane.listRunsByJobScope.mockRejectedValueOnce(bootstrapError);
 
     const app = await buildApp({
       config: getConfig({
@@ -1845,6 +1942,11 @@ describe("buildApp", () => {
       url: "/api/v1/runs",
       headers
     });
+    const groupedRunResponse = await app.inject({
+      method: "GET",
+      url: "/api/v1/runs?view=job_scope",
+      headers
+    });
 
     expect(repositoryResponse.statusCode).toBe(200);
     expect(repositoryResponse.headers["x-codex-swarm-degraded"]).toBe("database-unavailable");
@@ -1852,6 +1954,11 @@ describe("buildApp", () => {
 
     expect(runResponse.statusCode).toBe(200);
     expect(runResponse.json()).toEqual([]);
+    expect(groupedRunResponse.statusCode).toBe(200);
+    expect(groupedRunResponse.json()).toEqual({
+      projectJobs: [],
+      adHocJobs: []
+    });
 
     await app.close();
   });

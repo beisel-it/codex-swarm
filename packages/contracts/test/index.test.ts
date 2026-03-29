@@ -16,12 +16,15 @@ import {
   projectDetailSchema,
   projectSummarySchema,
   repositoryCreateSchema,
+  repositoryUpdateSchema,
   remoteWorkerBootstrapSchema,
   retentionReconcileReportSchema,
   runBranchPublishSchema,
   runCreateSchema,
   runDetailSchema,
+  runJobScopeSchema,
   runPullRequestHandoffSchema,
+  runsByJobScopeSchema,
   sessionTranscriptAppendSchema,
   secretAccessPlanSchema,
   workerDispatchAssignmentSchema,
@@ -206,6 +209,16 @@ describe("project schemas", () => {
     expect(project.repositoryAssignments).toHaveLength(1);
     expect(project.runAssignments).toHaveLength(1);
   });
+
+  it("accepts optional project assignments for project jobs", () => {
+    const run = runCreateSchema.parse({
+      repositoryId: "550e8400-e29b-41d4-a716-446655440000",
+      projectId: "550e8400-e29b-41d4-a716-446655440010",
+      goal: "Ship alpha"
+    });
+
+    expect(run.projectId).toBe("550e8400-e29b-41d4-a716-446655440010");
+  });
 });
 
 describe("taskCreateSchema", () => {
@@ -231,6 +244,8 @@ describe("runDetailSchema", () => {
       repositoryId: "550e8400-e29b-41d4-a716-446655440001",
       workspaceId: "workspace-1",
       teamId: "team-1",
+      jobType: "ad_hoc",
+      projectId: null,
       goal: "Render the task DAG",
       status: "in_progress",
       branchName: null,
@@ -404,6 +419,68 @@ describe("runDetailSchema", () => {
     expect(runDetail.taskDag.rootTaskIds).toEqual(["550e8400-e29b-41d4-a716-446655440010"]);
     expect(runDetail.taskDag.blockedTaskIds).toEqual(["550e8400-e29b-41d4-a716-446655440011"]);
     expect(runDetail.agents[0]?.observability.lineageSource).toBe("session_rollover");
+  });
+});
+
+describe("runJobScopeSchema", () => {
+  it("captures legacy ad-hoc fallback reasons", () => {
+    const scope = runJobScopeSchema.parse({
+      kind: "ad_hoc",
+      projectId: null,
+      repositoryProjectId: "550e8400-e29b-41d4-a716-446655440010",
+      reason: "run_unassigned"
+    });
+
+    expect(scope.kind).toBe("ad_hoc");
+    expect(scope.reason).toBe("run_unassigned");
+  });
+});
+
+describe("runsByJobScopeSchema", () => {
+  it("accepts grouped project and ad-hoc responses", () => {
+    const now = new Date("2026-03-29T10:00:00.000Z");
+    const grouped = runsByJobScopeSchema.parse({
+      projectJobs: [
+        {
+          id: "550e8400-e29b-41d4-a716-446655440020",
+          repositoryId: "550e8400-e29b-41d4-a716-446655440001",
+          projectId: "550e8400-e29b-41d4-a716-446655440010",
+          workspaceId: "workspace-1",
+          teamId: "team-1",
+          goal: "Project run",
+          status: "pending",
+          branchName: null,
+          planArtifactPath: null,
+          budgetTokens: null,
+          budgetCostUsd: null,
+          concurrencyCap: 1,
+          policyProfile: "standard",
+          publishedBranch: null,
+          branchPublishedAt: null,
+          branchPublishApprovalId: null,
+          pullRequestUrl: null,
+          pullRequestNumber: null,
+          pullRequestStatus: null,
+          pullRequestApprovalId: null,
+          handoffStatus: "pending",
+          completedAt: null,
+          metadata: {},
+          jobScope: {
+            kind: "project",
+            projectId: "550e8400-e29b-41d4-a716-446655440010",
+            repositoryProjectId: "550e8400-e29b-41d4-a716-446655440010",
+            reason: "run_assigned"
+          },
+          createdBy: "leader",
+          createdAt: now,
+          updatedAt: now
+        }
+      ],
+      adHocJobs: []
+    });
+
+    expect(grouped.projectJobs).toHaveLength(1);
+    expect(grouped.adHocJobs).toEqual([]);
   });
 });
 
@@ -658,6 +735,7 @@ describe("repositoryCreateSchema", () => {
 
     expect(repository.trustLevel).toBe("trusted");
     expect(repository.approvalProfile).toBeUndefined();
+    expect(repository.projectId).toBeUndefined();
   });
 });
 
@@ -669,6 +747,16 @@ describe("runCreateSchema", () => {
     });
 
     expect(run.concurrencyCap).toBe(1);
+  });
+});
+
+describe("repositoryUpdateSchema", () => {
+  it("allows clearing a repository project assignment", () => {
+    const repository = repositoryUpdateSchema.parse({
+      projectId: null
+    });
+
+    expect(repository.projectId).toBeNull();
   });
 });
 

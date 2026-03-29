@@ -21,6 +21,7 @@ import {
   type RunAuditExport,
   type RunBudgetCheckpointInput,
   type RunBudgetState,
+  type RunJobScope,
   type Agent,
   type AgentCreateInput,
   type ApprovalCreateInput,
@@ -32,6 +33,7 @@ import {
   type RetentionReconcileReport,
   type RetentionWindowSummary,
   type RunCreateInput,
+  type RunsByJobScope,
   type RunUpdateInput,
   type TuiAlert,
   type TuiOverview,
@@ -590,6 +592,92 @@ function readRunBudgetUsage(metadata: Record<string, unknown>) {
   };
 }
 
+function createDefaultRunContext(): Run["context"] {
+  return {
+    kind: "ad_hoc",
+    projectId: null,
+    projectSlug: null,
+    projectName: null,
+    projectDescription: null,
+    jobId: null,
+    jobName: null
+  };
+}
+
+function readOptionalString(record: Record<string, unknown>, key: string) {
+  return typeof record[key] === "string" && record[key].trim().length > 0 ? record[key] as string : null;
+}
+
+function readOptionalUuid(record: Record<string, unknown>, key: string) {
+  const value = readOptionalString(record, key);
+  return value && z.string().uuid().safeParse(value).success ? value : null;
+}
+
+function normalizeStoredRunContext(metadata: Record<string, unknown> | null | undefined): Run["context"] {
+  const stored = metadata?.runContext;
+  const record = stored && typeof stored === "object"
+    ? stored as Record<string, unknown>
+    : metadata ?? {};
+  const projectId = readOptionalUuid(record, "projectId");
+  const projectSlug = readOptionalString(record, "projectSlug");
+  const projectName = readOptionalString(record, "projectName");
+  const projectDescription = readOptionalString(record, "projectDescription");
+  const jobId = readOptionalString(record, "jobId");
+  const jobName = readOptionalString(record, "jobName");
+  const rawKind = readOptionalString(record, "kind");
+  const kind: Run["context"]["kind"] = rawKind === "project" || (!rawKind && (projectId || projectSlug || projectName))
+    ? "project"
+    : "ad_hoc";
+
+  return {
+    kind,
+    projectId,
+    projectSlug,
+    projectName,
+    projectDescription,
+    jobId,
+    jobName
+  };
+}
+
+function resolveRunContext(
+  context: RunCreate["context"] | RunUpdate["context"] | undefined,
+  metadata: Record<string, unknown> | undefined,
+  fallbackMetadata: Record<string, unknown> | null | undefined = undefined
+): Run["context"] {
+  if (context) {
+    return {
+      kind: context.kind ?? "ad_hoc",
+      projectId: context.projectId ?? null,
+      projectSlug: context.projectSlug ?? null,
+      projectName: context.projectName ?? null,
+      projectDescription: context.projectDescription ?? null,
+      jobId: context.jobId ?? null,
+      jobName: context.jobName ?? null
+    };
+  }
+
+  if (metadata) {
+    return normalizeStoredRunContext(metadata);
+  }
+
+  if (fallbackMetadata) {
+    return normalizeStoredRunContext(fallbackMetadata);
+  }
+
+  return createDefaultRunContext();
+}
+
+function withRunContextMetadata(
+  metadata: Record<string, unknown> | undefined,
+  context: Run["context"]
+) {
+  return {
+    ...(metadata ?? {}),
+    runContext: context
+  };
+}
+
 function getArtifactStorageMetadata(metadata: Record<string, unknown>) {
   return {
     url: typeof metadata.url === "string" ? metadata.url : null,
@@ -937,7 +1025,7 @@ export class ControlPlaneService {
         eq(runs.workspaceId, boundary.workspaceId),
         eq(runs.teamId, boundary.teamId)
       )).orderBy(asc(runs.createdAt));
-      return refreshedRows.map((run) => this.mapRun(run));
+      return refreshedRows.map((run) => this.mapRun(run, repository.projectId ?? null));
     }
 
     const rows = await this.db.select().from(runs).where(and(
@@ -959,12 +1047,26 @@ export class ControlPlaneService {
       eq(runs.workspaceId, boundary.workspaceId),
       eq(runs.teamId, boundary.teamId)
     )).orderBy(asc(runs.createdAt));
-    return refreshedRows.map((run) => this.mapRun(run));
+    const repositoriesById = new Map(
+      (await this.listRepositories(boundary)).map((repository) => [repository.id, repository] as const)
+    );
+
+    return refreshedRows.map((run) => this.mapRun(run, repositoriesById.get(run.repositoryId)?.projectId ?? null));
+  }
+
+  async listRunsByJobScope(repositoryId?: string, access?: AccessBoundary): Promise<RunsByJobScope> {
+    const runList = await this.listRuns(repositoryId, access);
+
+    return {
+      projectJobs: runList.filter((run) => run.jobScope?.kind === "project"),
+      adHocJobs: runList.filter((run) => run.jobScope?.kind !== "project")
+    };
   }
 
   async getRun(runId: string, access?: AccessBoundary): Promise<RunDetail> {
     await this.repairRunStateFromDispatchAssignments(runId);
     const run = await this.assertRunExists(runId, access);
+    const repository = await this.assertRepositoryExists(run.repositoryId, access);
 
     const [runTasks, runAgents, runSessions] = await Promise.all([
       this.db.select().from(tasks).where(eq(tasks.runId, runId)).orderBy(asc(tasks.createdAt)),
@@ -985,7 +1087,7 @@ export class ControlPlaneService {
     const mappedSessions = runSessions.map(({ session }): Session => this.mapSession(session));
 
     return {
-      ...this.mapRun(run),
+      ...this.mapRun(run, repository.projectId ?? null),
       tasks: mappedTasks,
       agents: this.mapAgents(runAgents, runSessions.map(({ session }) => session)),
       sessions: mappedSessions,
@@ -1007,6 +1109,7 @@ export class ControlPlaneService {
     const concurrencyCap = requiresSensitiveDefaults(repository, policyProfile)
       ? 1
       : input.concurrencyCap;
+    const context = resolveRunContext(input.context, input.metadata);
 
     const [run] = await this.db.insert(runs).values({
       id,
@@ -1031,13 +1134,13 @@ export class ControlPlaneService {
       pullRequestApprovalId: null,
       handoffStatus: "pending",
       completedAt: null,
-      metadata: input.metadata,
+      metadata: withRunContextMetadata(input.metadata, context),
       createdBy,
       createdAt: now,
       updatedAt: now
     }).returning();
 
-    return this.mapRun(expectPersistedRecord(run, "run"));
+    return this.mapRun(expectPersistedRecord(run, "run"), repository.projectId ?? null);
   }
 
   async updateRunStatus(runId: string, input: RunStatusUpdate, access?: AccessBoundary) {
@@ -1053,7 +1156,8 @@ export class ControlPlaneService {
       updatedAt: now
     }).where(eq(runs.id, runId)).returning();
 
-    return this.mapRun(expectPersistedRecord(run, "run"));
+    const repository = await this.assertRepositoryExists(existingRun.repositoryId, access);
+    return this.mapRun(expectPersistedRecord(run, "run"), repository.projectId ?? null);
   }
 
   async updateRun(runId: string, input: RunUpdate, access?: AccessBoundary) {
@@ -1062,6 +1166,7 @@ export class ControlPlaneService {
       await this.assertProjectExists(input.projectId, access);
     }
     const now = this.clock.now();
+    const context = resolveRunContext(input.context, input.metadata, existingRun.metadata);
 
     const [run] = await this.db.update(runs).set({
       projectId: input.projectId === undefined ? existingRun.projectId : input.projectId,
@@ -1075,11 +1180,14 @@ export class ControlPlaneService {
           : dollarsToCents(input.budgetCostUsd),
       concurrencyCap: input.concurrencyCap ?? existingRun.concurrencyCap,
       policyProfile: input.policyProfile === undefined ? existingRun.policyProfile : input.policyProfile,
-      metadata: input.metadata === undefined ? existingRun.metadata : input.metadata,
+      metadata: input.metadata === undefined
+        ? withRunContextMetadata(existingRun.metadata, context)
+        : withRunContextMetadata(input.metadata, context),
       updatedAt: now
     }).where(eq(runs.id, runId)).returning();
 
-    return this.mapRun(expectPersistedRecord(run, "run"));
+    const repository = await this.assertRepositoryExists(existingRun.repositoryId, access);
+    return this.mapRun(expectPersistedRecord(run, "run"), repository.projectId ?? null);
   }
 
   async deleteRun(runId: string, access?: AccessBoundary) {
@@ -1234,6 +1342,7 @@ export class ControlPlaneService {
 
   async publishRunBranch(runId: string, input: RunBranchPublish, access?: AccessBoundary) {
     const existingRun = await this.assertRunExists(runId, access);
+    const repository = await this.assertRepositoryExists(existingRun.repositoryId, access);
     const now = this.clock.now();
     const branchName = input.branchName ?? existingRun.branchName;
 
@@ -1252,7 +1361,7 @@ export class ControlPlaneService {
       updatedAt: now
     }).where(eq(runs.id, runId)).returning();
 
-    return this.mapRun(expectPersistedRecord(run, "run"));
+    return this.mapRun(expectPersistedRecord(run, "run"), repository.projectId ?? null);
   }
 
   async createRunPullRequestHandoff(runId: string, input: RunPullRequestHandoff, access?: AccessBoundary) {
@@ -1309,7 +1418,7 @@ export class ControlPlaneService {
       return persistedRun;
     });
 
-    return this.mapRun(expectPersistedRecord(updatedRun, "run"));
+    return this.mapRun(expectPersistedRecord(updatedRun, "run"), repository.projectId ?? null);
   }
 
   async listTasks(runId?: string, access?: AccessBoundary) {
@@ -2063,7 +2172,9 @@ export class ControlPlaneService {
         approvalPolicy: workerApprovalPolicy,
         includePlanTool: false,
         requiredCapabilities: ["workspace-write"],
-        metadata: {},
+        metadata: {
+          runContext: runDetail.context
+        },
         maxAttempts: 3,
         leaseTtlSeconds: 300
       });
@@ -2562,7 +2673,7 @@ export class ControlPlaneService {
 
     return {
       repository: this.mapRepository(repository),
-      run: this.mapRun(await this.assertRunExists(runId, access)),
+      run: this.mapRun(await this.assertRunExists(runId, access), repository.projectId ?? null),
       tasks: runDetail.tasks,
       agents: runDetail.agents,
       sessions: runDetail.sessions,
@@ -2637,7 +2748,9 @@ export class ControlPlaneService {
       ]);
 
     const repositoriesById = new Map(repositoryRows.map((repository) => [repository.id, this.mapRepository(repository)] as const));
-    const runsById = new Map(runRows.map((run) => [run.id, this.mapRun(run)] as const));
+    const runsById = new Map(
+      runRows.map((run) => [run.id, this.mapRun(run, repositoriesById.get(run.repositoryId)?.projectId ?? null)] as const)
+    );
     const approvalHistory = approvalRows
       .map((approval) => mapApprovalRecord(approval))
       .sort((left, right) => right.createdAt.getTime() - left.createdAt.getTime())
@@ -3260,8 +3373,8 @@ export class ControlPlaneService {
 
     return {
       ...repository,
-      provider: repository.provider as Repository["provider"],
       projectId: repository.projectId ?? null,
+      provider: repository.provider as Repository["provider"],
       trustLevel: repository.trustLevel as Repository["trustLevel"],
       providerSync: {
         connectivityStatus: providerSync.connectivityStatus,
@@ -3329,10 +3442,16 @@ export class ControlPlaneService {
     const acceptanceCriteria = task.acceptanceCriteria.length > 0
       ? task.acceptanceCriteria.map((criterion) => `- ${criterion}`).join("\n")
       : "- Complete the assigned task and leave clear implementation notes.";
+    const runContext = run.context.kind === "project"
+      ? `Project context: ${run.context.projectName ?? run.context.projectSlug ?? run.context.projectId ?? "project"}`
+      : "Project context: Ad-Hoc job";
+    const jobContext = run.context.jobName ? `Job: ${run.context.jobName}` : null;
 
     return [
       `Repository: ${repository.name}`,
       `Run goal: ${run.goal}`,
+      runContext,
+      ...(jobContext ? [jobContext] : []),
       `Task: ${task.title}`,
       `Role: ${task.role}`,
       "",
@@ -3574,7 +3693,8 @@ export class ControlPlaneService {
       updatedAt: now
     }).where(eq(runs.id, runId)).returning();
 
-    return this.mapRun(expectPersistedRecord(updatedRun, "run"));
+    const repository = await this.assertRepositoryExists(runDetail.repositoryId, access);
+    return this.mapRun(expectPersistedRecord(updatedRun, "run"), repository.projectId ?? null);
   }
 
   private mapSession(session: typeof sessions.$inferSelect): Session {
@@ -3894,16 +4014,50 @@ export class ControlPlaneService {
     };
   }
 
-  private mapRun(run: typeof runs.$inferSelect): Run {
+  private mapRun(run: typeof runs.$inferSelect, repositoryProjectId: string | null = null): Run {
+    const context = normalizeStoredRunContext(run.metadata);
+    const runProjectId = run.projectId ?? null;
+
     return {
       ...run,
-      projectId: run.projectId ?? null,
+      projectId: runProjectId,
       status: run.status as Run["status"],
       budgetCostUsd: centsToDollars(run.budgetCostUsd),
       branchPublishApprovalId: run.branchPublishApprovalId ?? null,
       pullRequestStatus: run.pullRequestStatus as Run["pullRequestStatus"],
       pullRequestApprovalId: run.pullRequestApprovalId ?? null,
-      handoffStatus: run.handoffStatus as Run["handoffStatus"]
+      handoffStatus: run.handoffStatus as Run["handoffStatus"],
+      context,
+      jobScope: this.resolveRunJobScope(runProjectId, repositoryProjectId)
+    };
+  }
+
+  private resolveRunJobScope(runProjectId: string | null, repositoryProjectId: string | null): RunJobScope {
+    if (runProjectId) {
+      if (!repositoryProjectId) {
+        return {
+          kind: "project",
+          projectId: runProjectId,
+          repositoryProjectId: null,
+          reason: "run_assigned_repository_unassigned"
+        };
+      }
+
+      return {
+        kind: "project",
+        projectId: runProjectId,
+        repositoryProjectId,
+        reason: repositoryProjectId === runProjectId
+          ? "run_assigned"
+          : "run_assigned_repository_mismatch"
+      };
+    }
+
+    return {
+      kind: "ad_hoc",
+      projectId: null,
+      repositoryProjectId,
+      reason: repositoryProjectId ? "run_unassigned" : "repository_unassigned"
     };
   }
 

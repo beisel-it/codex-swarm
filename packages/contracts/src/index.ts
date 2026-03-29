@@ -12,6 +12,7 @@ export const repositoryProviders = ["github", "gitlab", "local", "other"] as con
 export const repositoryTrustLevels = ["trusted", "sandboxed", "restricted"] as const;
 export const pullRequestStatuses = ["draft", "open", "merged", "closed"] as const;
 export const handoffStatuses = ["pending", "branch_published", "pr_open", "manual_handoff", "merged", "closed"] as const;
+export const runContextKinds = ["project", "ad_hoc"] as const;
 export const workerSessionStates = ["pending", "active", "stopped", "failed", "stale", "archived"] as const;
 export const agentObservabilityModes = ["session", "transcript_visibility", "unavailable"] as const;
 export const agentObservabilityLineageSources = ["active_session", "session_rollover", "task_reassignment", "task_state_transition", "terminal_session", "not_started"] as const;
@@ -165,6 +166,31 @@ export const runCreateSchema = z.object({
   budgetCostUsd: z.number().nonnegative().optional(),
   concurrencyCap: z.number().int().positive().default(1),
   policyProfile: z.string().min(1).optional(),
+  context: z.object({
+    kind: z.enum(runContextKinds).default("ad_hoc"),
+    projectId: z.uuid().nullable().default(null),
+    projectSlug: z.string().min(1).nullable().default(null),
+    projectName: z.string().min(1).nullable().default(null),
+    projectDescription: z.string().min(1).nullable().default(null),
+    jobId: z.string().min(1).nullable().default(null),
+    jobName: z.string().min(1).nullable().default(null)
+  }).superRefine((value, ctx) => {
+    if (value.kind === "project" && !value.projectId && !value.projectSlug && !value.projectName) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["projectName"],
+        message: "project runs require projectId, projectSlug, or projectName"
+      });
+    }
+  }).optional().default({
+    kind: "ad_hoc",
+    projectId: null,
+    projectSlug: null,
+    projectName: null,
+    projectDescription: null,
+    jobId: null,
+    jobName: null
+  }),
   metadata: z.record(z.string(), z.unknown()).default({})
 });
 
@@ -176,6 +202,7 @@ export const runUpdateSchema = z.object({
   budgetCostUsd: z.number().positive().nullable().optional(),
   concurrencyCap: z.number().int().positive().optional(),
   policyProfile: z.string().min(1).nullable().optional(),
+  context: runCreateSchema.shape.context.optional(),
   metadata: z.record(z.string(), z.unknown()).optional()
 }).refine((value) => Object.keys(value).length > 0, {
   message: "at least one run field must be updated"
@@ -282,11 +309,24 @@ export const repositorySchema = repositoryCreateSchema.extend({
   updatedAt: z.date()
 });
 
+export const runJobScopeSchema = z.object({
+  kind: z.enum(["project", "ad_hoc"]),
+  projectId: z.uuid().nullable().default(null),
+  repositoryProjectId: z.uuid().nullable().default(null),
+  reason: z.enum([
+    "run_assigned",
+    "run_assigned_repository_mismatch",
+    "run_assigned_repository_unassigned",
+    "run_unassigned",
+    "repository_unassigned"
+  ])
+});
+
 export const runSchema = runCreateSchema.extend({
   id: z.uuid(),
   workspaceId: z.string().min(1),
   teamId: z.string().min(1),
-  projectId: z.uuid().nullable().default(null),
+  projectId: z.uuid().nullable().optional(),
   status: z.enum(runStatuses),
   branchName: z.string().min(1).nullable(),
   planArtifactPath: z.string().min(1).nullable(),
@@ -303,9 +343,16 @@ export const runSchema = runCreateSchema.extend({
   pullRequestApprovalId: z.uuid().nullable(),
   handoffStatus: z.enum(handoffStatuses),
   completedAt: z.date().nullable(),
+  context: runCreateSchema.shape.context,
+  jobScope: runJobScopeSchema.optional(),
   createdBy: z.string().min(1),
   createdAt: z.date(),
   updatedAt: z.date()
+});
+
+export const runsByJobScopeSchema = z.object({
+  projectJobs: z.array(runSchema),
+  adHocJobs: z.array(runSchema)
 });
 
 export const taskSchema = taskCreateSchema.extend({
@@ -1250,8 +1297,8 @@ export type RepositoryCreateInput = z.infer<typeof repositoryCreateSchema>;
 export type RepositoryUpdateInput = z.infer<typeof repositoryUpdateSchema>;
 export type ProjectCreateInput = z.infer<typeof projectCreateSchema>;
 export type ProjectUpdateInput = z.infer<typeof projectUpdateSchema>;
-export type RunCreateInput = z.infer<typeof runCreateSchema>;
-export type RunUpdateInput = z.infer<typeof runUpdateSchema>;
+export type RunCreateInput = z.input<typeof runCreateSchema>;
+export type RunUpdateInput = z.input<typeof runUpdateSchema>;
 export type RunStatusUpdateInput = z.infer<typeof runStatusUpdateSchema>;
 export type RunBudgetCheckpointInput = z.infer<typeof runBudgetCheckpointSchema>;
 export type AgentTeamTemplateMember = z.infer<typeof agentTeamTemplateMemberSchema>;
@@ -1266,6 +1313,8 @@ export type ProjectRunAssignment = z.infer<typeof projectRunAssignmentSchema>;
 export type ProjectSummary = z.infer<typeof projectSummarySchema>;
 export type ProjectDetail = z.infer<typeof projectDetailSchema>;
 export type Run = z.infer<typeof runSchema>;
+export type RunJobScope = z.infer<typeof runJobScopeSchema>;
+export type RunsByJobScope = z.infer<typeof runsByJobScopeSchema>;
 export type RunBudgetState = z.infer<typeof runBudgetStateSchema>;
 export type Workspace = z.infer<typeof workspaceSchema>;
 export type Team = z.infer<typeof teamSchema>;

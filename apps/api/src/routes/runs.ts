@@ -94,13 +94,25 @@ export const runRoutes: FastifyPluginAsync = async (app) => {
     const repositoryId = typeof request.query === "object" && request.query && "repositoryId" in request.query
       ? String(request.query.repositoryId)
       : undefined;
+    const view = typeof request.query === "object" && request.query && "view" in request.query
+      ? String(request.query.view)
+      : undefined;
 
     try {
-        return await app.controlPlane.listRuns(repositoryId, request.authContext);
+      if (view === "job_scope") {
+        return await app.controlPlane.listRunsByJobScope(repositoryId, request.authContext);
+      }
+
+      return await app.controlPlane.listRuns(repositoryId, request.authContext);
     } catch (error) {
       if (app.config.NODE_ENV !== "production" && isRecoverableDatabaseError(error)) {
         app.observability.recordRecoverableDatabaseFallback("runs.list", error);
-        return [];
+        return view === "job_scope"
+          ? {
+            projectJobs: [],
+            adHocJobs: []
+          }
+          : [];
       }
 
       throw error;
