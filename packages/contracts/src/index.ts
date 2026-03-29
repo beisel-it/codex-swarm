@@ -551,7 +551,8 @@ export const runPullRequestHandoffSchema = z.object({
 export const cleanupJobRunSchema = z.object({
   runId: z.uuid().optional(),
   staleAfterMinutes: z.number().int().positive().default(15),
-  existingWorktreePaths: z.array(z.string().min(1)).default([])
+  existingWorktreePaths: z.array(z.string().min(1)).default([]),
+  deleteStaleWorktrees: z.boolean().default(false)
 });
 
 export const cleanupJobItemSchema = z.object({
@@ -560,7 +561,9 @@ export const cleanupJobItemSchema = z.object({
   agentId: z.uuid(),
   worktreePath: z.string().min(1),
   action: z.enum(["resume", "retry", "mark_stale", "archive"]),
-  reason: z.enum(["resume_session", "retry_pending_session", "missing_thread", "missing_worktree", "heartbeat_timeout", "terminal_state"])
+  reason: z.enum(["resume_session", "retry_pending_session", "missing_thread", "missing_worktree", "heartbeat_timeout", "terminal_state"]),
+  worktreeDeleted: z.boolean().default(false),
+  worktreeDeleteReason: z.string().min(1).nullable().default(null)
 });
 
 export const cleanupJobReportSchema = z.object({
@@ -569,6 +572,8 @@ export const cleanupJobReportSchema = z.object({
   retried: z.number().int().nonnegative(),
   markedStale: z.number().int().nonnegative(),
   archived: z.number().int().nonnegative(),
+  deletedWorktrees: z.number().int().nonnegative(),
+  worktreeDeleteFailures: z.number().int().nonnegative(),
   items: z.array(cleanupJobItemSchema),
   completedAt: z.date()
 });

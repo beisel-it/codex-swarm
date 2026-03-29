@@ -1881,6 +1881,8 @@ describe("buildApp", () => {
       retried: 1,
       markedStale: 1,
       archived: 0,
+      deletedWorktrees: 1,
+      worktreeDeleteFailures: 0,
       items: [
         {
           sessionId: ids.session,
@@ -1888,7 +1890,9 @@ describe("buildApp", () => {
           agentId: ids.agent,
           worktreePath: ".swarm/worktrees/codex-swarm/run-001/worker-001",
           action: "mark_stale",
-          reason: "missing_worktree"
+          reason: "missing_worktree",
+          worktreeDeleted: true,
+          worktreeDeleteReason: null
         }
       ],
       completedAt: new Date("2026-03-28T12:30:00.000Z")
@@ -1907,19 +1911,22 @@ describe("buildApp", () => {
       payload: {
         runId: ids.run,
         staleAfterMinutes: 20,
-        existingWorktreePaths: []
+        existingWorktreePaths: [],
+        deleteStaleWorktrees: true
       }
     });
 
     expect(response.statusCode).toBe(200);
     expect(response.json()).toMatchObject({
       scannedSessions: 2,
-      markedStale: 1
+      markedStale: 1,
+      deletedWorktrees: 1
     });
     expect(controlPlane.runCleanupJob).toHaveBeenCalledWith({
       runId: ids.run,
       staleAfterMinutes: 20,
-      existingWorktreePaths: []
+      existingWorktreePaths: [],
+      deleteStaleWorktrees: true
     });
 
     await app.close();

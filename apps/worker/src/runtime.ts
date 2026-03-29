@@ -1,5 +1,5 @@
 import { once } from "node:events";
-import { lstat, mkdir, readlink, symlink, writeFile } from "node:fs/promises";
+import { lstat, mkdir, readlink, rm, symlink, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { spawn, type ChildProcess, type SpawnOptions } from "node:child_process";
 
@@ -145,6 +145,12 @@ export interface WorkerSessionRecoveryAction {
   sessionId: string;
   action: "resume" | "retry" | "mark_stale" | "archive";
   reason: "resume_session" | "retry_pending_session" | "missing_thread" | "missing_worktree" | "heartbeat_timeout" | "terminal_state";
+}
+
+export interface WorktreeCleanupResult {
+  path: string;
+  deleted: boolean;
+  reason: string | null;
 }
 
 function sanitizePathSegment(value: string) {
@@ -306,6 +312,56 @@ export async function materializeRepositoryWorkspace(input: RepositoryMaterializ
     repositoryUrl: input.repository.url,
     sourcePath: null
   };
+}
+
+export async function cleanupWorktreePaths(paths: string[]): Promise<WorktreeCleanupResult[]> {
+  const seen = new Set<string>();
+  const results: WorktreeCleanupResult[] = [];
+
+  for (const path of paths) {
+    if (seen.has(path)) {
+      continue;
+    }
+
+    seen.add(path);
+
+    if (path.startsWith("untracked/")) {
+      results.push({
+        path,
+        deleted: false,
+        reason: "placeholder_path"
+      });
+      continue;
+    }
+
+    const resolvedPath = resolve(path);
+
+    if (resolvedPath === "/") {
+      results.push({
+        path,
+        deleted: false,
+        reason: "unsafe_root_path"
+      });
+      continue;
+    }
+
+    try {
+      await rm(path, { recursive: true, force: true });
+      results.push({
+        path,
+        deleted: true,
+        reason: null
+      });
+    } catch (error) {
+      results.push({
+        path,
+        deleted: false,
+        reason: error instanceof Error ? error.message : String(error)
+      });
+    }
+  }
+
+  return results;
 }
 
 export function createWorktreePath(input: WorktreePathInput) {

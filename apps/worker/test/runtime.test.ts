@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { describe, expect, it } from "vitest";
@@ -10,6 +10,7 @@ import {
   buildCodexSessionReplyRequest,
   buildCodexSessionStartRequest,
   buildSessionRecoveryPlan,
+  cleanupWorktreePaths,
   CodexSessionRuntime,
   CodexServerSupervisor,
   materializeRepositoryWorkspace,
@@ -192,6 +193,38 @@ describe("worker runtime helpers", () => {
       expect(await readFile(join(mountPath, "README.md"), "utf8")).toBe("hello from mount\n");
     } finally {
       await rm(sourceRoot, { recursive: true, force: true });
+      await rm(workspaceRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("deletes stale worktree directories while skipping placeholder paths", async () => {
+    const workspaceRoot = await mkdtemp(join(tmpdir(), "codex-swarm-worktree-cleanup-"));
+    const staleWorktree = join(workspaceRoot, "stale-worker");
+
+    try {
+      await mkdir(staleWorktree, { recursive: true });
+      await writeFile(join(staleWorktree, "README.md"), "stale\n", "utf8");
+
+      const results = await cleanupWorktreePaths([
+        staleWorktree,
+        "untracked/session-001"
+      ]);
+
+      expect(results).toEqual([
+        {
+          path: staleWorktree,
+          deleted: true,
+          reason: null
+        },
+        {
+          path: "untracked/session-001",
+          deleted: false,
+          reason: "placeholder_path"
+        }
+      ]);
+
+      await expect(readFile(join(staleWorktree, "README.md"), "utf8")).rejects.toThrow();
+    } finally {
       await rm(workspaceRoot, { recursive: true, force: true });
     }
   });

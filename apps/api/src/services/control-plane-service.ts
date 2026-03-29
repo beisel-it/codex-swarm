@@ -44,7 +44,7 @@ import {
   type WorkerNodeRegisterInput
 } from "@codex-swarm/contracts";
 import { resolveInitialTaskStatus } from "@codex-swarm/orchestration";
-import { buildSessionRecoveryPlan } from "@codex-swarm/worker";
+import { buildSessionRecoveryPlan, cleanupWorktreePaths } from "@codex-swarm/worker";
 
 import type { AppDb } from "../db/client.js";
 import {
@@ -1468,6 +1468,17 @@ export class ControlPlaneService {
       existingWorktreePaths: input.existingWorktreePaths
     });
     const rowBySessionId = new Map(rows.map((row) => [row.sessionId, row] as const));
+    const worktreeCleanup = input.deleteStaleWorktrees
+      ? await cleanupWorktreePaths(
+        recoveryPlan
+          .filter((item) => item.action === "mark_stale" || item.action === "archive")
+          .map((item) => {
+            const row = rowBySessionId.get(item.sessionId);
+            return row?.worktreePath ?? `untracked/${item.sessionId}`;
+          })
+      )
+      : [];
+    const cleanupByPath = new Map(worktreeCleanup.map((item) => [item.path, item] as const));
 
     for (const item of recoveryPlan) {
       const row = rowBySessionId.get(item.sessionId);
@@ -1528,16 +1539,22 @@ export class ControlPlaneService {
       retried: recoveryPlan.filter((item) => item.action === "retry").length,
       markedStale: recoveryPlan.filter((item) => item.action === "mark_stale").length,
       archived: recoveryPlan.filter((item) => item.action === "archive").length,
+      deletedWorktrees: worktreeCleanup.filter((item) => item.deleted).length,
+      worktreeDeleteFailures: worktreeCleanup.filter((item) => !item.deleted && item.reason !== "placeholder_path").length,
       items: recoveryPlan.map((item) => {
         const row = expectPersistedRecord(rowBySessionId.get(item.sessionId), "cleanup session row");
+        const worktreePath = row.worktreePath ?? `untracked/${item.sessionId}`;
+        const cleanup = cleanupByPath.get(worktreePath);
 
         return {
           sessionId: item.sessionId,
           runId: row.runId,
           agentId: row.agentId,
-          worktreePath: row.worktreePath ?? `untracked/${item.sessionId}`,
+          worktreePath,
           action: item.action,
-          reason: item.reason
+          reason: item.reason,
+          worktreeDeleted: cleanup?.deleted ?? false,
+          worktreeDeleteReason: cleanup?.reason ?? null
         };
       }),
       completedAt: now

@@ -50,6 +50,12 @@ Follow the detailed runbook in [Upgrade Path](./operations/upgrade-path.md).
 - If a repository record does not include `localPath`, the worker runtime clones `repository.url` into the assigned worktree path using the requested branch or the repository default branch.
 - Operators should use `localPath` only for trusted single-host flows where the source checkout lifecycle is already under explicit control.
 
+### Cleanup job behavior
+
+- `POST /api/v1/cleanup-jobs/run` still supports dry classification of missing or stale sessions through `existingWorktreePaths`.
+- Set `deleteStaleWorktrees=true` when operators want the cleanup run to remove stale or terminal worktree directories on disk after reconciliation.
+- Placeholder paths such as `untracked/<sessionId>` are never deleted.
+
 ## Reference Operating Loop
 
 1. Check `/health` and `db:status`.

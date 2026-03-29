@@ -1,3 +1,6 @@
+import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 import { describe, expect, it } from "vitest";
 
 import { agents, sessions } from "../src/db/schema.js";
@@ -158,7 +161,8 @@ describe("ControlPlaneService.runCleanupJob", () => {
         ".swarm/worktrees/codex-swarm/run-001/agent-retry",
         ".swarm/worktrees/codex-swarm/run-001/agent-stale",
         ".swarm/worktrees/codex-swarm/run-001/agent-archive"
-      ]
+      ],
+      deleteStaleWorktrees: false
     });
 
     expect(report).toMatchObject({
@@ -166,28 +170,38 @@ describe("ControlPlaneService.runCleanupJob", () => {
       resumed: 1,
       retried: 1,
       markedStale: 1,
-      archived: 1
+      archived: 1,
+      deletedWorktrees: 0,
+      worktreeDeleteFailures: 0
     });
     expect(report.items).toEqual([
       expect.objectContaining({
         sessionId: "11111111-1111-4111-8111-111111111111",
         action: "resume",
-        reason: "resume_session"
+        reason: "resume_session",
+        worktreeDeleted: false,
+        worktreeDeleteReason: null
       }),
       expect.objectContaining({
         sessionId: "22222222-2222-4222-8222-222222222222",
         action: "retry",
-        reason: "retry_pending_session"
+        reason: "retry_pending_session",
+        worktreeDeleted: false,
+        worktreeDeleteReason: null
       }),
       expect.objectContaining({
         sessionId: "33333333-3333-4333-8333-333333333333",
         action: "mark_stale",
-        reason: "heartbeat_timeout"
+        reason: "heartbeat_timeout",
+        worktreeDeleted: false,
+        worktreeDeleteReason: null
       }),
       expect.objectContaining({
         sessionId: "44444444-4444-4444-8444-444444444444",
         action: "archive",
-        reason: "terminal_state"
+        reason: "terminal_state",
+        worktreeDeleted: false,
+        worktreeDeleteReason: null
       })
     ]);
 
@@ -224,5 +238,81 @@ describe("ControlPlaneService.runCleanupJob", () => {
       status: "stopped",
       updatedAt: now
     });
+  });
+
+  it("deletes stale and archived worktree directories when the cleanup run opts in", async () => {
+    const now = new Date("2026-03-28T12:30:00.000Z");
+    const workspaceRoot = await mkdtemp(join(tmpdir(), "codex-swarm-cleanup-job-"));
+    const staleWorktree = join(workspaceRoot, "agent-stale");
+    const archiveWorktree = join(workspaceRoot, "agent-archive");
+
+    try {
+      await mkdir(staleWorktree, { recursive: true });
+      await mkdir(archiveWorktree, { recursive: true });
+      await writeFile(join(staleWorktree, "README.md"), "stale\n", "utf8");
+      await writeFile(join(archiveWorktree, "README.md"), "archive\n", "utf8");
+
+      const db = new FakeCleanupDb([
+        {
+          sessionId: "33333333-3333-4333-8333-333333333333",
+          runId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          agentId: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+          worktreePath: staleWorktree,
+          state: "active",
+          threadId: "thread-stale",
+          lastHeartbeatAt: new Date("2026-03-28T11:45:00.000Z")
+        },
+        {
+          sessionId: "44444444-4444-4444-8444-444444444444",
+          runId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          agentId: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+          worktreePath: archiveWorktree,
+          state: "failed",
+          threadId: "thread-archive",
+          lastHeartbeatAt: new Date("2026-03-28T12:20:00.000Z")
+        }
+      ]);
+
+      const service = new ControlPlaneService(
+        db as never,
+        { now: () => now }
+      );
+
+      const report = await service.runCleanupJob({
+        runId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        staleAfterMinutes: 15,
+        existingWorktreePaths: [
+          staleWorktree,
+          archiveWorktree
+        ],
+        deleteStaleWorktrees: true
+      });
+
+      expect(report).toMatchObject({
+        scannedSessions: 2,
+        markedStale: 1,
+        archived: 1,
+        deletedWorktrees: 2,
+        worktreeDeleteFailures: 0
+      });
+      expect(report.items).toEqual([
+        expect.objectContaining({
+          worktreePath: staleWorktree,
+          action: "mark_stale",
+          worktreeDeleted: true,
+          worktreeDeleteReason: null
+        }),
+        expect.objectContaining({
+          worktreePath: archiveWorktree,
+          action: "archive",
+          worktreeDeleted: true,
+          worktreeDeleteReason: null
+        })
+      ]);
+      await expect(readFile(join(staleWorktree, "README.md"), "utf8")).rejects.toThrow();
+      await expect(readFile(join(archiveWorktree, "README.md"), "utf8")).rejects.toThrow();
+    } finally {
+      await rm(workspaceRoot, { recursive: true, force: true });
+    }
   });
 });
