@@ -6,6 +6,7 @@ and capture workflow for the codex-swarm terminal UI.
 Source of truth:
 
 - `docs/architecture/post-m10-tui-delivery-plan.md`
+- `docs/architecture/post-m10-tui-visual-spec.md`
 - `docs/qa/post-m10-tui-acceptance-matrix.md`
 
 ## 1. Launch command

@@ -145,13 +145,17 @@ The post-M10 TUI task is done only when all of the following are true:
 
 ### T1. Visual spec and terminal interaction model
 
-Owner: `designer`
+Owner: `frontend-dev`
 
 Focus:
 
 - define the terminal visual language
 - define summary-card, kanban, panel, alert, and drilldown composition
 - define keybindings and focus model
+
+Checked-in spec:
+
+- `docs/architecture/post-m10-tui-visual-spec.md`
 
 ### T2. TUI data contract and aggregation support
 
