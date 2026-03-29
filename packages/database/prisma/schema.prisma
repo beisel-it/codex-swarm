@@ -26,6 +26,15 @@ model Run {
   branchName       String?
   planArtifactPath String?
   metadata         Json
+  publishedBranch  String?
+  branchPublishedAt DateTime?
+  branchPublishApprovalId String?
+  pullRequestUrl   String?
+  pullRequestNumber Int?
+  pullRequestStatus String?
+  pullRequestApprovalId String?
+  handoffStatus    String   @default("pending")
+  completedAt      DateTime?
   createdBy        String
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt

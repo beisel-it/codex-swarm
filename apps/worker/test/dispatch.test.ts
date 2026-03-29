@@ -126,7 +126,7 @@ function createRuntime(overrides: Partial<WorkerNodeRuntime> = {}): WorkerNodeRu
     postgresUrl: "postgres://postgres:postgres@db.internal:5432/codex",
     redisUrl: "redis://cache.internal:6379/0",
     queueKeyPrefix: "codex-swarm",
-    capabilities: ["default"],
+    capabilities: ["default", "remote"],
     credentialEnvNames: ["OPENAI_API_KEY"],
     heartbeatIntervalSeconds: 30,
     ...overrides
@@ -163,8 +163,8 @@ describe("dispatch helpers", () => {
     });
     expect(bootstrap.checks).toContainEqual({
       name: "artifact_store",
-      status: "degraded",
-      detail: "artifactBaseUrl not configured; worker can run but artifact uploads remain local-only"
+      status: "missing",
+      detail: "artifactBaseUrl is required for remote workers because artifacts must remain accessible across nodes"
     });
     expect(evaluateWorkerRuntimeDependencies(runtime).map((check) => check.name)).toEqual([
       "control_plane",
@@ -174,6 +174,18 @@ describe("dispatch helpers", () => {
       "codex_cli",
       "workspace_root"
     ]);
+  });
+
+  it("keeps artifact store optional for single-host workers", () => {
+    const runtime = createRuntime({
+      capabilities: ["default"]
+    });
+
+    expect(evaluateWorkerRuntimeDependencies(runtime)).toContainEqual({
+      name: "artifact_store",
+      status: "degraded",
+      detail: "artifactBaseUrl not configured; single-host workers can fall back to local artifact access"
+    });
   });
 
   it("derives drain behavior from the target node state", () => {

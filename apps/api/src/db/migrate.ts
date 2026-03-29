@@ -35,6 +35,7 @@ const statements = [
     local_path text,
     trust_level text not null default 'trusted',
     approval_profile text not null default 'standard',
+    provider_sync jsonb not null default '{"connectivityStatus":"skipped","validatedAt":null,"defaultBranch":null,"branches":[],"providerRepoUrl":null,"lastError":null}'::jsonb,
     created_at timestamptz not null default now(),
     updated_at timestamptz not null default now()
   )`,
@@ -53,9 +54,11 @@ const statements = [
     policy_profile text,
     published_branch text,
     branch_published_at timestamptz,
+    branch_publish_approval_id text,
     pull_request_url text,
     pull_request_number integer,
     pull_request_status text,
+    pull_request_approval_id text,
     handoff_status text not null default 'pending',
     completed_at timestamptz,
     metadata jsonb not null default '{}'::jsonb,
@@ -201,6 +204,9 @@ const statements = [
     kind text not null,
     path text not null,
     content_type text not null,
+    url text,
+    size_bytes integer,
+    sha256 text,
     metadata jsonb not null default '{}'::jsonb,
     created_at timestamptz not null default now()
   )`,
@@ -265,6 +271,7 @@ async function main() {
   await db.execute(sql.raw("alter table repositories add column if not exists team_id text not null default 'default-team'"));
   await db.execute(sql.raw("alter table repositories add column if not exists trust_level text not null default 'trusted'"));
   await db.execute(sql.raw("alter table repositories add column if not exists approval_profile text not null default 'standard'"));
+  await db.execute(sql.raw("alter table repositories add column if not exists provider_sync jsonb not null default '{\"connectivityStatus\":\"skipped\",\"validatedAt\":null,\"defaultBranch\":null,\"branches\":[],\"providerRepoUrl\":null,\"lastError\":null}'::jsonb"));
   await db.execute(sql.raw("alter table teams add column if not exists policy_profile text not null default 'standard'"));
   await db.execute(sql.raw("alter table runs add column if not exists budget_tokens integer"));
   await db.execute(sql.raw("alter table runs add column if not exists budget_cost_usd_cents integer"));
@@ -274,11 +281,16 @@ async function main() {
   await db.execute(sql.raw("alter table runs add column if not exists policy_profile text"));
   await db.execute(sql.raw("alter table runs add column if not exists published_branch text"));
   await db.execute(sql.raw("alter table runs add column if not exists branch_published_at timestamptz"));
+  await db.execute(sql.raw("alter table runs add column if not exists branch_publish_approval_id text references approvals(id)"));
   await db.execute(sql.raw("alter table runs add column if not exists pull_request_url text"));
   await db.execute(sql.raw("alter table runs add column if not exists pull_request_number integer"));
   await db.execute(sql.raw("alter table runs add column if not exists pull_request_status text"));
+  await db.execute(sql.raw("alter table runs add column if not exists pull_request_approval_id text references approvals(id)"));
   await db.execute(sql.raw("alter table runs add column if not exists handoff_status text not null default 'pending'"));
   await db.execute(sql.raw("alter table runs add column if not exists completed_at timestamptz"));
+  await db.execute(sql.raw("alter table artifacts add column if not exists url text"));
+  await db.execute(sql.raw("alter table artifacts add column if not exists size_bytes integer"));
+  await db.execute(sql.raw("alter table artifacts add column if not exists sha256 text"));
   await db.execute(sql.raw("alter table control_plane_events add column if not exists actor jsonb default null"));
   await db.execute(sql.raw(controlPlaneMetadataTableSql));
   await db.execute(sql.raw("alter table control_plane_metadata add column if not exists config_version text not null default '1'"));

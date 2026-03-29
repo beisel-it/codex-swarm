@@ -19,6 +19,21 @@ export const repositories = pgTable("repositories", {
   localPath: text("local_path"),
   trustLevel: text("trust_level").notNull().default("trusted"),
   approvalProfile: text("approval_profile").notNull().default("standard"),
+  providerSync: jsonb("provider_sync").$type<{
+    connectivityStatus: "validated" | "failed" | "skipped";
+    validatedAt: string | null;
+    defaultBranch: string | null;
+    branches: string[];
+    providerRepoUrl: string | null;
+    lastError: string | null;
+  }>().notNull().default({
+    connectivityStatus: "skipped",
+    validatedAt: null,
+    defaultBranch: null,
+    branches: [],
+    providerRepoUrl: null,
+    lastError: null
+  }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
 });
@@ -38,9 +53,11 @@ export const runs = pgTable("runs", {
   policyProfile: text("policy_profile"),
   publishedBranch: text("published_branch"),
   branchPublishedAt: timestamp("branch_published_at", { withTimezone: true }),
+  branchPublishApprovalId: text("branch_publish_approval_id"),
   pullRequestUrl: text("pull_request_url"),
   pullRequestNumber: integer("pull_request_number"),
   pullRequestStatus: text("pull_request_status"),
+  pullRequestApprovalId: text("pull_request_approval_id"),
   handoffStatus: text("handoff_status").notNull().default("pending"),
   completedAt: timestamp("completed_at", { withTimezone: true }),
   metadata: jsonb("metadata").$type<Record<string, unknown>>().notNull().default({}),
@@ -200,6 +217,9 @@ export const artifacts = pgTable("artifacts", {
   kind: text("kind").notNull(),
   path: text("path").notNull(),
   contentType: text("content_type").notNull(),
+  url: text("url"),
+  sizeBytes: integer("size_bytes"),
+  sha256: text("sha256"),
   metadata: jsonb("metadata").$type<Record<string, unknown>>().notNull().default({}),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow()
 });

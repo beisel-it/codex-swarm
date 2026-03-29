@@ -70,6 +70,8 @@ const controlPlane = {
   createValidation: vi.fn(),
   listArtifacts: vi.fn(),
   createArtifact: vi.fn(),
+  getArtifact: vi.fn(),
+  attachArtifactStorage: vi.fn(),
   runCleanupJob: vi.fn()
 };
 
@@ -86,7 +88,7 @@ const observability = {
 };
 
 class FakeVerticalSliceControlPlane {
-  private readonly repositories = [
+  private readonly repositories: any[] = [
     {
       id: ids.repository,
       workspaceId: defaultBoundary.workspaceId,
@@ -98,6 +100,14 @@ class FakeVerticalSliceControlPlane {
       localPath: null,
       trustLevel: "trusted",
       approvalProfile: "standard",
+      providerSync: {
+        connectivityStatus: "validated",
+        validatedAt: new Date("2026-03-28T00:00:00.000Z"),
+        defaultBranch: "main",
+        branches: ["main"],
+        providerRepoUrl: "https://example.com/codex-swarm.git",
+        lastError: null
+      },
       createdAt: new Date("2026-03-28T00:00:00.000Z"),
       updatedAt: new Date("2026-03-28T00:00:00.000Z")
     }
@@ -133,7 +143,7 @@ class FakeVerticalSliceControlPlane {
     }
   ];
   private readonly workerDispatchAssignments: any[] = [];
-  private readonly artifacts = [
+  private readonly artifacts: any[] = [
     {
       id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
       runId: ids.run,
@@ -141,8 +151,12 @@ class FakeVerticalSliceControlPlane {
       kind: "report",
       path: "artifacts/validations/typecheck.json",
       contentType: "application/json",
+      url: "http://localhost:3000/api/v1/artifacts/cccccccc-cccc-4ccc-8ccc-cccccccccccc/content",
+      sizeBytes: 17,
+      sha256: "fe31f5f3446f89f5f47df61053a8dff5cbb6e1cf6398949bf16a6760522b5f82",
       metadata: {
-        suite: "typecheck"
+        suite: "typecheck",
+        storageKey: "cc/cccccccc-cccc-4ccc-8ccc-cccccccccccc/content.bin"
       },
       createdAt: new Date()
     }
@@ -167,8 +181,32 @@ class FakeVerticalSliceControlPlane {
       repository.workspaceId === access.workspaceId && repository.teamId === access.teamId);
   }
 
-  async createRepository() {
-    throw new Error("not implemented");
+  async createRepository(input: any, access?: any) {
+    const repository = {
+      id: crypto.randomUUID(),
+      workspaceId: access?.workspaceId ?? defaultBoundary.workspaceId,
+      teamId: access?.teamId ?? defaultBoundary.teamId,
+      name: input.name,
+      url: input.url,
+      provider: input.provider ?? "github",
+      defaultBranch: input.defaultBranch ?? "main",
+      localPath: input.localPath ?? null,
+      trustLevel: input.trustLevel ?? "trusted",
+      approvalProfile: input.approvalProfile ?? "standard",
+      providerSync: {
+        connectivityStatus: "validated",
+        validatedAt: new Date("2026-03-28T00:00:00.000Z"),
+        defaultBranch: input.defaultBranch ?? "main",
+        branches: [input.defaultBranch ?? "main"],
+        providerRepoUrl: input.url,
+        lastError: null
+      },
+      createdAt: new Date("2026-03-28T00:00:00.000Z"),
+      updatedAt: new Date("2026-03-28T00:00:00.000Z")
+    };
+
+    this.repositories.push(repository);
+    return repository;
   }
 
   async listRuns(repositoryId?: string, access?: any) {
@@ -213,9 +251,11 @@ class FakeVerticalSliceControlPlane {
       policyProfile: input.policyProfile ?? repository.approvalProfile,
       publishedBranch: null,
       branchPublishedAt: null,
+      branchPublishApprovalId: null,
       pullRequestUrl: null,
       pullRequestNumber: null,
       pullRequestStatus: null,
+      pullRequestApprovalId: null,
       handoffStatus: "pending",
       completedAt: null,
       metadata: input.metadata,
@@ -249,6 +289,7 @@ class FakeVerticalSliceControlPlane {
     run.branchName = branchName;
     run.publishedBranch = branchName;
     run.branchPublishedAt = new Date();
+    run.branchPublishApprovalId = input.approvalId ?? run.branchPublishApprovalId;
     run.handoffStatus = "branch_published";
     return run;
   }
@@ -259,6 +300,7 @@ class FakeVerticalSliceControlPlane {
     run.pullRequestUrl = input.url ?? null;
     run.pullRequestNumber = input.number ?? null;
     run.pullRequestStatus = input.url ? input.status : null;
+    run.pullRequestApprovalId = input.approvalId ?? run.pullRequestApprovalId;
     run.handoffStatus = input.url ? "pr_open" : "manual_handoff";
     return run;
   }
@@ -825,17 +867,52 @@ class FakeVerticalSliceControlPlane {
   async createArtifact(input: any, access?: any) {
     await this.getRun(input.runId, access);
     const artifact = {
-      id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+      id: crypto.randomUUID(),
       runId: input.runId,
       taskId: input.taskId ?? null,
       kind: input.kind,
       path: input.path,
       contentType: input.contentType,
+      url: null,
+      sizeBytes: null,
+      sha256: null,
       metadata: input.metadata ?? {},
       createdAt: new Date()
     };
 
     this.artifacts.push(artifact);
+    return artifact;
+  }
+
+  async getArtifact(artifactId: string, access?: any) {
+    const artifact = this.artifacts.find((candidate) => candidate.id === artifactId);
+
+    if (!artifact) {
+      throw new HttpError(404, `artifact ${artifactId} not found`);
+    }
+
+    await this.getRun(artifact.runId, access);
+    return artifact;
+  }
+
+  async attachArtifactStorage(artifactId: string, storage: any) {
+    const artifact = this.artifacts.find((candidate) => candidate.id === artifactId);
+
+    if (!artifact) {
+      throw new HttpError(404, `artifact ${artifactId} not found`);
+    }
+
+    artifact.url = storage.url;
+    artifact.sizeBytes = storage.sizeBytes;
+    artifact.sha256 = storage.sha256;
+    artifact.metadata = {
+      ...artifact.metadata,
+      storageKey: storage.storageKey,
+      url: storage.url,
+      sizeBytes: storage.sizeBytes,
+      sha256: storage.sha256
+    };
+
     return artifact;
   }
 
@@ -1109,7 +1186,15 @@ describe("buildApp", () => {
       defaultBranch: "main",
       localPath: null,
       trustLevel: "trusted",
-      approvalProfile: "standard"
+      approvalProfile: "standard",
+      providerSync: {
+        connectivityStatus: "validated",
+        validatedAt: "2026-03-28T00:00:00.000Z",
+        defaultBranch: "main",
+        branches: ["main"],
+        providerRepoUrl: "https://github.com/example/codex-swarm",
+        lastError: null
+      }
     });
 
     const app = await buildApp({
@@ -1133,13 +1218,17 @@ describe("buildApp", () => {
     expect(response.json()).toMatchObject({
       provider: "github",
       trustLevel: "trusted",
-      approvalProfile: "standard"
+      approvalProfile: "standard",
+      providerSync: {
+        connectivityStatus: "validated",
+        defaultBranch: "main",
+        branches: ["main"]
+      }
     });
     expect(controlPlane.createRepository).toHaveBeenCalledWith({
       name: "codex-swarm",
       url: "https://github.com/example/codex-swarm",
       provider: "github",
-      defaultBranch: "main",
       trustLevel: "trusted"
     }, expect.objectContaining({
       workspaceId: defaultBoundary.workspaceId,
@@ -1163,9 +1252,11 @@ describe("buildApp", () => {
       policyProfile: null,
       publishedBranch: "runs/m3-git-provider",
       branchPublishedAt: "2026-03-28T12:00:00.000Z",
+      branchPublishApprovalId: "99999999-9999-4999-8999-999999999999",
       pullRequestUrl: null,
       pullRequestNumber: null,
       pullRequestStatus: null,
+      pullRequestApprovalId: null,
       handoffStatus: "branch_published",
       completedAt: null,
       metadata: {},
@@ -1186,6 +1277,7 @@ describe("buildApp", () => {
       },
       payload: {
         branchName: "runs/m3-git-provider",
+        approvalId: "99999999-9999-4999-8999-999999999999",
         publishedBy: "tech-lead"
       }
     });
@@ -1193,10 +1285,12 @@ describe("buildApp", () => {
     expect(response.statusCode).toBe(200);
     expect(response.json()).toMatchObject({
       publishedBranch: "runs/m3-git-provider",
+      branchPublishApprovalId: "99999999-9999-4999-8999-999999999999",
       handoffStatus: "branch_published"
     });
     expect(controlPlane.publishRunBranch).toHaveBeenCalledWith(ids.run, {
       branchName: "runs/m3-git-provider",
+      approvalId: "99999999-9999-4999-8999-999999999999",
       publishedBy: "tech-lead",
       remoteName: "origin"
     }, expect.objectContaining({
@@ -1221,9 +1315,11 @@ describe("buildApp", () => {
       policyProfile: null,
       publishedBranch: "runs/m3-git-provider",
       branchPublishedAt: "2026-03-28T12:00:00.000Z",
+      branchPublishApprovalId: null,
       pullRequestUrl: "https://github.com/example/codex-swarm/pull/42",
       pullRequestNumber: 42,
       pullRequestStatus: "open",
+      pullRequestApprovalId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
       handoffStatus: "pr_open",
       completedAt: null,
       metadata: {},
@@ -1246,6 +1342,7 @@ describe("buildApp", () => {
         title: "M3 Git provider handoff",
         body: "Validation evidence attached.",
         createdBy: "tech-lead",
+        approvalId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
         provider: "github",
         url: "https://github.com/example/codex-swarm/pull/42",
         number: 42,
@@ -1257,12 +1354,14 @@ describe("buildApp", () => {
     expect(response.json()).toMatchObject({
       pullRequestUrl: "https://github.com/example/codex-swarm/pull/42",
       pullRequestNumber: 42,
+      pullRequestApprovalId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
       handoffStatus: "pr_open"
     });
     expect(controlPlane.createRunPullRequestHandoff).toHaveBeenCalledWith(ids.run, {
       title: "M3 Git provider handoff",
       body: "Validation evidence attached.",
       createdBy: "tech-lead",
+      approvalId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
       provider: "github",
       url: "https://github.com/example/codex-swarm/pull/42",
       number: 42,
@@ -1959,9 +2058,11 @@ describe("buildApp", () => {
         policyProfile: "standard",
         publishedBranch: null,
         branchPublishedAt: null,
+        branchPublishApprovalId: null,
         pullRequestUrl: null,
         pullRequestNumber: null,
         pullRequestStatus: null,
+        pullRequestApprovalId: null,
         handoffStatus: "pending",
         completedAt: null,
         metadata: {},
@@ -3315,6 +3416,20 @@ describe("buildApp", () => {
       });
 
       expect(createArtifactResponse.statusCode).toBe(201);
+      expect(createArtifactResponse.json()).toMatchObject({
+        runId: ids.run,
+        kind: "plan",
+        path: planArtifact.path,
+        contentType: "text/markdown",
+        url: expect.stringContaining("/api/v1/artifacts/"),
+        sizeBytes: markdown.length,
+        sha256: expect.any(String),
+        metadata: {
+          relativePath: ".swarm/plan.md",
+          source: "leader-plan",
+          storageKey: expect.any(String)
+        }
+      });
 
       const updateRunResponse = await app.inject({
         method: "PATCH",
@@ -3352,14 +3467,88 @@ describe("buildApp", () => {
           kind: "plan",
           path: planArtifact.path,
           contentType: "text/markdown",
-          metadata: {
+          metadata: expect.objectContaining({
             relativePath: ".swarm/plan.md",
-            source: "leader-plan"
-          }
+            source: "leader-plan",
+            storageKey: expect.any(String)
+          })
         })
       ]));
+
+      const createdArtifact = createArtifactResponse.json();
+      const artifactContentResponse = await app.inject({
+        method: "GET",
+        url: `/api/v1/artifacts/${createdArtifact.id}/content`,
+        headers
+      });
+
+      expect(artifactContentResponse.statusCode).toBe(200);
+      expect(artifactContentResponse.headers["content-type"]).toContain("text/markdown");
+      expect(artifactContentResponse.body).toBe(markdown);
     } finally {
       await rm(cwd, { recursive: true, force: true });
+      await app.close();
+    }
+  });
+
+  it("stores inline artifact content without relying on a local file path", async () => {
+    const app = await buildApp({
+      config: getConfig({
+        NODE_ENV: "test",
+        PORT: 3000,
+        HOST: "127.0.0.1",
+        DATABASE_URL: "postgres://unused/test",
+        DEV_AUTH_TOKEN: "test-token",
+        OPENAI_TRACING_DISABLED: true
+      }),
+      controlPlane: new FakeVerticalSliceControlPlane() as unknown as ControlPlaneService
+    });
+
+    const headers = {
+      authorization: "Bearer test-token"
+    };
+
+    try {
+      const createRunResponse = await app.inject({
+        method: "POST",
+        url: "/api/v1/runs",
+        headers,
+        payload: {
+          repositoryId: ids.repository,
+          goal: "Persist inline artifact",
+          metadata: {}
+        }
+      });
+
+      expect(createRunResponse.statusCode).toBe(201);
+
+      const response = await app.inject({
+        method: "POST",
+        url: "/api/v1/artifacts",
+        headers,
+        payload: {
+          runId: ids.run,
+          kind: "report",
+          path: "artifacts/report.json",
+          contentType: "application/json",
+          contentBase64: Buffer.from("{\"ok\":true}").toString("base64"),
+          metadata: {
+            source: "inline-test"
+          }
+        }
+      });
+
+      expect(response.statusCode).toBe(201);
+      expect(response.json()).toMatchObject({
+        kind: "report",
+        url: expect.stringContaining("/api/v1/artifacts/"),
+        sizeBytes: 11,
+        metadata: {
+          source: "inline-test",
+          storageKey: expect.any(String)
+        }
+      });
+    } finally {
       await app.close();
     }
   });

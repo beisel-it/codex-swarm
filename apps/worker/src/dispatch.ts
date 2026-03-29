@@ -128,6 +128,8 @@ export function buildWorkerDrainStatus(command: WorkerDrainCommand, previousStat
 }
 
 export function evaluateWorkerRuntimeDependencies(runtime: WorkerNodeRuntime): WorkerRuntimeDependencyCheck[] {
+  const requiresSharedArtifactStore = runtime.capabilities.includes("remote");
+
   const checks: WorkerRuntimeDependencyCheck[] = [
     {
       name: "control_plane",
@@ -148,10 +150,12 @@ export function evaluateWorkerRuntimeDependencies(runtime: WorkerNodeRuntime): W
     },
     {
       name: "artifact_store",
-      status: runtime.artifactBaseUrl ? "ready" : "degraded",
+      status: runtime.artifactBaseUrl ? "ready" : requiresSharedArtifactStore ? "missing" : "degraded",
       detail: runtime.artifactBaseUrl
         ? `artifact store configured at ${runtime.artifactBaseUrl}`
-        : "artifactBaseUrl not configured; worker can run but artifact uploads remain local-only"
+        : requiresSharedArtifactStore
+          ? "artifactBaseUrl is required for remote workers because artifacts must remain accessible across nodes"
+          : "artifactBaseUrl not configured; single-host workers can fall back to local artifact access"
     },
     {
       name: "codex_cli",

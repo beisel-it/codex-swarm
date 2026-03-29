@@ -43,6 +43,8 @@ Notes:
 
 - worker placement is sticky and explicit
 - drain-mode procedures should be documented and exercised
+- remote worker bootstrap must include an `artifactBaseUrl` that resolves back to the control-plane API
+- the control-plane API must persist artifact blobs under shared durable storage and expose them through `/api/v1/artifacts/:id/content`
 - restore and upgrade procedures must account for both control-plane and worker coordination
 
 Frontend reference:

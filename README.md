@@ -18,8 +18,9 @@ TypeScript pnpm-workspace scaffold for the M0/M1 slice described in [PRD.md](./P
 
 1. Install workspace dependencies:
    `corepack pnpm install`
-2. Copy `.env.example` to `.env` and set `DATABASE_URL` and `DEV_AUTH_TOKEN`.
+2. Copy `.env.example` to `.env` and set `DATABASE_URL`, `DEV_AUTH_TOKEN`, and the artifact settings used by your deployment shape.
    The M6 runtime also tracks `CONTROL_PLANE_SCHEMA_VERSION` and `CONTROL_PLANE_CONFIG_VERSION`; leave the shipped defaults unless you are validating an upgrade mismatch path.
+   For multi-node deployments, set `ARTIFACT_STORAGE_ROOT` to shared durable storage on the API host and `ARTIFACT_BASE_URL` to the externally reachable API base URL so remote workers and operators can resolve artifact downloads.
 3. For governed-repo testing, optionally switch `SECRET_SOURCE_MODE=external_manager`, set `SECRET_PROVIDER=vault`, and list task-scoped credential names in `REMOTE_SECRET_ENV_NAMES`.
 4. Start the API package:
    `corepack pnpm --dir apps/api dev`
@@ -59,6 +60,13 @@ Repository materialization:
 - Worker runtime now exposes `materializeRepositoryWorkspace(...)` in `@codex-swarm/worker`.
 - Repositories with `localPath` are mounted into the worker worktree path as an operator-prepared local checkout. The runtime does not change branches for mounted paths; operators own branch/cleanliness of that source tree.
 - Repositories without `localPath` are cloned into the worker worktree path from `repository.url` using the requested branch or the repository default branch.
+- `POST /api/v1/repositories` now validates reachable provider-backed repositories with `git ls-remote`, records discovered branches/default branch metadata, and falls back to `main` only when the provider does not expose a default branch.
+
+Artifact persistence:
+
+- `POST /api/v1/artifacts` persists both metadata and durable blob content.
+- `GET /api/v1/artifacts/:id/content` serves the stored artifact bytes through the control-plane API.
+- Remote worker nodes should not run without `artifactBaseUrl`; the runtime dependency check treats shared artifact access as mandatory for multi-node execution.
 
 Operations docs:
 

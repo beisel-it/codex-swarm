@@ -47,8 +47,14 @@ Follow the detailed runbook in [Upgrade Path](./operations/upgrade-path.md).
 
 - Worker workspaces are prepared through `materializeRepositoryWorkspace(...)` in `apps/worker/src/runtime.ts`.
 - If a repository record includes `localPath`, the worker path is a mounted view of that operator-managed checkout. The platform treats the mounted source as pre-positioned and does not switch branches or clean the source tree.
-- If a repository record does not include `localPath`, the worker runtime clones `repository.url` into the assigned worktree path using the requested branch or the repository default branch.
+- If a repository record does not include `localPath`, the control plane validates provider connectivity with `git ls-remote`, records the discovered branches/default branch, and the worker runtime clones `repository.url` into the assigned worktree path using the requested branch or the repository default branch.
 - Operators should use `localPath` only for trusted single-host flows where the source checkout lifecycle is already under explicit control.
+
+### Artifact storage rules
+
+- `POST /api/v1/artifacts` writes blob content into `ARTIFACT_STORAGE_ROOT` and records a control-plane download URL for the artifact.
+- `GET /api/v1/artifacts/:id/content` is the supported retrieval path for operators, dashboards, and remote workers.
+- Multi-node workers must be configured with an `artifactBaseUrl`; without it, the runtime dependency check leaves the node unschedulable for remote execution.
 
 ### Cleanup job behavior
 

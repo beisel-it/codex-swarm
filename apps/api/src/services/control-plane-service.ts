@@ -65,6 +65,7 @@ import {
 } from "../db/schema.js";
 import type { Clock } from "../lib/clock.js";
 import { HttpError } from "../lib/http-error.js";
+import { inspectRepositoryProvider } from "../lib/repository-provider.js";
 import type {
   approvalCreateSchema,
   messageCreateSchema,
@@ -209,6 +210,10 @@ function normalizeValidationTemplates(templates: TaskCreate["validationTemplates
   }));
 }
 
+function isApprovedHandoffApproval(approval: Approval | null | undefined, kind: Approval["kind"], runId: string) {
+  return approval?.runId === runId && approval.kind === kind && approval.status === "approved";
+}
+
 function inferRepositoryProvider(url: string): Repository["provider"] {
   const normalizedUrl = url.toLowerCase();
 
@@ -233,6 +238,14 @@ function dollarsToCents(value: number | undefined) {
 
 function centsToDollars(value: number | null) {
   return value === null ? null : value / 100;
+}
+
+function getArtifactStorageMetadata(metadata: Record<string, unknown>) {
+  return {
+    url: typeof metadata.url === "string" ? metadata.url : null,
+    sizeBytes: typeof metadata.sizeBytes === "number" ? metadata.sizeBytes : null,
+    sha256: typeof metadata.sha256 === "string" ? metadata.sha256 : null
+  };
 }
 
 function expectPersistedRecord<T>(record: T | undefined, entity: string): T {
@@ -355,6 +368,15 @@ export class ControlPlaneService {
     const id = crypto.randomUUID();
     const now = this.clock.now();
     const approvalProfile = resolveRepositoryApprovalProfile(input, team.policyProfile);
+    const provider = input.provider ?? inferRepositoryProvider(input.url);
+    const providerInspection = await inspectRepositoryProvider({
+      provider,
+      url: input.url,
+      localPath: input.localPath ?? null
+    });
+    const defaultBranch = input.defaultBranch
+      ?? providerInspection.defaultBranch
+      ?? "main";
 
     const [repository] = await this.db.insert(repositories).values({
       id,
@@ -362,11 +384,19 @@ export class ControlPlaneService {
       teamId: boundary.teamId,
       name: input.name,
       url: input.url,
-      provider: input.provider ?? inferRepositoryProvider(input.url),
-      defaultBranch: input.defaultBranch,
+      provider,
+      defaultBranch,
       localPath: input.localPath ?? null,
       trustLevel: input.trustLevel,
       approvalProfile,
+      providerSync: {
+        connectivityStatus: providerInspection.connectivityStatus,
+        validatedAt: providerInspection.validatedAt?.toISOString() ?? null,
+        defaultBranch: providerInspection.defaultBranch ?? defaultBranch,
+        branches: providerInspection.branches,
+        providerRepoUrl: providerInspection.providerRepoUrl,
+        lastError: providerInspection.lastError
+      },
       createdAt: now,
       updatedAt: now
     }).returning();
@@ -447,9 +477,11 @@ export class ControlPlaneService {
       policyProfile,
       publishedBranch: null,
       branchPublishedAt: null,
+      branchPublishApprovalId: null,
       pullRequestUrl: null,
       pullRequestNumber: null,
       pullRequestStatus: null,
+      pullRequestApprovalId: null,
       handoffStatus: "pending",
       completedAt: null,
       metadata: input.metadata,
@@ -484,10 +516,13 @@ export class ControlPlaneService {
       throw new HttpError(409, "run does not have a branch to publish");
     }
 
+    const branchApproval = await this.resolveRequiredHandoffApproval(runId, "patch", input.approvalId, access);
+
     const [run] = await this.db.update(runs).set({
       branchName,
       publishedBranch: branchName,
       branchPublishedAt: now,
+      branchPublishApprovalId: branchApproval?.id ?? existingRun.branchPublishApprovalId ?? null,
       handoffStatus: "branch_published",
       updatedAt: now
     }).where(eq(runs.id, runId)).returning();
@@ -499,6 +534,7 @@ export class ControlPlaneService {
     const now = this.clock.now();
     const run = await this.assertRunExists(runId, access);
     const repository = await this.assertRepositoryExists(run.repositoryId, access);
+    const mergeApproval = await this.resolveRequiredHandoffApproval(runId, "merge", input.approvalId, access);
     const headBranch = input.headBranch ?? run.publishedBranch ?? run.branchName;
 
     if (!headBranch) {
@@ -514,12 +550,13 @@ export class ControlPlaneService {
           : "pr_open"
       : "manual_handoff";
 
-    const [updatedRun] = await this.db.transaction(async (tx) => {
+    const updatedRun = await this.db.transaction(async (tx) => {
       const [persistedRun] = await tx.update(runs).set({
         publishedBranch: headBranch,
         pullRequestUrl: input.url ?? null,
         pullRequestNumber: input.number ?? null,
         pullRequestStatus: input.url ? input.status : null,
+        pullRequestApprovalId: mergeApproval?.id ?? run.pullRequestApprovalId ?? null,
         handoffStatus,
         updatedAt: now
       }).where(eq(runs.id, runId)).returning();
@@ -544,7 +581,7 @@ export class ControlPlaneService {
         createdAt: now
       });
 
-      return [persistedRun];
+      return persistedRun;
     });
 
     return this.mapRun(expectPersistedRecord(updatedRun, "run"));
@@ -950,6 +987,7 @@ export class ControlPlaneService {
       await this.assertTaskExists(input.taskId, access);
     }
 
+    const storage = getArtifactStorageMetadata(input.metadata);
     const [artifact] = await this.db.insert(artifacts).values({
       id: crypto.randomUUID(),
       runId: input.runId,
@@ -957,11 +995,33 @@ export class ControlPlaneService {
       kind: input.kind,
       path: input.path,
       contentType: input.contentType,
+      url: storage.url,
+      sizeBytes: storage.sizeBytes,
+      sha256: storage.sha256,
       metadata: input.metadata,
       createdAt: this.clock.now()
     }).returning();
 
-    return expectPersistedRecord(artifact, "artifact");
+    return this.mapArtifact(expectPersistedRecord(artifact, "artifact"));
+  }
+
+  async attachArtifactStorage(
+    artifactId: string,
+    storage: {
+      storageKey: string;
+      url: string;
+      sizeBytes: number;
+      sha256: string;
+    }
+  ) {
+    const [artifact] = await this.db.update(artifacts).set({
+      url: storage.url,
+      sizeBytes: storage.sizeBytes,
+      sha256: storage.sha256,
+      metadata: sql`jsonb_set(jsonb_set(jsonb_set(jsonb_set(metadata, '{storageKey}', to_jsonb(${storage.storageKey}::text), true), '{url}', to_jsonb(${storage.url}::text), true), '{sizeBytes}', to_jsonb(${storage.sizeBytes}), true), '{sha256}', to_jsonb(${storage.sha256}::text), true)`
+    }).where(eq(artifacts.id, artifactId)).returning();
+
+    return this.mapArtifact(expectPersistedRecord(artifact, "artifact"));
   }
 
   async listWorkerDispatchAssignments(query: WorkerDispatchListQuery = {}) {
@@ -1166,10 +1226,18 @@ export class ControlPlaneService {
   async listArtifacts(runId: string, access?: AccessBoundary) {
     await this.assertRunExists(runId, access);
     const rows = await this.db.select().from(artifacts).where(eq(artifacts.runId, runId)).orderBy(asc(artifacts.createdAt));
-    return rows.map((artifact): Artifact => ({
-      ...artifact,
-      kind: artifact.kind as Artifact["kind"]
-    }));
+    return rows.map((artifact) => this.mapArtifact(artifact));
+  }
+
+  async getArtifact(artifactId: string, access?: AccessBoundary) {
+    const [artifact] = await this.db.select().from(artifacts).where(eq(artifacts.id, artifactId));
+
+    if (!artifact) {
+      throw new HttpError(404, `artifact ${artifactId} not found`);
+    }
+
+    await this.assertRunExists(artifact.runId, access);
+    return this.mapArtifact(artifact);
   }
 
   async exportRunAudit(runId: string, exportedBy: ActorIdentity, retentionPolicy: RetentionPolicy, access?: AccessBoundary): Promise<RunAuditExport> {
@@ -1744,6 +1812,36 @@ export class ControlPlaneService {
     }
   }
 
+  private async resolveRequiredHandoffApproval(
+    runId: string,
+    kind: "patch" | "merge",
+    approvalId: string | undefined,
+    access?: AccessBoundary
+  ) {
+    const approvalsForRun = await this.listApprovals(runId, access);
+    const approvalsOfKind = approvalsForRun.filter((approval) => approval.kind === kind);
+
+    if (approvalId) {
+      const approval = approvalsOfKind.find((candidate) => candidate.id === approvalId);
+
+      if (!approval) {
+        throw new HttpError(404, `${kind} approval ${approvalId} not found`);
+      }
+
+      if (!isApprovedHandoffApproval(approval, kind, runId)) {
+        throw new HttpError(409, `${kind} approval ${approvalId} must be approved before handoff`);
+      }
+
+      return approval;
+    }
+
+    if (approvalsOfKind.length === 0) {
+      return null;
+    }
+
+    throw new HttpError(409, `${kind} approval linkage is required for this handoff`);
+  }
+
   private async hydrateValidationHistory(rows: typeof validations.$inferSelect[]): Promise<ValidationHistoryEntry[]> {
     if (rows.length === 0) {
       return [];
@@ -1760,10 +1858,7 @@ export class ControlPlaneService {
 
     const artifactsById = new Map<string, Artifact>(
       linkedArtifacts.map((artifact) => {
-        const normalizedArtifact: Artifact = {
-          ...artifact,
-          kind: artifact.kind as Artifact["kind"]
-        };
+        const normalizedArtifact = this.mapArtifact(artifact);
 
         return [artifact.id, normalizedArtifact] as const;
       })
@@ -1784,10 +1879,34 @@ export class ControlPlaneService {
   }
 
   private mapRepository(repository: typeof repositories.$inferSelect): Repository {
+    const providerSync = repository.providerSync ?? {
+      connectivityStatus: "skipped",
+      validatedAt: null,
+      defaultBranch: null,
+      branches: [],
+      providerRepoUrl: null,
+      lastError: null
+    };
+
     return {
       ...repository,
       provider: repository.provider as Repository["provider"],
-      trustLevel: repository.trustLevel as Repository["trustLevel"]
+      trustLevel: repository.trustLevel as Repository["trustLevel"],
+      providerSync: {
+        connectivityStatus: providerSync.connectivityStatus,
+        validatedAt: providerSync.validatedAt ? new Date(providerSync.validatedAt) : null,
+        defaultBranch: providerSync.defaultBranch,
+        branches: providerSync.branches,
+        providerRepoUrl: providerSync.providerRepoUrl,
+        lastError: providerSync.lastError
+      }
+    };
+  }
+
+  private mapArtifact(artifact: typeof artifacts.$inferSelect): Artifact {
+    return {
+      ...artifact,
+      kind: artifact.kind as Artifact["kind"]
     };
   }
 
@@ -1926,7 +2045,9 @@ export class ControlPlaneService {
       ...run,
       status: run.status as Run["status"],
       budgetCostUsd: centsToDollars(run.budgetCostUsd),
+      branchPublishApprovalId: run.branchPublishApprovalId ?? null,
       pullRequestStatus: run.pullRequestStatus as Run["pullRequestStatus"],
+      pullRequestApprovalId: run.pullRequestApprovalId ?? null,
       handoffStatus: run.handoffStatus as Run["handoffStatus"]
     };
   }

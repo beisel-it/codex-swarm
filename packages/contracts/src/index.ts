@@ -74,10 +74,19 @@ export const repositoryCreateSchema = z.object({
   name: z.string().min(1),
   url: z.string().url(),
   provider: z.enum(repositoryProviders).optional(),
-  defaultBranch: z.string().min(1).default("main"),
+  defaultBranch: z.string().min(1).optional(),
   localPath: z.string().min(1).optional(),
   trustLevel: z.enum(repositoryTrustLevels).default("trusted"),
   approvalProfile: z.string().min(1).optional()
+});
+
+export const repositoryProviderSyncSchema = z.object({
+  connectivityStatus: z.enum(["validated", "failed", "skipped"]),
+  validatedAt: z.date().nullable().default(null),
+  defaultBranch: z.string().min(1).nullable().default(null),
+  branches: z.array(z.string().min(1)).default([]),
+  providerRepoUrl: z.string().url().nullable().default(null),
+  lastError: z.string().min(1).nullable().default(null)
 });
 
 export const workspaceSchema = z.object({
@@ -198,9 +207,11 @@ export const repositorySchema = repositoryCreateSchema.extend({
   workspaceId: z.string().min(1),
   teamId: z.string().min(1),
   provider: z.enum(repositoryProviders),
+  defaultBranch: z.string().min(1),
   localPath: z.string().min(1).nullable(),
   trustLevel: z.enum(repositoryTrustLevels),
   approvalProfile: z.string().min(1),
+  providerSync: repositoryProviderSyncSchema,
   createdAt: z.date(),
   updatedAt: z.date()
 });
@@ -218,9 +229,11 @@ export const runSchema = runCreateSchema.extend({
   policyProfile: z.string().min(1).nullable(),
   publishedBranch: z.string().min(1).nullable(),
   branchPublishedAt: z.date().nullable(),
+  branchPublishApprovalId: z.uuid().nullable(),
   pullRequestUrl: z.string().url().nullable(),
   pullRequestNumber: z.number().int().positive().nullable(),
   pullRequestStatus: z.enum(pullRequestStatuses).nullable(),
+  pullRequestApprovalId: z.uuid().nullable(),
   handoffStatus: z.enum(handoffStatuses),
   completedAt: z.date().nullable(),
   createdBy: z.string().min(1),
@@ -312,6 +325,9 @@ export const artifactSchema = z.object({
   kind: z.enum(artifactKinds),
   path: z.string().min(1),
   contentType: z.string().min(1),
+  url: z.string().url().nullable().default(null),
+  sizeBytes: z.number().int().nonnegative().nullable().default(null),
+  sha256: z.string().min(1).nullable().default(null),
   metadata: z.record(z.string(), z.unknown()).default({}),
   createdAt: z.date()
 });
@@ -322,6 +338,7 @@ export const artifactCreateSchema = z.object({
   kind: z.enum(artifactKinds),
   path: z.string().min(1),
   contentType: z.string().min(1),
+  contentBase64: z.string().min(1).optional(),
   metadata: z.record(z.string(), z.unknown()).default({})
 });
 
@@ -530,6 +547,7 @@ export const approvalResolveSchema = z.object({
 
 export const runBranchPublishSchema = z.object({
   branchName: z.string().min(1).optional(),
+  approvalId: z.uuid().optional(),
   publishedBy: z.string().min(1),
   remoteName: z.string().min(1).default("origin"),
   commitSha: z.string().min(1).optional(),
@@ -540,6 +558,7 @@ export const runPullRequestHandoffSchema = z.object({
   title: z.string().min(1),
   body: z.string().min(1),
   createdBy: z.string().min(1),
+  approvalId: z.uuid().optional(),
   provider: z.enum(repositoryProviders).optional(),
   baseBranch: z.string().min(1).optional(),
   headBranch: z.string().min(1).optional(),

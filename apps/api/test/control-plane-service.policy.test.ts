@@ -1,7 +1,18 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { repositories, runs, teams } from "../src/db/schema.js";
 import { ControlPlaneService } from "../src/services/control-plane-service.js";
+
+vi.mock("../src/lib/repository-provider.js", () => ({
+  inspectRepositoryProvider: vi.fn(async (repository: { url: string }) => ({
+    connectivityStatus: "validated",
+    validatedAt: new Date("2026-03-28T12:00:00.000Z"),
+    defaultBranch: "main",
+    branches: ["main"],
+    providerRepoUrl: repository.url,
+    lastError: null
+  }))
+}));
 
 class FakePolicyDb {
   repositoryValues: Array<Record<string, unknown>> = [];
@@ -76,6 +87,10 @@ class FakePolicyDb {
 }
 
 describe("ControlPlaneService policy inheritance", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
   it("inherits the team policy profile for repositories without explicit overrides", async () => {
     const db = new FakePolicyDb();
     db.teamRecord.policyProfile = "breakglass";

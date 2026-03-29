@@ -5,6 +5,7 @@ import {
   approvalCreateSchema,
   approvalResolveSchema,
   agentCreateSchema,
+  artifactCreateSchema,
   cleanupJobRunSchema,
   controlPlaneMetricsSchema,
   governanceAdminReportSchema,
@@ -31,13 +32,13 @@ import {
 } from "../src/index.js";
 
 describe("repositoryCreateSchema", () => {
-  it("defaults the branch name to main", () => {
+  it("leaves branch discovery open by default", () => {
     const repository = repositoryCreateSchema.parse({
       name: "codex-swarm",
       url: "https://example.com/repo.git"
     });
 
-    expect(repository.defaultBranch).toBe("main");
+    expect(repository.defaultBranch).toBeUndefined();
   });
 });
 
@@ -206,6 +207,20 @@ describe("validationCreateSchema", () => {
     });
 
     expect(validation.artifactIds).toEqual([]);
+  });
+});
+
+describe("artifactCreateSchema", () => {
+  it("accepts optional inline content for durable storage", () => {
+    const artifact = artifactCreateSchema.parse({
+      runId: "550e8400-e29b-41d4-a716-446655440000",
+      kind: "report",
+      path: "artifacts/report.json",
+      contentType: "application/json",
+      contentBase64: "eyJvayI6dHJ1ZX0="
+    });
+
+    expect(artifact.contentBase64).toBe("eyJvayI6dHJ1ZX0=");
   });
 });
 
