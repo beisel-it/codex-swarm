@@ -1,3 +1,6 @@
+import { once } from "node:events";
+import { spawn, type ChildProcess, type SpawnOptions } from "node:child_process";
+
 export interface WorktreePathInput {
   rootDir: string;
   repositorySlug: string;
@@ -22,6 +25,30 @@ export interface CodexSessionStartInput {
 export interface CodexSessionReplyInput {
   threadId: string;
   prompt: string;
+}
+
+export interface CodexServerSupervisorState {
+  status: "idle" | "starting" | "running" | "stopped" | "failed";
+  command: string[];
+  pid: number | null;
+  startedAt: Date | null;
+  stoppedAt: Date | null;
+  exitCode: number | null;
+  signal: NodeJS.Signals | null;
+  failureReason: string | null;
+}
+
+export interface CodexServerSupervisorOptions {
+  config: CodexServerConfig;
+  command?: string[];
+  env?: NodeJS.ProcessEnv;
+  spawnImpl?: (
+    command: string,
+    args: readonly string[],
+    options: SpawnOptions
+  ) => ChildProcess;
+  onStdout?: (chunk: string) => void;
+  onStderr?: (chunk: string) => void;
 }
 
 export interface WorkerSessionRecoveryCandidate {
@@ -89,6 +116,166 @@ export function buildCodexServerCommand(config: CodexServerConfig) {
   }
 
   return command;
+}
+
+function createIdleSupervisorState(command: string[]): CodexServerSupervisorState {
+  return {
+    status: "idle",
+    command,
+    pid: null,
+    startedAt: null,
+    stoppedAt: null,
+    exitCode: null,
+    signal: null,
+    failureReason: null
+  };
+}
+
+export class CodexServerSupervisor {
+  private readonly options: CodexServerSupervisorOptions;
+
+  private readonly spawnImpl: (
+    command: string,
+    args: readonly string[],
+    options: SpawnOptions
+  ) => ChildProcess;
+
+  private process: ChildProcess | null = null;
+
+  private state: CodexServerSupervisorState;
+
+  constructor(options: CodexServerSupervisorOptions) {
+    this.options = options;
+    this.spawnImpl = options.spawnImpl ?? spawn;
+    this.state = createIdleSupervisorState(options.command ?? buildCodexServerCommand(options.config));
+  }
+
+  snapshot() {
+    return {
+      ...this.state,
+      command: [...this.state.command]
+    };
+  }
+
+  isRunning() {
+    return this.state.status === "running";
+  }
+
+  async start() {
+    if (this.process && this.state.status === "running") {
+      return this.snapshot();
+    }
+
+    const command = this.options.command ?? buildCodexServerCommand(this.options.config);
+    const [executable, ...args] = command;
+
+    if (!executable) {
+      throw new Error("codex server command must include an executable");
+    }
+
+    this.state = {
+      ...createIdleSupervisorState(command),
+      status: "starting"
+    };
+
+    const child = this.spawnImpl(executable, args, {
+      cwd: this.options.config.cwd,
+      env: {
+        ...process.env,
+        ...this.options.env
+      },
+      stdio: ["ignore", "pipe", "pipe"]
+    });
+
+    this.process = child;
+
+    child.stdout?.setEncoding("utf8");
+    child.stdout?.on("data", (chunk: string | Buffer) => {
+      this.options.onStdout?.(String(chunk));
+    });
+
+    child.stderr?.setEncoding("utf8");
+    child.stderr?.on("data", (chunk: string | Buffer) => {
+      this.options.onStderr?.(String(chunk));
+    });
+
+    child.once("spawn", () => {
+      this.state = {
+        ...this.state,
+        status: "running",
+        pid: child.pid ?? null,
+        startedAt: new Date()
+      };
+    });
+
+    child.once("error", (error) => {
+      this.process = null;
+      this.state = {
+        ...this.state,
+        status: "failed",
+        pid: child.pid ?? null,
+        stoppedAt: new Date(),
+        failureReason: error.message
+      };
+    });
+
+    child.once("exit", (code, signal) => {
+      const failureReason = code && code !== 0
+        ? `codex_mcp_server_exit_${code}`
+        : null;
+
+      this.process = null;
+      this.state = {
+        ...this.state,
+        status: failureReason ? "failed" : "stopped",
+        pid: child.pid ?? this.state.pid,
+        stoppedAt: new Date(),
+        exitCode: code,
+        signal,
+        failureReason
+      };
+    });
+
+    try {
+      await Promise.race([
+        once(child, "spawn"),
+        once(child, "error").then(([error]) => {
+          throw error;
+        })
+      ]);
+    } catch (error) {
+      if (error instanceof Error) {
+        throw error;
+      }
+
+      throw new Error(String(error));
+    }
+
+    return this.snapshot();
+  }
+
+  async stop(signal: NodeJS.Signals = "SIGTERM") {
+    const child = this.process;
+
+    if (!child || child.exitCode !== null || this.state.status === "stopped" || this.state.status === "failed") {
+      return this.snapshot();
+    }
+
+    child.kill(signal);
+    await once(child, "exit");
+    return this.snapshot();
+  }
+
+  async waitForExit() {
+    const child = this.process;
+
+    if (!child || child.exitCode !== null || this.state.status === "stopped" || this.state.status === "failed") {
+      return this.snapshot();
+    }
+
+    await once(child, "exit");
+    return this.snapshot();
+  }
 }
 
 export function buildCodexSessionStartRequest(input: CodexSessionStartInput) {

@@ -5,6 +5,7 @@ import {
   buildCodexSessionReplyRequest,
   buildCodexSessionStartRequest,
   buildSessionRecoveryPlan,
+  CodexServerSupervisor,
   createWorktreePath
 } from "../src/runtime.js";
 
@@ -74,6 +75,70 @@ describe("worker runtime helpers", () => {
         prompt: "Continue the worker"
       }
     });
+  });
+
+  it("starts and stops a supervised codex server process", async () => {
+    const stdout: string[] = [];
+    let resolveReady: (() => void) | null = null;
+    const ready = new Promise<void>((resolve) => {
+      resolveReady = resolve;
+    });
+    const supervisor = new CodexServerSupervisor({
+      config: {
+        cwd: process.cwd(),
+        profile: "default",
+        sandbox: "workspace-write",
+        approvalPolicy: "on-request"
+      },
+      command: [
+        process.execPath,
+        "--input-type=module",
+        "-e",
+        "console.log('codex-mcp-server-ready'); setInterval(() => {}, 1000);"
+      ],
+      onStdout: (chunk) => {
+        stdout.push(chunk);
+
+        if (chunk.includes("codex-mcp-server-ready")) {
+          resolveReady?.();
+        }
+      }
+    });
+
+    const started = await supervisor.start();
+    expect(started.status).toBe("running");
+    expect(started.pid).toBeTypeOf("number");
+    expect(supervisor.isRunning()).toBe(true);
+
+    await ready;
+    const stopped = await supervisor.stop();
+    expect(stopped.status).toBe("stopped");
+    expect(stopped.signal).toBe("SIGTERM");
+    expect(stdout.join("")).toContain("codex-mcp-server-ready");
+  });
+
+  it("marks the supervisor failed when the codex server exits non-zero", async () => {
+    const supervisor = new CodexServerSupervisor({
+      config: {
+        cwd: process.cwd(),
+        profile: "default",
+        sandbox: "workspace-write",
+        approvalPolicy: "on-request"
+      },
+      command: [
+        process.execPath,
+        "--input-type=module",
+        "-e",
+        "process.exit(7);"
+      ]
+    });
+
+    await supervisor.start();
+    const stopped = await supervisor.waitForExit();
+
+    expect(stopped.status).toBe("failed");
+    expect(stopped.exitCode).toBe(7);
+    expect(stopped.failureReason).toBe("codex_mcp_server_exit_7");
   });
 
   it("builds a restart recovery plan for persisted sessions", () => {

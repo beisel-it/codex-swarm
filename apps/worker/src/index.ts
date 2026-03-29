@@ -1,5 +1,6 @@
 import {
   buildCodexServerCommand,
+  CodexServerSupervisor,
   buildCodexSessionReplyRequest,
   buildCodexSessionStartRequest,
   buildSessionRecoveryPlan,
@@ -22,6 +23,7 @@ import { SessionRegistry } from "./session-registry.js";
 
 export {
   buildCodexServerCommand,
+  CodexServerSupervisor,
   buildCodexSessionReplyRequest,
   buildCodexSessionStartRequest,
   buildRedisDispatchQueueKeys,
