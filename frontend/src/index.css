@@ -352,10 +352,25 @@ code {
   align-content: start;
 }
 
+.run-inventory-card {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.run-inventory-card .run-stack {
+  max-height: min(52vh, 560px);
+}
+
 .control-group {
   display: grid;
   gap: 10px;
   padding-bottom: 6px;
+}
+
+.control-group-tracks {
+  min-height: 0;
+  overflow: hidden;
 }
 
 .control-group + .control-group {
@@ -852,6 +867,37 @@ code {
   color: var(--text-subtle);
 }
 
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(18, 23, 35, 0.48);
+  backdrop-filter: blur(8px);
+}
+
+.confirm-modal {
+  width: min(100%, 420px);
+  display: grid;
+  gap: 12px;
+  padding: 18px;
+  border-radius: 6px;
+  border: 1px solid rgba(18, 23, 35, 0.12);
+  background: rgba(255, 250, 246, 0.98);
+  box-shadow: 0 24px 60px rgba(18, 23, 35, 0.24);
+}
+
+.confirm-modal h2,
+.confirm-modal p {
+  margin: 0;
+}
+
+.confirm-modal p:last-of-type {
+  color: var(--text-subtle);
+}
+
 .action-row-inline {
   margin-top: 10px;
 }
@@ -911,6 +957,11 @@ code {
 .action-button-secondary {
   background: rgba(18, 23, 35, 0.14);
   color: var(--text-strong);
+}
+
+.action-button-danger {
+  background: var(--danger);
+  color: #fff8f1;
 }
 
 .action-button:hover,

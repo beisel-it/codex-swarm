@@ -58,6 +58,10 @@ type TeamTemplate = {
   members: TeamTemplateMember[]
 }
 
+type PendingDeleteAction =
+  | { kind: 'repository'; id: string; label: string }
+  | { kind: 'run'; id: string; label: string }
+
 type Repository = {
   id: string
   name: string
@@ -1845,6 +1849,7 @@ function App() {
   const [runFormNotice, setRunFormNotice] = useState('')
   const [repoFormNotice, setRepoFormNotice] = useState('')
   const [highlightedPanel, setHighlightedPanel] = useState<'run' | 'repo' | null>(null)
+  const [pendingDeleteAction, setPendingDeleteAction] = useState<PendingDeleteAction | null>(null)
   const [viewportWidth, setViewportWidth] = useState(() => {
     if (typeof window === 'undefined') {
       return 1280
@@ -2458,21 +2463,22 @@ function App() {
   }
 
   async function handleDeleteRepository(repository: Repository) {
-    if (!window.confirm(`Delete repository “${repository.name}”?`)) {
-      return
-    }
+    setPendingDeleteAction({ kind: 'repository', id: repository.id, label: repository.name })
+  }
 
+  async function confirmDeleteRepository(repositoryId: string) {
     setActionPending(true)
 
     try {
-      await deleteRepository(repository.id)
-      if (editingRepositoryId === repository.id) {
+      await deleteRepository(repositoryId)
+      if (editingRepositoryId === repositoryId) {
         setEditingRepositoryId(null)
       }
       await refreshSwarmData()
     } catch (error) {
       setErrorText(error instanceof Error ? error.message : 'Unable to delete repository')
     } finally {
+      setPendingDeleteAction(null)
       setActionPending(false)
     }
   }
@@ -2499,21 +2505,22 @@ function App() {
   }
 
   async function handleDeleteRun(run: Run) {
-    if (!window.confirm(`Delete run “${run.goal}”?`)) {
-      return
-    }
+    setPendingDeleteAction({ kind: 'run', id: run.id, label: run.goal })
+  }
 
+  async function confirmDeleteRun(runId: string) {
     setActionPending(true)
 
     try {
-      await deleteRun(run.id)
-      if (editingRunId === run.id) {
+      await deleteRun(runId)
+      if (editingRunId === runId) {
         setEditingRunId(null)
       }
       await refreshSwarmData()
     } catch (error) {
       setErrorText(error instanceof Error ? error.message : 'Unable to delete run')
     } finally {
+      setPendingDeleteAction(null)
       setActionPending(false)
     }
   }
@@ -2536,6 +2543,19 @@ function App() {
 
     window.addEventListener('pointermove', handlePointerMove)
     window.addEventListener('pointerup', handlePointerUp)
+  }
+
+  async function handleConfirmDelete() {
+    if (!pendingDeleteAction) {
+      return
+    }
+
+    if (pendingDeleteAction.kind === 'repository') {
+      await confirmDeleteRepository(pendingDeleteAction.id)
+      return
+    }
+
+    await confirmDeleteRun(pendingDeleteAction.id)
   }
 
   return (
@@ -2818,7 +2838,7 @@ function App() {
               </div>
               ) : null}
             </section>
-            <section className={`control-card ${showRunInventory ? 'is-open' : 'is-collapsed'}`}>
+            <section className={`control-card run-inventory-card ${showRunInventory ? 'is-open' : 'is-collapsed'}`}>
               <div className="control-card-header">
                 <div className="control-card-heading">
                   <strong>Runs</strong>
@@ -4083,6 +4103,45 @@ function App() {
         ) : null}
       </main>
 
+      {pendingDeleteAction ? (
+        <div className="modal-backdrop" role="presentation" onClick={() => setPendingDeleteAction(null)}>
+          <div
+            className="confirm-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="confirm-delete-title"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <p className="panel-kicker">Confirm delete</p>
+            <h2 id="confirm-delete-title">
+              Delete {pendingDeleteAction.kind === 'repository' ? 'repository' : 'run'}?
+            </h2>
+            <p>
+              {pendingDeleteAction.kind === 'repository'
+                ? `This removes “${pendingDeleteAction.label}” from the workspace.`
+                : `This removes the run “${pendingDeleteAction.label}” and its run-owned records.`}
+            </p>
+            <div className="action-row">
+              <button
+                type="button"
+                className="action-button action-button-secondary"
+                onClick={() => setPendingDeleteAction(null)}
+                disabled={actionPending}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="action-button action-button-danger"
+                onClick={() => void handleConfirmDelete()}
+                disabled={actionPending}
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   )
 }
