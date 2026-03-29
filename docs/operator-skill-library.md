@@ -27,6 +27,8 @@ surfaces used by this repo:
 - [`codex-swarm-agent-coordination`](../.agents/skills/codex-swarm-agent-coordination/SKILL.md)
 - [`codex-swarm-diagnostics`](../.agents/skills/codex-swarm-diagnostics/SKILL.md)
 - [`codex-swarm-recovery`](../.agents/skills/codex-swarm-recovery/SKILL.md)
+- [Agent and Skill Authoring Guide](./agent-skill-authoring.md)
+- [Checked-in skill index](../.agents/skills/README.md)
 
 These cover the currently checked-in external-operator slice:
 
@@ -35,6 +37,7 @@ These cover the currently checked-in external-operator slice:
 - task create/update/dependency workflows
 - agent coordination and loop-control commands
 - diagnostics and recovery investigation grounded in the live product surfaces
+- safe extension of the checked-in agent and skill pack
 
 ## How to operate codex-swarm with this pack
 
@@ -55,6 +58,9 @@ These cover the currently checked-in external-operator slice:
    control to live product state:
    - `codex-swarm-diagnostics`
    - `codex-swarm-recovery`
+7. Use the authoring pack when the goal is to extend codex-swarm itself:
+   - `docs/agent-skill-authoring.md`
+   - `.agents/skills/README.md`
 
 ## Grounded repo examples
 
@@ -86,3 +92,5 @@ The current workspace gives concrete operator anchors:
   use `codex-swarm-diagnostics`
 - Need to perform cleanup, reconciliation, restore, or upgrade recovery:
   use `codex-swarm-recovery`
+- Need to add or extend codex-swarm agents or skills:
+  use `docs/agent-skill-authoring.md` and `.agents/skills/README.md`

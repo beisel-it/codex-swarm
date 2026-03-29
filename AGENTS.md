@@ -20,11 +20,14 @@ Codex Swarm is a TypeScript monorepo for orchestrating multi-agent software deli
 - `packages/contracts`: shared Zod schemas and API contract types
 - `packages/orchestration`: execution planning and orchestration helpers
 - `.codex/agents`: starter role pack for agent runs in this repo or derived repos
-- `.agents/skills`: reusable workflow skills for planning, DAG generation, milestone validation, and PR preparation
+- `.agents/skills`: reusable workflow skills for planning, DAG generation, milestone validation, PR preparation, and codex-swarm external-operator control
 - `templates/repo-profiles`: stack-specific starter profiles for onboarded repos
 
 ## Coordination
 
 - Use the `.codex/agents` pack when bootstrapping a new run.
 - Use the `.agents/skills` library when the task matches a documented workflow.
+- For external Codex operation of this repo, start with `docs/operator-skill-library.md`
+  and `.agents/skills/README.md`, then select the codex-swarm-specific skill
+  that matches the requested control action.
 - Prefer stack templates in `templates/repo-profiles` over ad hoc repo setup.

@@ -1,53 +1,57 @@
-# codex-swarm external operator skill index
+# Codex Swarm Skill Library
 
-This is the checked-in Codex skill library for operating the `codex-swarm`
-product and workspace from the outside.
+This directory contains the checked-in Codex skill library for operating and
+extending `codex-swarm`.
 
-These skills are codex-swarm-specific. They are not generic ClawTeam primers.
-They assume the operator is driving this repository and product through the
-actual repo surfaces:
+## Skill groups
 
-- `clawteam` task, board, inbox, coordination, and lifecycle commands
-- repo docs such as `PRD.md`, `ROADMAP.md`, `.swarm/status.md`, and
-  `docs/architecture/*.md`
-- workspace verification commands such as `corepack pnpm --dir ... test`
-
-## Current control-skill pack
+### External operator skills
 
 - `codex-swarm-board-triage`
-  Inspect the live `codex-swarm` board, reduce the queue, and identify the next
-  unblockers.
 - `codex-swarm-inbox-inspection`
-  Inspect or consume agent inbox traffic without losing messages.
 - `codex-swarm-task-control`
-  Create, update, reassign, and rewire task dependencies with explicit task IDs.
 - `codex-swarm-agent-coordination`
-  Send handoffs, run conflict checks, checkpoint workspaces, save sessions,
-  report cost, and manage idle-loop transitions.
 - `codex-swarm-diagnostics`
-  Diagnose Codex Swarm health, metrics drift, queue pressure, run-state
-  failures, and worker-node issues through the live repo surfaces.
 - `codex-swarm-recovery`
-  Drive cleanup dry runs, worker reconciliation, restore or DR steps, and
-  post-recovery verification through the checked-in runbooks.
 
-## How to use this pack
+These are the M8 codex-swarm-specific skills for operating the workspace from
+the outside.
 
-1. Read [docs/operator-skill-library.md](../../docs/operator-skill-library.md)
-   for repo-specific operator guidance.
-2. Select the skill that matches the requested control action.
-3. Use `codex-swarm` as the team name unless the user explicitly says otherwise.
-4. Inspect current state before mutating it:
-   `clawteam board show codex-swarm`
-   `clawteam task list codex-swarm --status in_progress`
-   `clawteam inbox peek codex-swarm --agent <agent>`
-5. Report exact task IDs, statuses, blockers, and command outcomes back to the
-   user.
+### Workflow execution skills
 
-## Guardrails
+- `plan-from-spec`
+- `create-task-dag`
+- `validate-milestone`
+- `prepare-pr`
 
-- Do not consume inbox messages with `inbox receive` unless the workflow needs
-  destructive reads.
-- Do not mutate task dependencies without checking current board or task state.
-- Do not describe commands abstractly when a concrete codex-swarm command
-  sequence exists.
+These are reusable execution workflows used inside repo delivery work.
+
+## How to add a new codex-swarm skill
+
+1. Create a new directory under `.agents/skills/<skill-name>/`.
+2. Add a `SKILL.md` with:
+   - purpose
+   - trigger conditions
+   - required inputs
+   - concrete commands or workflow steps
+   - expected outputs
+3. Reference only real codex-swarm control surfaces:
+   - `clawteam` board/inbox/task/workspace commands
+   - repo docs under `docs/`
+   - local verification commands such as `corepack pnpm ...`
+4. Add the skill to [docs/operator-skill-library.md](../../docs/operator-skill-library.md)
+   if it is part of the external operator pack.
+5. Add or update an example workflow in
+   [docs/operator-skill-workflows.md](../../docs/operator-skill-workflows.md)
+   if the new skill changes operator guidance.
+
+## How to evaluate whether a skill belongs here
+
+Add the skill if it teaches Codex how to operate `codex-swarm` or a repo
+managed by `codex-swarm` through concrete, repeatable workflows.
+
+Do not add the skill if it is only:
+
+- generic product advice
+- generic ClawTeam usage unrelated to codex-swarm
+- generic coding help with no codex-swarm workflow tie-in
