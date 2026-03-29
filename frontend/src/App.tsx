@@ -1718,6 +1718,8 @@ function App() {
   const [taskDraftTitle, setTaskDraftTitle] = useState('')
   const [taskDraftDescription, setTaskDraftDescription] = useState('')
   const [taskDraftRole, setTaskDraftRole] = useState('developer')
+  const [showRepoControls, setShowRepoControls] = useState(false)
+  const [showRunControls, setShowRunControls] = useState(false)
 
   const deferredTaskQuery = useDeferredValue(taskQuery)
 
@@ -2140,65 +2142,93 @@ function App() {
           </div>
 
           <div className="control-stack">
-            <section className="control-card">
+            <section className={`control-card ${showRepoControls ? 'is-open' : 'is-collapsed'}`}>
               <div className="control-card-header">
-                <strong>Register repository</strong>
-                <span>Real API</span>
+                <div className="control-card-heading">
+                  <strong>Register repository</strong>
+                  <span>Real API</span>
+                </div>
+                <button
+                  type="button"
+                  className="control-toggle"
+                  aria-expanded={showRepoControls}
+                  onClick={() => setShowRepoControls((current) => !current)}
+                >
+                  {showRepoControls ? 'Hide' : 'Show'}
+                </button>
               </div>
-              <label className="control-field">
-                <span>Name</span>
-                <input value={repoDraftName} onChange={(event) => setRepoDraftName(event.target.value)} />
-              </label>
-              <label className="control-field">
-                <span>Remote URL</span>
-                <input value={repoDraftUrl} onChange={(event) => setRepoDraftUrl(event.target.value)} />
-              </label>
-              <label className="control-field">
-                <span>Provider</span>
-                <select value={repoDraftProvider} onChange={(event) => setRepoDraftProvider(event.target.value as RepositoryProvider)}>
-                  <option value="github">GitHub</option>
-                  <option value="gitlab">GitLab</option>
-                  <option value="local">Local</option>
-                  <option value="other">Other</option>
-                </select>
-              </label>
-              <button type="button" className="action-button" onClick={handleCreateRepository} disabled={actionPending}>
-                Register repository
-              </button>
+              {showRepoControls ? (
+                <>
+                  <label className="control-field">
+                    <span>Name</span>
+                    <input value={repoDraftName} onChange={(event) => setRepoDraftName(event.target.value)} />
+                  </label>
+                  <label className="control-field">
+                    <span>Remote URL</span>
+                    <input value={repoDraftUrl} onChange={(event) => setRepoDraftUrl(event.target.value)} />
+                  </label>
+                  <label className="control-field">
+                    <span>Provider</span>
+                    <select value={repoDraftProvider} onChange={(event) => setRepoDraftProvider(event.target.value as RepositoryProvider)}>
+                      <option value="github">GitHub</option>
+                      <option value="gitlab">GitLab</option>
+                      <option value="local">Local</option>
+                      <option value="other">Other</option>
+                    </select>
+                  </label>
+                  <button type="button" className="action-button" onClick={handleCreateRepository} disabled={actionPending}>
+                    Register repository
+                  </button>
+                </>
+              ) : null}
             </section>
 
-            <section className="control-card">
+            <section className={`control-card ${showRunControls ? 'is-open' : 'is-collapsed'}`}>
               <div className="control-card-header">
-                <strong>Create and start run</strong>
-                <span>Live orchestration</span>
-              </div>
-              <label className="control-field">
-                <span>Repository</span>
-                <select value={runDraftRepositoryId} onChange={(event) => setRunDraftRepositoryId(event.target.value)}>
-                  <option value="">Select repository</option>
-                  {data.repositories.map((repository) => (
-                    <option key={repository.id} value={repository.id}>
-                      {repository.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="control-field">
-                <span>Goal</span>
-                <textarea value={runDraftGoal} onChange={(event) => setRunDraftGoal(event.target.value)} rows={4} />
-              </label>
-              <label className="control-field">
-                <span>Branch</span>
-                <input value={runDraftBranchName} onChange={(event) => setRunDraftBranchName(event.target.value)} />
-              </label>
-              <div className="action-row">
-                <button type="button" className="action-button action-button-secondary" onClick={() => handleCreateRun(false)} disabled={actionPending}>
-                  Create only
-                </button>
-                <button type="button" className="action-button" onClick={() => handleCreateRun(true)} disabled={actionPending}>
-                  Create and start
+                <div className="control-card-heading">
+                  <strong>Create and start run</strong>
+                  <span>Live orchestration</span>
+                </div>
+                <button
+                  type="button"
+                  className="control-toggle"
+                  aria-expanded={showRunControls}
+                  onClick={() => setShowRunControls((current) => !current)}
+                >
+                  {showRunControls ? 'Hide' : 'Show'}
                 </button>
               </div>
+              {showRunControls ? (
+                <>
+                  <label className="control-field">
+                    <span>Repository</span>
+                    <select value={runDraftRepositoryId} onChange={(event) => setRunDraftRepositoryId(event.target.value)}>
+                      <option value="">Select repository</option>
+                      {data.repositories.map((repository) => (
+                        <option key={repository.id} value={repository.id}>
+                          {repository.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="control-field">
+                    <span>Goal</span>
+                    <textarea value={runDraftGoal} onChange={(event) => setRunDraftGoal(event.target.value)} rows={4} />
+                  </label>
+                  <label className="control-field">
+                    <span>Branch</span>
+                    <input value={runDraftBranchName} onChange={(event) => setRunDraftBranchName(event.target.value)} />
+                  </label>
+                  <div className="action-row">
+                    <button type="button" className="action-button action-button-secondary" onClick={() => handleCreateRun(false)} disabled={actionPending}>
+                      Create only
+                    </button>
+                    <button type="button" className="action-button" onClick={() => handleCreateRun(true)} disabled={actionPending}>
+                      Create and start
+                    </button>
+                  </div>
+                </>
+              ) : null}
             </section>
           </div>
 
