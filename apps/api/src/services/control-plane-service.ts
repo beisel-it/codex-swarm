@@ -352,6 +352,57 @@ function isApprovedHandoffApproval(approval: Approval | null | undefined, kind: 
   return approval?.runId === runId && approval.kind === kind && approval.status === "approved";
 }
 
+const policyExceptionDecisionSchema = z.object({
+  policyKey: z.enum(["run_budget"]),
+  trigger: z.enum(["budget_cap_exceeded"]),
+  targetType: z.enum(["run"]),
+  targetId: z.uuid(),
+  requestedAction: z.enum(["continue_run"]),
+  decision: z.enum(["block_pending_approval"]),
+  policyProfile: z.string().min(1),
+  checkpointSource: z.string().min(1),
+  observed: z.object({
+    totalTokens: z.number().nonnegative().nullable().default(null),
+    totalCostUsd: z.number().nonnegative().nullable().default(null)
+  }),
+  threshold: z.object({
+    budgetTokens: z.number().int().positive().nullable().default(null),
+    budgetCostUsd: z.number().nonnegative().nullable().default(null)
+  })
+});
+
+const policyExceptionRequestPayloadSchema = z.object({
+  summary: z.string().min(1),
+  policyDecision: policyExceptionDecisionSchema,
+  enforcement: z.object({
+    onApproval: z.enum(["continue_run"]),
+    onRejection: z.enum(["remain_blocked"])
+  })
+});
+
+const policyExceptionResolutionPayloadSchema = z.object({
+  outcome: z.enum(["approved_exception", "rejected_exception"]),
+  rationale: z.string().min(1).optional(),
+  feedback: z.string().nullable().default(null)
+});
+
+function isBudgetPolicyExceptionApproval(approval: Pick<Approval, "kind" | "requestedPayload" | "runId">, runId: string) {
+  if (approval.kind !== "policy_exception" || approval.runId !== runId) {
+    return false;
+  }
+
+  const parsedPayload = policyExceptionRequestPayloadSchema.safeParse(approval.requestedPayload);
+
+  if (parsedPayload.success) {
+    return parsedPayload.data.policyDecision.policyKey === "run_budget"
+      && parsedPayload.data.policyDecision.targetId === runId;
+  }
+
+  return approval.requestedPayload
+    && typeof approval.requestedPayload === "object"
+    && (approval.requestedPayload as Record<string, unknown>).reason === "budget_cap_exceeded";
+}
+
 function inferRepositoryProvider(url: string): Repository["provider"] {
   const normalizedUrl = url.toLowerCase();
 
@@ -695,14 +746,10 @@ export class ControlPlaneService {
       .orderBy(asc(approvals.createdAt));
     const approvedBudgetException = policyExceptionRows.find((approval) =>
       approval.status === "approved"
-      && approval.requestedPayload
-      && typeof approval.requestedPayload === "object"
-      && (approval.requestedPayload as Record<string, unknown>).reason === "budget_cap_exceeded");
+      && isBudgetPolicyExceptionApproval(mapApprovalRecord(approval), runId));
     const pendingBudgetException = policyExceptionRows.find((approval) =>
       approval.status === "pending"
-      && approval.requestedPayload
-      && typeof approval.requestedPayload === "object"
-      && (approval.requestedPayload as Record<string, unknown>).reason === "budget_cap_exceeded");
+      && isBudgetPolicyExceptionApproval(mapApprovalRecord(approval), runId));
 
     let decision: RunBudgetState["decision"] = "within_budget";
     let continueAllowed = true;
@@ -725,13 +772,29 @@ export class ControlPlaneService {
           kind: "policy_exception",
           status: "pending",
           requestedPayload: {
-            reason: "budget_cap_exceeded",
-            source: input.source,
-            budgetTokens: run.budgetTokens,
-            budgetCostUsd,
-            tokensUsedTotal,
-            costUsdTotal,
-            exceeded
+            summary: "Run execution exceeded its configured budget and requires a policy exception review to continue.",
+            policyDecision: {
+              policyKey: "run_budget",
+              trigger: "budget_cap_exceeded",
+              targetType: "run",
+              targetId: runId,
+              requestedAction: "continue_run",
+              decision: "block_pending_approval",
+              policyProfile: run.policyProfile,
+              checkpointSource: input.source,
+              observed: {
+                totalTokens: tokensUsedTotal,
+                totalCostUsd: costUsdTotal
+              },
+              threshold: {
+                budgetTokens: run.budgetTokens,
+                budgetCostUsd
+              }
+            },
+            enforcement: {
+              onApproval: "continue_run",
+              onRejection: "remain_blocked"
+            }
           },
           resolutionPayload: {},
           requestedBy: "system:budget-guard",
@@ -1101,6 +1164,18 @@ export class ControlPlaneService {
       await this.assertTaskExists(input.taskId, access);
     }
 
+    if (input.kind === "policy_exception") {
+      const parsedPolicyException = policyExceptionRequestPayloadSchema.safeParse(input.requestedPayload);
+
+      if (!parsedPolicyException.success) {
+        throw new HttpError(400, "policy_exception approvals require a structured policy decision payload");
+      }
+
+      if (parsedPolicyException.data.policyDecision.targetId !== input.runId) {
+        throw new HttpError(409, "policy_exception approval targetId must match the approval runId");
+      }
+    }
+
     const now = this.clock.now();
     const delegation = input.delegation
       ? {
@@ -1166,16 +1241,32 @@ export class ControlPlaneService {
   }
 
   async resolveApproval(approvalId: string, input: ApprovalResolve, access?: AccessBoundary) {
-    await this.getApproval(approvalId, access);
+    const existingApproval = await this.getApproval(approvalId, access);
+    const resolutionPayload = {
+      ...input.resolutionPayload,
+      feedback: input.feedback ?? null
+    };
+
+    if (existingApproval.kind === "policy_exception") {
+      const parsedResolution = policyExceptionResolutionPayloadSchema.safeParse(resolutionPayload);
+
+      if (!parsedResolution.success) {
+        throw new HttpError(400, "policy_exception approvals require an explicit resolution outcome");
+      }
+
+      const expectedOutcome = input.status === "approved" ? "approved_exception" : "rejected_exception";
+
+      if (parsedResolution.data.outcome !== expectedOutcome) {
+        throw new HttpError(409, `policy_exception resolution outcome must be ${expectedOutcome} when status is ${input.status}`);
+      }
+    }
+
     const now = this.clock.now();
 
     const [approval] = await this.db.update(approvals).set({
       status: input.status,
       resolver: input.resolver,
-      resolutionPayload: {
-        ...input.resolutionPayload,
-        feedback: input.feedback ?? null
-      },
+      resolutionPayload,
       resolvedAt: now,
       updatedAt: now
     }).where(eq(approvals.id, approvalId)).returning();

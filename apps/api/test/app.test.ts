@@ -998,12 +998,14 @@ class FakeVerticalSliceControlPlane {
       approval.runId === runId
       && approval.kind === "policy_exception"
       && approval.status === "approved"
-      && approval.requestedPayload?.reason === "budget_cap_exceeded");
+      && approval.requestedPayload?.policyDecision?.policyKey === "run_budget"
+      && approval.requestedPayload?.policyDecision?.targetId === runId);
     const pendingException = this.approvals.find((approval) =>
       approval.runId === runId
       && approval.kind === "policy_exception"
       && approval.status === "pending"
-      && approval.requestedPayload?.reason === "budget_cap_exceeded");
+      && approval.requestedPayload?.policyDecision?.policyKey === "run_budget"
+      && approval.requestedPayload?.policyDecision?.targetId === runId);
 
     let decision = "within_budget";
     let continueAllowed = true;
@@ -1021,13 +1023,29 @@ class FakeVerticalSliceControlPlane {
           kind: "policy_exception",
           requestedBy: "system:budget-guard",
           requestedPayload: {
-            reason: "budget_cap_exceeded",
-            source: input.source,
-            budgetTokens: run.budgetTokens,
-            budgetCostUsd: run.budgetCostUsd,
-            tokensUsedTotal,
-            costUsdTotal,
-            exceeded
+            summary: "Run execution exceeded its configured budget and requires a policy exception review to continue.",
+            policyDecision: {
+              policyKey: "run_budget",
+              trigger: "budget_cap_exceeded",
+              targetType: "run",
+              targetId: runId,
+              requestedAction: "continue_run",
+              decision: "block_pending_approval",
+              policyProfile: run.policyProfile,
+              checkpointSource: input.source,
+              observed: {
+                totalTokens: tokensUsedTotal,
+                totalCostUsd: costUsdTotal
+              },
+              threshold: {
+                budgetTokens: run.budgetTokens,
+                budgetCostUsd: run.budgetCostUsd
+              }
+            },
+            enforcement: {
+              onApproval: "continue_run",
+              onRejection: "remain_blocked"
+            }
           }
         }, access);
         approvalId = approval.id;
@@ -2697,6 +2715,33 @@ describe("buildApp", () => {
         teamId: defaultBoundary.teamId
       })
     );
+
+    await app.close();
+  });
+
+  it("rejects generic policy-exception approval requests without a structured policy decision", async () => {
+    const app = await buildApp({
+      controlPlane: controlPlane as unknown as ControlPlaneService
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/v1/approvals",
+      headers: {
+        authorization: "Bearer codex-swarm-dev-token"
+      },
+      payload: {
+        runId: ids.run,
+        kind: "policy_exception",
+        requestedBy: "ignored-client-value",
+        requestedPayload: {
+          reason: "budget_cap_exceeded"
+        }
+      }
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(controlPlane.createApproval).not.toHaveBeenCalled();
 
     await app.close();
   });
@@ -5263,7 +5308,15 @@ describe("buildApp", () => {
             kind: "policy_exception",
             status: "pending",
             requestedPayload: expect.objectContaining({
-              reason: "budget_cap_exceeded"
+              policyDecision: expect.objectContaining({
+                policyKey: "run_budget",
+                trigger: "budget_cap_exceeded",
+                targetId: ids.run
+              }),
+              enforcement: expect.objectContaining({
+                onApproval: "continue_run",
+                onRejection: "remain_blocked"
+              })
             })
           })
         ])
@@ -5333,7 +5386,8 @@ describe("buildApp", () => {
         status: "approved",
         resolver: "reviewer-1",
         resolutionPayload: {
-          decision: "approved"
+          outcome: "approved_exception",
+          rationale: "Budget exception accepted for this run"
         }
       }, defaultBoundary);
 
