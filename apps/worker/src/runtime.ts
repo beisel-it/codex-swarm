@@ -1,6 +1,8 @@
 import { once } from "node:events";
 import { spawn, type ChildProcess, type SpawnOptions } from "node:child_process";
 
+import { SessionRegistry, type WorkerSessionRecord } from "./session-registry.js";
+
 export interface WorktreePathInput {
   rootDir: string;
   repositorySlug: string;
@@ -49,6 +51,32 @@ export interface CodexServerSupervisorOptions {
   ) => ChildProcess;
   onStdout?: (chunk: string) => void;
   onStderr?: (chunk: string) => void;
+}
+
+export interface CodexToolExecutionResult {
+  threadId: string;
+  output: string;
+  metadata?: Record<string, unknown>;
+}
+
+export type CodexToolRequest =
+  | ReturnType<typeof buildCodexSessionStartRequest>
+  | ReturnType<typeof buildCodexSessionReplyRequest>;
+
+export type CodexToolExecutor = (request: CodexToolRequest) => Promise<CodexToolExecutionResult>;
+
+export interface CodexSessionRuntimeOptions {
+  registry: SessionRegistry;
+  supervisor: CodexServerSupervisor;
+  executeTool: CodexToolExecutor;
+  now?: () => Date;
+}
+
+export interface CodexSessionExecutionResult {
+  request: CodexToolRequest;
+  response: CodexToolExecutionResult;
+  session: WorkerSessionRecord;
+  supervisor: CodexServerSupervisorState;
 }
 
 export interface WorkerSessionRecoveryCandidate {
@@ -154,6 +182,12 @@ export class CodexServerSupervisor {
     return {
       ...this.state,
       command: [...this.state.command]
+    };
+  }
+
+  getConfig() {
+    return {
+      ...this.options.config
     };
   }
 
@@ -275,6 +309,72 @@ export class CodexServerSupervisor {
 
     await once(child, "exit");
     return this.snapshot();
+  }
+}
+
+export class CodexSessionRuntime {
+  private readonly now: () => Date;
+
+  constructor(private readonly options: CodexSessionRuntimeOptions) {
+    this.now = options.now ?? (() => new Date());
+  }
+
+  async startSession(sessionId: string, prompt: string): Promise<CodexSessionExecutionResult> {
+    const session = this.options.registry.get(sessionId);
+    await this.options.supervisor.start();
+
+    const request = buildCodexSessionStartRequest({
+      prompt,
+      config: this.options.supervisor.getConfig()
+    });
+    const response = await this.options.executeTool(request);
+    const activated = this.options.registry.activate(session.sessionId, response.threadId);
+
+    return {
+      request,
+      response,
+      session: activated,
+      supervisor: this.options.supervisor.snapshot()
+    };
+  }
+
+  async continueSession(sessionId: string, prompt: string): Promise<CodexSessionExecutionResult> {
+    const session = this.options.registry.get(sessionId);
+
+    if (!session.threadId) {
+      throw new Error(`session ${sessionId} has no persisted threadId`);
+    }
+
+    await this.options.supervisor.start();
+
+    const request = buildCodexSessionReplyRequest({
+      threadId: session.threadId,
+      prompt
+    });
+    const response = await this.options.executeTool(request);
+
+    if (response.threadId !== session.threadId) {
+      throw new Error(`session ${sessionId} reply returned mismatched threadId ${response.threadId}`);
+    }
+
+    const updated = this.options.registry.heartbeat(sessionId, this.now());
+
+    return {
+      request,
+      response,
+      session: updated,
+      supervisor: this.options.supervisor.snapshot()
+    };
+  }
+
+  async stopSession(sessionId: string) {
+    const session = this.options.registry.get(sessionId);
+    await this.options.supervisor.stop();
+
+    return {
+      session: this.options.registry.stop(session.sessionId),
+      supervisor: this.options.supervisor.snapshot()
+    };
   }
 }
 

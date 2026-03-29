@@ -5,9 +5,11 @@ import {
   buildCodexSessionReplyRequest,
   buildCodexSessionStartRequest,
   buildSessionRecoveryPlan,
+  CodexSessionRuntime,
   CodexServerSupervisor,
   createWorktreePath
 } from "../src/runtime.js";
+import { SessionRegistry } from "../src/session-registry.js";
 
 describe("worker runtime helpers", () => {
   it("creates deterministic sanitized worktree paths", () => {
@@ -139,6 +141,82 @@ describe("worker runtime helpers", () => {
     expect(stopped.status).toBe("failed");
     expect(stopped.exitCode).toBe(7);
     expect(stopped.failureReason).toBe("codex_mcp_server_exit_7");
+  });
+
+  it("executes codex start and reply flows with persisted thread reuse", async () => {
+    const registry = new SessionRegistry();
+    registry.seed({
+      sessionId: "session-001",
+      runId: "run-001",
+      agentId: "agent-001",
+      worktreePath: createWorktreePath({
+        rootDir: ".swarm/worktrees",
+        repositorySlug: "codex-swarm",
+        runId: "run-001",
+        agentId: "agent-001"
+      })
+    });
+
+    const requests: Array<{ tool: string; threadId?: string }> = [];
+    const supervisor = new CodexServerSupervisor({
+      config: {
+        cwd: process.cwd(),
+        profile: "default",
+        sandbox: "workspace-write",
+        approvalPolicy: "on-request",
+        includePlanTool: true
+      },
+      command: [
+        process.execPath,
+        "--input-type=module",
+        "-e",
+        "setInterval(() => {}, 1000);"
+      ]
+    });
+    const runtime = new CodexSessionRuntime({
+      registry,
+      supervisor,
+      executeTool: async (request) => {
+        requests.push(request.tool === "codex-reply"
+          ? {
+              tool: request.tool,
+              threadId: request.input.threadId
+            }
+          : {
+              tool: request.tool
+            });
+
+        return {
+          threadId: "thread-001",
+          output: request.tool === "codex" ? "started" : "continued"
+        };
+      },
+      now: () => new Date("2026-03-29T00:00:00.000Z")
+    });
+
+    const started = await runtime.startSession("session-001", "Start the worker");
+    expect(started.request.tool).toBe("codex");
+    expect(started.session.threadId).toBe("thread-001");
+    expect(started.supervisor.status).toBe("running");
+
+    const continued = await runtime.continueSession("session-001", "Continue the worker");
+    expect(continued.request.tool).toBe("codex-reply");
+    expect(continued.session.threadId).toBe("thread-001");
+    expect(continued.session.lastHeartbeatAt?.toISOString()).toBe("2026-03-29T00:00:00.000Z");
+
+    const stopped = await runtime.stopSession("session-001");
+    expect(stopped.session.state).toBe("stopped");
+    expect(stopped.supervisor.status).toBe("stopped");
+
+    expect(requests).toEqual([
+      {
+        tool: "codex"
+      },
+      {
+        tool: "codex-reply",
+        threadId: "thread-001"
+      }
+    ]);
   });
 
   it("builds a restart recovery plan for persisted sessions", () => {
