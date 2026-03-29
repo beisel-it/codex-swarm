@@ -1,10 +1,12 @@
 import {
   buildCodexServerCommand,
+  buildPlanMarkdown,
   CodexSessionRuntime,
   CodexServerSupervisor,
   buildCodexSessionReplyRequest,
   buildCodexSessionStartRequest,
   buildSessionRecoveryPlan,
+  materializePlanArtifact,
   createWorktreePath
 } from "./runtime.js";
 import {
@@ -24,6 +26,7 @@ import { SessionRegistry } from "./session-registry.js";
 
 export {
   buildCodexServerCommand,
+  buildPlanMarkdown,
   CodexSessionRuntime,
   CodexServerSupervisor,
   buildCodexSessionReplyRequest,
@@ -38,6 +41,7 @@ export {
   deserializeDispatchAssignment,
   deserializeDispatchLease,
   evaluateWorkerRuntimeDependencies,
+  materializePlanArtifact,
   RedisDispatchQueue,
   SessionRegistry,
   serializeDispatchAssignment,

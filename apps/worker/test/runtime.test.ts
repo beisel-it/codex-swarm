@@ -1,12 +1,17 @@
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 import { describe, expect, it } from "vitest";
 
 import {
   buildCodexServerCommand,
+  buildPlanMarkdown,
   buildCodexSessionReplyRequest,
   buildCodexSessionStartRequest,
   buildSessionRecoveryPlan,
   CodexSessionRuntime,
   CodexServerSupervisor,
+  materializePlanArtifact,
   createWorktreePath
 } from "../src/runtime.js";
 import { SessionRegistry } from "../src/session-registry.js";
@@ -77,6 +82,42 @@ describe("worker runtime helpers", () => {
         prompt: "Continue the worker"
       }
     });
+  });
+
+  it("renders and writes a durable .swarm/plan.md artifact", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "codex-swarm-plan-"));
+
+    try {
+      const artifact = await materializePlanArtifact({
+        cwd,
+        plan: {
+          goal: "Ship the first hello-world slice",
+          summary: "Create a minimal plan artifact for review",
+          tasks: [
+            {
+              title: "Define the control-plane API",
+              role: "backend-developer",
+              description: "Document and expose the first run endpoints",
+              acceptanceCriteria: ["run creation is routable", "contracts are typed"]
+            },
+            {
+              title: "Render the board shell",
+              role: "frontend-developer"
+            }
+          ]
+        }
+      });
+
+      expect(artifact.relativePath).toBe(".swarm/plan.md");
+      expect(artifact.path).toBe(join(cwd, ".swarm/plan.md"));
+      expect(artifact.markdown).toContain("# Swarm Plan");
+      expect(artifact.markdown).toContain("1. Define the control-plane API");
+
+      const persisted = await readFile(artifact.path, "utf8");
+      expect(persisted).toBe(artifact.markdown);
+    } finally {
+      await rm(cwd, { recursive: true, force: true });
+    }
   });
 
   it("starts and stops a supervised codex server process", async () => {

@@ -1,7 +1,12 @@
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  buildPlanMarkdown,
   CodexSessionRuntime,
   CodexServerSupervisor,
+  materializePlanArtifact,
   SessionRegistry
 } from "@codex-swarm/worker";
 import type { ControlPlaneService } from "../src/services/control-plane-service.js";
@@ -128,6 +133,20 @@ class FakeVerticalSliceControlPlane {
     }
   ];
   private readonly workerDispatchAssignments: any[] = [];
+  private readonly artifacts = [
+    {
+      id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+      runId: ids.run,
+      taskId: ids.taskA,
+      kind: "report",
+      path: "artifacts/validations/typecheck.json",
+      contentType: "application/json",
+      metadata: {
+        suite: "typecheck"
+      },
+      createdAt: new Date()
+    }
+  ];
 
   private assertBoundary(entity: { workspaceId: string; teamId: string }, access?: any) {
     if (!access) {
@@ -791,25 +810,14 @@ class FakeVerticalSliceControlPlane {
   }
 
   async listArtifacts(_runId?: string, _access?: any) {
-    return [
-      {
-        id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
-        runId: ids.run,
-        taskId: ids.taskA,
-        kind: "report",
-        path: "artifacts/validations/typecheck.json",
-        contentType: "application/json",
-        metadata: {
-          suite: "typecheck"
-        },
-        createdAt: new Date()
-      }
-    ];
+    return _runId
+      ? this.artifacts.filter((artifact) => artifact.runId === _runId)
+      : this.artifacts;
   }
 
   async createArtifact(input: any, access?: any) {
     await this.getRun(input.runId, access);
-    return {
+    const artifact = {
       id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
       runId: input.runId,
       taskId: input.taskId ?? null,
@@ -819,6 +827,9 @@ class FakeVerticalSliceControlPlane {
       metadata: input.metadata ?? {},
       createdAt: new Date()
     };
+
+    this.artifacts.push(artifact);
+    return artifact;
   }
 
   async exportRunAudit(runId: string, _exportedBy?: any, _retentionPolicy?: any, access?: any) {
@@ -3112,6 +3123,183 @@ describe("buildApp", () => {
 
     await launchRuntime.stopSession(ids.session);
     await app.close();
+  });
+
+  it("persists a generated .swarm/plan.md into run state and artifact history", async () => {
+    const app = await buildApp({
+      config: getConfig({
+        NODE_ENV: "test",
+        PORT: 3000,
+        HOST: "127.0.0.1",
+        DATABASE_URL: "postgres://unused/test",
+        DEV_AUTH_TOKEN: "test-token",
+        OPENAI_TRACING_DISABLED: true
+      }),
+      controlPlane: new FakeVerticalSliceControlPlane() as unknown as ControlPlaneService
+    });
+
+    const headers = {
+      authorization: "Bearer test-token"
+    };
+    const cwd = await mkdtemp(join(tmpdir(), "codex-swarm-plan-proof-"));
+
+    try {
+      const createRunResponse = await app.inject({
+        method: "POST",
+        url: "/api/v1/runs",
+        headers,
+        payload: {
+          repositoryId: ids.repository,
+          goal: "Generate and persist a leader plan",
+          metadata: {
+            scenario: "plan-proof"
+          }
+        }
+      });
+
+      expect(createRunResponse.statusCode).toBe(201);
+
+      const createTaskAResponse = await app.inject({
+        method: "POST",
+        url: "/api/v1/tasks",
+        headers,
+        payload: {
+          runId: ids.run,
+          title: "Define API scope",
+          description: "Establish the first backend deliverable",
+          role: "backend-developer",
+          priority: 2,
+          dependencyIds: [],
+          acceptanceCriteria: ["control-plane route exists"]
+        }
+      });
+
+      const createTaskBResponse = await app.inject({
+        method: "POST",
+        url: "/api/v1/tasks",
+        headers,
+        payload: {
+          runId: ids.run,
+          title: "Render review board",
+          description: "Expose plan progress to reviewers",
+          role: "frontend-developer",
+          priority: 3,
+          dependencyIds: [ids.taskA],
+          acceptanceCriteria: ["board shows the task graph"]
+        }
+      });
+
+      expect(createTaskAResponse.statusCode).toBe(201);
+      expect(createTaskBResponse.statusCode).toBe(201);
+
+      const markdown = buildPlanMarkdown({
+        goal: "Generate and persist a leader plan",
+        summary: "Leader emits the first durable plan artifact",
+        tasks: [
+          {
+            title: "Define API scope",
+            role: "backend-developer",
+            description: "Establish the first backend deliverable",
+            acceptanceCriteria: ["control-plane route exists"]
+          },
+          {
+            title: "Render review board",
+            role: "frontend-developer",
+            description: "Expose plan progress to reviewers",
+            acceptanceCriteria: ["board shows the task graph"]
+          }
+        ]
+      });
+
+      const planArtifact = await materializePlanArtifact({
+        cwd,
+        plan: {
+          goal: "Generate and persist a leader plan",
+          summary: "Leader emits the first durable plan artifact",
+          tasks: [
+            {
+              title: "Define API scope",
+              role: "backend-developer",
+              description: "Establish the first backend deliverable",
+              acceptanceCriteria: ["control-plane route exists"]
+            },
+            {
+              title: "Render review board",
+              role: "frontend-developer",
+              description: "Expose plan progress to reviewers",
+              acceptanceCriteria: ["board shows the task graph"]
+            }
+          ]
+        }
+      });
+
+      expect(planArtifact.path).toBe(join(cwd, ".swarm/plan.md"));
+      expect(await readFile(planArtifact.path, "utf8")).toBe(markdown);
+
+      const createArtifactResponse = await app.inject({
+        method: "POST",
+        url: "/api/v1/artifacts",
+        headers,
+        payload: {
+          runId: ids.run,
+          kind: "plan",
+          path: planArtifact.path,
+          contentType: "text/markdown",
+          metadata: {
+            relativePath: planArtifact.relativePath,
+            source: "leader-plan"
+          }
+        }
+      });
+
+      expect(createArtifactResponse.statusCode).toBe(201);
+
+      const updateRunResponse = await app.inject({
+        method: "PATCH",
+        url: `/api/v1/runs/${ids.run}/status`,
+        headers,
+        payload: {
+          status: "planning",
+          planArtifactPath: planArtifact.path
+        }
+      });
+
+      expect(updateRunResponse.statusCode).toBe(200);
+
+      const getRunResponse = await app.inject({
+        method: "GET",
+        url: `/api/v1/runs/${ids.run}`,
+        headers
+      });
+      const listArtifactsResponse = await app.inject({
+        method: "GET",
+        url: `/api/v1/artifacts?runId=${ids.run}`,
+        headers
+      });
+
+      expect(getRunResponse.statusCode).toBe(200);
+      expect(getRunResponse.json()).toMatchObject({
+        id: ids.run,
+        status: "planning",
+        planArtifactPath: planArtifact.path
+      });
+      expect(listArtifactsResponse.statusCode).toBe(200);
+      expect(listArtifactsResponse.json()).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          runId: ids.run,
+          kind: "plan",
+          path: planArtifact.path,
+          contentType: "text/markdown",
+          metadata: {
+            relativePath: ".swarm/plan.md",
+            source: "leader-plan"
+          }
+        })
+      ]));
+    } finally {
+      await rm(cwd, { recursive: true, force: true });
+      await app.close();
+    }
   });
 
   it("allows members to create runs and request approvals", async () => {

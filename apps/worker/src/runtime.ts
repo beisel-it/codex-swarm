@@ -1,4 +1,6 @@
 import { once } from "node:events";
+import { mkdir, writeFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import { spawn, type ChildProcess, type SpawnOptions } from "node:child_process";
 
 import { SessionRegistry, type WorkerSessionRecord } from "./session-registry.js";
@@ -59,6 +61,19 @@ export interface CodexToolExecutionResult {
   metadata?: Record<string, unknown>;
 }
 
+export interface PlanTaskDocument {
+  title: string;
+  role: string;
+  description?: string;
+  acceptanceCriteria?: string[];
+}
+
+export interface PlanDocumentInput {
+  goal: string;
+  summary?: string;
+  tasks: PlanTaskDocument[];
+}
+
 export type CodexToolRequest =
   | ReturnType<typeof buildCodexSessionStartRequest>
   | ReturnType<typeof buildCodexSessionReplyRequest>;
@@ -77,6 +92,12 @@ export interface CodexSessionExecutionResult {
   response: CodexToolExecutionResult;
   session: WorkerSessionRecord;
   supervisor: CodexServerSupervisorState;
+}
+
+export interface PlanMaterializationInput {
+  cwd: string;
+  plan: PlanDocumentInput;
+  relativePath?: string;
 }
 
 export interface WorkerSessionRecoveryCandidate {
@@ -108,6 +129,55 @@ function sanitizePathSegment(value: string) {
     .replace(/[^a-z0-9-_]+/g, "-")
     .replace(/-+/g, "-")
     .replace(/^-|-$/g, "");
+}
+
+export function buildPlanMarkdown(input: PlanDocumentInput) {
+  const lines = [
+    "# Swarm Plan",
+    "",
+    "## Goal",
+    input.goal
+  ];
+
+  if (input.summary) {
+    lines.push("", "## Summary", input.summary);
+  }
+
+  lines.push("", "## Tasks");
+
+  input.tasks.forEach((task, index) => {
+    lines.push("", `${index + 1}. ${task.title}`, `   Role: ${task.role}`);
+
+    if (task.description) {
+      lines.push(`   Description: ${task.description}`);
+    }
+
+    if (task.acceptanceCriteria && task.acceptanceCriteria.length > 0) {
+      lines.push("   Acceptance Criteria:");
+
+      for (const criterion of task.acceptanceCriteria) {
+        lines.push(`   - ${criterion}`);
+      }
+    }
+  });
+
+  lines.push("");
+  return lines.join("\n");
+}
+
+export async function materializePlanArtifact(input: PlanMaterializationInput) {
+  const relativePath = input.relativePath ?? ".swarm/plan.md";
+  const outputPath = join(input.cwd, relativePath);
+  const markdown = buildPlanMarkdown(input.plan);
+
+  await mkdir(dirname(outputPath), { recursive: true });
+  await writeFile(outputPath, markdown, "utf8");
+
+  return {
+    path: outputPath,
+    relativePath,
+    markdown
+  };
 }
 
 export function createWorktreePath(input: WorktreePathInput) {
