@@ -867,3 +867,24 @@ Evidence:
 Residual risks:
 
 - The proof surface is run-scoped via governance report and audit export; broader cross-run aggregation would be an enhancement, not a requirement of the roadmap wording.
+
+## Task `81c7c2da`
+
+Roadmap entry:
+
+- Phase 5 exit criterion: `Teams can set different policy profiles without code changes.`
+
+Verdict:
+
+- parity
+
+Evidence:
+
+- Repository policy resolution is data-driven: `resolveRepositoryApprovalProfile(...)` uses explicit repository input or the owning team’s `policyProfile` when creating repositories in `apps/api/src/services/control-plane-service.ts`.
+- Policy tests verify that changing the team policy profile changes the inherited repository approval profile without code edits in `apps/api/test/control-plane-service.policy.test.ts`.
+- The governance report aggregates active repository profiles and their repository/run counts, giving admins a live readback of policy variation in `apps/api/src/services/control-plane-service.ts` and `apps/api/test/control-plane-service.governance.test.ts`.
+- The admin frontend renders those active profiles and counts in the governance panel in `frontend/src/App.tsx`.
+
+Residual risks:
+
+- The repo proves data-driven policy differentiation and inheritance, but not a richer standalone policy-administration editor beyond the current API-backed onboarding and governance surfaces.
