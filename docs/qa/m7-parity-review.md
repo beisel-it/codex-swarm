@@ -707,3 +707,24 @@ Evidence:
 Residual risks:
 
 - The delivered flow centers on approval records linked to runs/tasks rather than a broader generalized review workflow, but it satisfies the roadmap’s approve/reject deliverable.
+
+## Task `98288275`
+
+Roadmap entry:
+
+- Phase 2 deliverable: `Restart-safe active runs`
+
+Verdict:
+
+- parity
+
+Evidence:
+
+- The worker runtime implements an explicit restart recovery planner through `buildSessionRecoveryPlan(...)`, classifying persisted sessions into resume, retry, mark-stale, or archive actions based on thread state, heartbeat age, and worktree presence in `apps/worker/src/runtime.ts`.
+- Worker runtime tests verify that persisted sessions are mapped into restart actions deterministically, including missing-thread, missing-worktree, heartbeat-timeout, and terminal-session cases in `apps/worker/test/runtime.test.ts`.
+- The worker session registry supports hydrating persisted session records, preserving thread bindings, and resuming lookups by `threadId` in `apps/worker/src/session-registry.ts` and `apps/worker/test/session-registry.test.ts`.
+- The control plane persists runs, tasks, agents, sessions, and approvals durably in the shared database schema, which is the required foundation for restart-safe active run state in `apps/api/src/db/schema.ts`.
+
+Residual risks:
+
+- This verdict covers the delivered restart-safe model and recovery primitives. The stronger end-to-end proof that a run survives an orchestrator restart without losing task or approval state remains the separate exit criterion tracked in `[077]`.
