@@ -12,6 +12,8 @@ import {
   type GovernanceAdminReport,
   type Run,
   type RunAuditExport,
+  type RunBudgetCheckpointInput,
+  type RunBudgetState,
   type Agent,
   type AgentCreateInput,
   type ApprovalCreateInput,
@@ -78,6 +80,7 @@ import { z } from "zod";
 type RepositoryCreate = RepositoryCreateInput;
 type RunCreate = RunCreateInput;
 type RunStatusUpdate = RunStatusUpdateInput;
+type RunBudgetCheckpoint = RunBudgetCheckpointInput;
 type TaskCreate = TaskCreateInput;
 type TaskStatusUpdate = TaskStatusUpdateInput;
 type AgentCreate = AgentCreateInput;
@@ -238,6 +241,30 @@ function dollarsToCents(value: number | undefined) {
 
 function centsToDollars(value: number | null) {
   return value === null ? null : value / 100;
+}
+
+function dollarsToStoredCents(value: number) {
+  return Math.round(value * 100);
+}
+
+function readRunBudgetUsage(metadata: Record<string, unknown>) {
+  const budgetUsage = metadata.budgetUsage;
+
+  if (!budgetUsage || typeof budgetUsage !== "object") {
+    return {
+      tokensUsedTotal: 0,
+      costUsdTotal: 0
+    };
+  }
+
+  return {
+    tokensUsedTotal: typeof (budgetUsage as { tokensUsedTotal?: unknown }).tokensUsedTotal === "number"
+      ? Math.max(0, Math.trunc((budgetUsage as { tokensUsedTotal: number }).tokensUsedTotal))
+      : 0,
+    costUsdTotal: typeof (budgetUsage as { costUsdTotal?: unknown }).costUsdTotal === "number"
+      ? Math.max(0, (budgetUsage as { costUsdTotal: number }).costUsdTotal)
+      : 0
+  };
 }
 
 function getArtifactStorageMetadata(metadata: Record<string, unknown>) {
@@ -505,6 +532,122 @@ export class ControlPlaneService {
     }).where(eq(runs.id, runId)).returning();
 
     return this.mapRun(expectPersistedRecord(run, "run"));
+  }
+
+  async recordRunBudgetCheckpoint(runId: string, input: RunBudgetCheckpoint, access?: AccessBoundary): Promise<RunBudgetState> {
+    const run = await this.assertRunExists(runId, access);
+    const now = this.clock.now();
+    const currentUsage = readRunBudgetUsage(run.metadata);
+    const tokensUsedTotal = currentUsage.tokensUsedTotal + input.tokensUsedDelta;
+    const costUsdTotal = currentUsage.costUsdTotal + input.costUsdDelta;
+    const exceeded: Array<"tokens" | "cost"> = [];
+
+    if (run.budgetTokens !== null && tokensUsedTotal >= run.budgetTokens) {
+      exceeded.push("tokens");
+    }
+
+    const budgetCostUsd = centsToDollars(run.budgetCostUsd);
+
+    if (budgetCostUsd !== null && dollarsToStoredCents(costUsdTotal) >= run.budgetCostUsd!) {
+      exceeded.push("cost");
+    }
+
+    const policyExceptionRows = await this.db.select().from(approvals)
+      .where(and(
+        eq(approvals.runId, runId),
+        eq(approvals.kind, "policy_exception")
+      ))
+      .orderBy(asc(approvals.createdAt));
+    const approvedBudgetException = policyExceptionRows.find((approval) =>
+      approval.status === "approved"
+      && approval.requestedPayload
+      && typeof approval.requestedPayload === "object"
+      && (approval.requestedPayload as Record<string, unknown>).reason === "budget_cap_exceeded");
+    const pendingBudgetException = policyExceptionRows.find((approval) =>
+      approval.status === "pending"
+      && approval.requestedPayload
+      && typeof approval.requestedPayload === "object"
+      && (approval.requestedPayload as Record<string, unknown>).reason === "budget_cap_exceeded");
+
+    let decision: RunBudgetState["decision"] = "within_budget";
+    let continueAllowed = true;
+    let approvalId: string | null = null;
+
+    if (exceeded.length > 0) {
+      if (approvedBudgetException) {
+        decision = "approved_exception";
+        approvalId = approvedBudgetException.id;
+      } else {
+        decision = "awaiting_policy_exception";
+        continueAllowed = false;
+
+        const approval = pendingBudgetException ?? expectPersistedRecord((await this.db.insert(approvals).values({
+          id: crypto.randomUUID(),
+          runId,
+          workspaceId: run.workspaceId,
+          teamId: run.teamId,
+          taskId: null,
+          kind: "policy_exception",
+          status: "pending",
+          requestedPayload: {
+            reason: "budget_cap_exceeded",
+            source: input.source,
+            budgetTokens: run.budgetTokens,
+            budgetCostUsd,
+            tokensUsedTotal,
+            costUsdTotal,
+            exceeded
+          },
+          resolutionPayload: {},
+          requestedBy: "system:budget-guard",
+          delegateActorId: null,
+          delegatedBy: null,
+          delegatedAt: null,
+          delegationReason: null,
+          resolver: null,
+          resolvedAt: null,
+          createdAt: now,
+          updatedAt: now
+        }).returning())[0], "approval");
+
+        approvalId = approval.id;
+      }
+    }
+
+    const [updatedRun] = await this.db.update(runs).set({
+      status: decision === "awaiting_policy_exception" ? "awaiting_approval" : run.status,
+      metadata: {
+        ...run.metadata,
+        budgetUsage: {
+          tokensUsedTotal,
+          costUsdTotal,
+          lastCheckpointAt: now.toISOString(),
+          lastCheckpointSource: input.source,
+          ...input.metadata
+        },
+        budgetGuard: {
+          decision,
+          continueAllowed,
+          exceeded,
+          approvalId,
+          updatedAt: now.toISOString()
+        }
+      },
+      updatedAt: now
+    }).where(eq(runs.id, runId)).returning();
+
+    expectPersistedRecord(updatedRun, "run");
+
+    return {
+      runId,
+      continueAllowed,
+      decision,
+      tokensUsedTotal,
+      costUsdTotal,
+      exceeded,
+      approvalId,
+      updatedAt: now
+    };
   }
 
   async publishRunBranch(runId: string, input: RunBranchPublish, access?: AccessBoundary) {

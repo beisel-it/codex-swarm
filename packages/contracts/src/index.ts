@@ -139,6 +139,24 @@ export const runStatusUpdateSchema = z.object({
   planArtifactPath: z.string().min(1).optional()
 });
 
+export const runBudgetCheckpointSchema = z.object({
+  source: z.string().min(1),
+  tokensUsedDelta: z.number().int().nonnegative().default(0),
+  costUsdDelta: z.number().nonnegative().default(0),
+  metadata: z.record(z.string(), z.unknown()).default({})
+});
+
+export const runBudgetStateSchema = z.object({
+  runId: z.uuid(),
+  continueAllowed: z.boolean(),
+  decision: z.enum(["within_budget", "awaiting_policy_exception", "approved_exception"]),
+  tokensUsedTotal: z.number().int().nonnegative(),
+  costUsdTotal: z.number().nonnegative(),
+  exceeded: z.array(z.enum(["tokens", "cost"])).default([]),
+  approvalId: z.uuid().nullable().default(null),
+  updatedAt: z.date()
+});
+
 export const taskCreateSchema = z.object({
   runId: z.uuid(),
   parentTaskId: z.uuid().optional(),
@@ -864,11 +882,13 @@ export const runAuditExportSchema = z.object({
 export type RepositoryCreateInput = z.infer<typeof repositoryCreateSchema>;
 export type RunCreateInput = z.infer<typeof runCreateSchema>;
 export type RunStatusUpdateInput = z.infer<typeof runStatusUpdateSchema>;
+export type RunBudgetCheckpointInput = z.infer<typeof runBudgetCheckpointSchema>;
 export type TaskCreateInput = z.infer<typeof taskCreateSchema>;
 export type TaskStatusUpdateInput = z.infer<typeof taskStatusUpdateSchema>;
 export type AgentCreateInput = z.infer<typeof agentCreateSchema>;
 export type Repository = z.infer<typeof repositorySchema>;
 export type Run = z.infer<typeof runSchema>;
+export type RunBudgetState = z.infer<typeof runBudgetStateSchema>;
 export type Workspace = z.infer<typeof workspaceSchema>;
 export type Team = z.infer<typeof teamSchema>;
 export type IdentityContext = z.infer<typeof identityContextSchema>;

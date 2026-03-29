@@ -2,6 +2,7 @@ import type { FastifyPluginAsync } from "fastify";
 
 import {
   idParamSchema,
+  runBudgetCheckpointSchema,
   runBranchPublishSchema,
   runCreateSchema,
   runPullRequestHandoffSchema,
@@ -96,6 +97,28 @@ export const runRoutes: FastifyPluginAsync = async (app) => {
 
       return run;
     }, { route: "runs.update-status" });
+  });
+
+  app.post("/runs/:id/budget-checkpoints", async (request) => {
+    return app.observability.withTrace("api.runs.budget-checkpoints", async () => {
+      const { id } = idParamSchema.parse(request.params);
+      const input = runBudgetCheckpointSchema.parse(request.body);
+      const budgetState = requireValue(
+        await app.controlPlane.recordRunBudgetCheckpoint(id, input, request.authContext),
+        "control plane returned no run budget state"
+      );
+
+      if (budgetState.decision === "awaiting_policy_exception") {
+        await app.observability.recordTimelineEvent(timelineEvent(controlPlaneEvents.runStatusUpdated, {
+          runId: id,
+          entityId: id,
+          status: "awaiting_approval",
+          summary: `Run paused for budget policy exception review after ${input.source}`
+        }));
+      }
+
+      return budgetState;
+    }, { route: "runs.budget-checkpoints" });
   });
 
   app.post("/runs/:id/publish-branch", async (request) => {

@@ -71,6 +71,7 @@ const controlPlane = {
   getApproval: vi.fn(),
   createApproval: vi.fn(),
   resolveApproval: vi.fn(),
+  recordRunBudgetCheckpoint: vi.fn(),
   listValidations: vi.fn(),
   createValidation: vi.fn(),
   listArtifacts: vi.fn(),
@@ -177,6 +178,46 @@ class FakeVerticalSliceControlPlane {
       summary: "Typecheck passed",
       artifactPath: "artifacts/validations/typecheck.json",
       artifactIds: ["cccccccc-cccc-4ccc-8ccc-cccccccccccc"],
+      createdAt: new Date(),
+      updatedAt: new Date()
+    }
+  ];
+  private readonly approvals: any[] = [
+    {
+      id: "77777777-7777-4777-8777-777777777777",
+      runId: ids.run,
+      workspaceId: defaultBoundary.workspaceId,
+      teamId: defaultBoundary.teamId,
+      taskId: ids.taskA,
+      kind: "plan",
+      status: "pending",
+      requestedPayload: {
+        summary: "Review the execution plan"
+      },
+      resolutionPayload: {},
+      requestedBy: "tech-lead",
+      resolver: null,
+      resolvedAt: null,
+      createdAt: new Date(),
+      updatedAt: new Date()
+    },
+    {
+      id: "88888888-8888-4888-8888-888888888888",
+      runId: "99999999-9999-4999-8999-999999999999",
+      workspaceId: "other-workspace",
+      teamId: "other-team",
+      taskId: null,
+      kind: "merge",
+      status: "approved",
+      requestedPayload: {
+        summary: "Approve merge handoff"
+      },
+      resolutionPayload: {
+        feedback: "ok"
+      },
+      requestedBy: "tech-lead",
+      resolver: "reviewer",
+      resolvedAt: new Date(),
       createdAt: new Date(),
       updatedAt: new Date()
     }
@@ -711,48 +752,7 @@ class FakeVerticalSliceControlPlane {
   }
 
   async listApprovals(runId?: string, access?: any) {
-    const approvals = [
-      {
-        id: "77777777-7777-4777-8777-777777777777",
-        runId: ids.run,
-        workspaceId: defaultBoundary.workspaceId,
-        teamId: defaultBoundary.teamId,
-        taskId: ids.taskA,
-        kind: "plan",
-        status: "pending",
-        requestedPayload: {
-          summary: "Review the execution plan"
-        },
-        resolutionPayload: {},
-        requestedBy: "tech-lead",
-        resolver: null,
-        resolvedAt: null,
-        createdAt: new Date(),
-        updatedAt: new Date()
-      },
-      {
-        id: "88888888-8888-4888-8888-888888888888",
-        runId: "99999999-9999-4999-8999-999999999999",
-        workspaceId: "other-workspace",
-        teamId: "other-team",
-        taskId: null,
-        kind: "merge",
-        status: "approved",
-        requestedPayload: {
-          summary: "Approve merge handoff"
-        },
-        resolutionPayload: {
-          feedback: "ok"
-        },
-        requestedBy: "tech-lead",
-        resolver: "reviewer",
-        resolvedAt: new Date(),
-        createdAt: new Date(),
-        updatedAt: new Date()
-      }
-    ];
-
-    return (runId ? approvals.filter((approval) => approval.runId === runId) : approvals)
+    return (runId ? this.approvals.filter((approval) => approval.runId === runId) : this.approvals)
       .filter((approval) => !access || (
         approval.workspaceId === access.workspaceId && approval.teamId === access.teamId
       ));
@@ -771,8 +771,8 @@ class FakeVerticalSliceControlPlane {
   async createApproval(input: any, access?: any) {
     const run = await this.getRun(input.runId, access);
     const now = new Date();
-    return {
-      id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    const approval = {
+      id: crypto.randomUUID(),
       runId: input.runId,
       workspaceId: run.workspaceId,
       teamId: run.teamId,
@@ -795,20 +795,105 @@ class FakeVerticalSliceControlPlane {
       createdAt: now,
       updatedAt: now
     };
+
+    this.approvals.push(approval);
+    return approval;
   }
 
   async resolveApproval(approvalId: string, input: any, access?: any) {
     const approval = await this.getApproval(approvalId, access);
+    approval.status = input.status;
+    approval.resolver = input.resolver;
+    approval.resolutionPayload = {
+      ...input.resolutionPayload,
+      feedback: input.feedback ?? null
+    };
+    approval.resolvedAt = new Date();
+    approval.updatedAt = new Date();
+    return approval;
+  }
+
+  async recordRunBudgetCheckpoint(runId: string, input: any, access?: any) {
+    const run = await this.getRun(runId, access);
+    const budgetUsage = run.metadata?.budgetUsage ?? {};
+    const tokensUsedTotal = (budgetUsage.tokensUsedTotal ?? 0) + (input.tokensUsedDelta ?? 0);
+    const costUsdTotal = (budgetUsage.costUsdTotal ?? 0) + (input.costUsdDelta ?? 0);
+    const exceeded = [];
+
+    if (run.budgetTokens !== null && tokensUsedTotal >= run.budgetTokens) {
+      exceeded.push("tokens");
+    }
+
+    if (run.budgetCostUsd !== null && costUsdTotal >= run.budgetCostUsd) {
+      exceeded.push("cost");
+    }
+
+    const approvedException = this.approvals.find((approval) =>
+      approval.runId === runId
+      && approval.kind === "policy_exception"
+      && approval.status === "approved"
+      && approval.requestedPayload?.reason === "budget_cap_exceeded");
+    const pendingException = this.approvals.find((approval) =>
+      approval.runId === runId
+      && approval.kind === "policy_exception"
+      && approval.status === "pending"
+      && approval.requestedPayload?.reason === "budget_cap_exceeded");
+
+    let decision = "within_budget";
+    let continueAllowed = true;
+    let approvalId = null;
+
+    if (exceeded.length > 0) {
+      if (approvedException) {
+        decision = "approved_exception";
+        approvalId = approvedException.id;
+      } else {
+        decision = "awaiting_policy_exception";
+        continueAllowed = false;
+        const approval = pendingException ?? await this.createApproval({
+          runId,
+          kind: "policy_exception",
+          requestedBy: "system:budget-guard",
+          requestedPayload: {
+            reason: "budget_cap_exceeded",
+            source: input.source,
+            budgetTokens: run.budgetTokens,
+            budgetCostUsd: run.budgetCostUsd,
+            tokensUsedTotal,
+            costUsdTotal,
+            exceeded
+          }
+        }, access);
+        approvalId = approval.id;
+        run.status = "awaiting_approval";
+      }
+    }
+
+    run.metadata = {
+      ...run.metadata,
+      budgetUsage: {
+        tokensUsedTotal,
+        costUsdTotal,
+        lastCheckpointAt: new Date().toISOString(),
+        lastCheckpointSource: input.source
+      },
+      budgetGuard: {
+        decision,
+        continueAllowed,
+        exceeded,
+        approvalId,
+        updatedAt: new Date().toISOString()
+      }
+    };
 
     return {
-      ...approval,
-      status: input.status,
-      resolver: input.resolver,
-      resolutionPayload: {
-        ...input.resolutionPayload,
-        feedback: input.feedback ?? null
-      },
-      resolvedAt: new Date(),
+      runId,
+      continueAllowed,
+      decision,
+      tokensUsedTotal,
+      costUsdTotal,
+      exceeded,
+      approvalId,
       updatedAt: new Date()
     };
   }
@@ -4736,6 +4821,287 @@ describe("buildApp", () => {
     } finally {
       await rm(worktreeRoot, { recursive: true, force: true });
       await rm(repoRoot, { recursive: true, force: true });
+      await app.close();
+    }
+  });
+
+  it("pauses a run behind policy-exception approval when execution exceeds the budget cap", async () => {
+    const verticalSlice = new FakeVerticalSliceControlPlane();
+    const app = await buildApp({
+      config: getConfig({
+        NODE_ENV: "test",
+        PORT: 3000,
+        HOST: "127.0.0.1",
+        DATABASE_URL: "postgres://unused/test",
+        DEV_AUTH_TOKEN: "test-token",
+        OPENAI_TRACING_DISABLED: true
+      }),
+      controlPlane: verticalSlice as unknown as ControlPlaneService
+    });
+
+    const headers = {
+      authorization: "Bearer test-token"
+    };
+    const repoRoot = await mkdtemp(join(tmpdir(), "codex-swarm-budget-dispatch-repo-"));
+    const worktreeRoot = await mkdtemp(join(tmpdir(), "codex-swarm-budget-dispatch-"));
+
+    try {
+      await writeFile(join(repoRoot, "README.md"), "budget worker dispatch\n", "utf8");
+      execFileSync("git", ["init", "--initial-branch=main"], { cwd: repoRoot, stdio: "pipe" });
+      execFileSync("git", ["config", "user.name", "Codex Swarm"], { cwd: repoRoot, stdio: "pipe" });
+      execFileSync("git", ["config", "user.email", "codex-swarm@example.com"], { cwd: repoRoot, stdio: "pipe" });
+      execFileSync("git", ["add", "README.md"], { cwd: repoRoot, stdio: "pipe" });
+      execFileSync("git", ["commit", "-m", "initial"], { cwd: repoRoot, stdio: "pipe" });
+      (verticalSlice as any).repositories[0].url = repoRoot;
+
+      const request: LeaderPlanningLoopRequest = async <T>(
+        method: string,
+        path: string,
+        payload?: Record<string, unknown>
+      ) => {
+        const response = await (app.inject as any)({
+          method,
+          url: path,
+          headers,
+          ...(payload ? { payload } : {})
+        }) as {
+          statusCode: number;
+          body: string;
+          json(): T;
+        };
+
+        if (response.statusCode >= 400) {
+          throw new Error(`${method} ${path} failed with ${response.statusCode}: ${response.body}`);
+        }
+
+        return response.json() as T;
+      };
+
+      await app.inject({
+        method: "POST",
+        url: "/api/v1/runs",
+        headers,
+        payload: {
+          repositoryId: ids.repository,
+          goal: "Enforce runtime budget caps",
+          budgetTokens: 100,
+          budgetCostUsd: 0.25,
+          concurrencyCap: 1,
+          metadata: {}
+        }
+      });
+
+      await app.inject({
+        method: "POST",
+        url: "/api/v1/agents",
+        headers,
+        payload: {
+          runId: ids.run,
+          name: "worker-budget",
+          role: "backend-developer",
+          status: "idle",
+          session: {
+            threadId: "thread-worker-budget",
+            cwd: process.cwd(),
+            sandbox: "workspace-write",
+            approvalPolicy: "on-request",
+            includePlanTool: false,
+            metadata: {}
+          }
+        }
+      });
+
+      const taskResponse = await app.inject({
+        method: "POST",
+        url: "/api/v1/tasks",
+        headers,
+        payload: {
+          runId: ids.run,
+          title: "Budget enforcement task",
+          description: "Trip the run budget during execution",
+          role: "backend-developer",
+          priority: 1,
+          dependencyIds: [],
+          acceptanceCriteria: ["budget guard pauses the run"]
+        }
+      });
+
+      const taskId = taskResponse.json().id as string;
+
+      await app.inject({
+        method: "POST",
+        url: "/api/v1/worker-dispatch-assignments",
+        headers,
+        payload: {
+          runId: ids.run,
+          taskId,
+          agentId: ids.agent,
+          sessionId: ids.session,
+          repositoryId: ids.repository,
+          repositoryName: "codex-swarm",
+          stickyNodeId: ids.workerNode,
+          requiredCapabilities: ["remote"],
+          worktreePath: join(worktreeRoot, "worker-budget"),
+          prompt: "Continue the worker session",
+          profile: "default",
+          sandbox: "workspace-write",
+          approvalPolicy: "on-request"
+        }
+      });
+
+      const result = await runManagedWorkerDispatch({
+        request,
+        nodeId: ids.workerNode,
+        workspaceRoot: process.cwd(),
+        supervisorCommand: [
+          process.execPath,
+          "--input-type=module",
+          "-e",
+          "setInterval(() => {}, 1000);"
+        ],
+        executeTool: async () => ({
+          threadId: "thread-worker-budget",
+          output: "worker completed",
+          metadata: {
+            usage: {
+              totalTokens: 120,
+              costUsd: 0.5
+            }
+          }
+        })
+      });
+
+      expect(result).toMatchObject({
+        status: "completed"
+      });
+
+      const runResponse = await app.inject({
+        method: "GET",
+        url: `/api/v1/runs/${ids.run}`,
+        headers
+      });
+
+      expect(runResponse.statusCode).toBe(200);
+      expect(runResponse.json()).toMatchObject({
+        status: "awaiting_approval",
+        metadata: {
+          budgetUsage: {
+            tokensUsedTotal: 120,
+            costUsdTotal: 0.5
+          },
+          budgetGuard: {
+            decision: "awaiting_policy_exception",
+            continueAllowed: false,
+            exceeded: ["tokens", "cost"]
+          }
+        }
+      });
+
+      const approvalsResponse = await app.inject({
+        method: "GET",
+        url: `/api/v1/approvals?runId=${ids.run}`,
+        headers
+      });
+
+      expect(approvalsResponse.statusCode).toBe(200);
+      expect(approvalsResponse.json()).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            kind: "policy_exception",
+            status: "pending",
+            requestedPayload: expect.objectContaining({
+              reason: "budget_cap_exceeded"
+            })
+          })
+        ])
+      );
+    } finally {
+      await rm(worktreeRoot, { recursive: true, force: true });
+      await rm(repoRoot, { recursive: true, force: true });
+      await app.close();
+    }
+  });
+
+  it("allows later checkpoints after a budget policy exception is approved", async () => {
+    const verticalSlice = new FakeVerticalSliceControlPlane();
+    const app = await buildApp({
+      config: getConfig({
+        NODE_ENV: "test",
+        PORT: 3000,
+        HOST: "127.0.0.1",
+        DATABASE_URL: "postgres://unused/test",
+        DEV_AUTH_TOKEN: "test-token",
+        OPENAI_TRACING_DISABLED: true
+      }),
+      controlPlane: verticalSlice as unknown as ControlPlaneService
+    });
+
+    const headers = {
+      authorization: "Bearer test-token"
+    };
+
+    try {
+      await app.inject({
+        method: "POST",
+        url: "/api/v1/runs",
+        headers,
+        payload: {
+          repositoryId: ids.repository,
+          goal: "Resume after budget exception approval",
+          budgetTokens: 100,
+          concurrencyCap: 1,
+          metadata: {}
+        }
+      });
+
+      const firstCheckpoint = await app.inject({
+        method: "POST",
+        url: `/api/v1/runs/${ids.run}/budget-checkpoints`,
+        headers,
+        payload: {
+          source: "test.initial",
+          tokensUsedDelta: 120,
+          costUsdDelta: 0
+        }
+      });
+
+      expect(firstCheckpoint.statusCode).toBe(200);
+      expect(firstCheckpoint.json()).toMatchObject({
+        continueAllowed: false,
+        decision: "awaiting_policy_exception"
+      });
+
+      const pendingApproval = verticalSlice
+        .listApprovals(ids.run)
+        .then((approvals: any[]) => approvals.find((item) => item.kind === "policy_exception"));
+      const approvalId = (await pendingApproval).id as string;
+
+      await verticalSlice.resolveApproval(approvalId, {
+        status: "approved",
+        resolver: "reviewer-1",
+        resolutionPayload: {
+          decision: "approved"
+        }
+      }, defaultBoundary);
+
+      const secondCheckpoint = await app.inject({
+        method: "POST",
+        url: `/api/v1/runs/${ids.run}/budget-checkpoints`,
+        headers,
+        payload: {
+          source: "test.after-approval",
+          tokensUsedDelta: 0,
+          costUsdDelta: 0
+        }
+      });
+
+      expect(secondCheckpoint.statusCode).toBe(200);
+      expect(secondCheckpoint.json()).toMatchObject({
+        continueAllowed: true,
+        decision: "approved_exception",
+        exceeded: ["tokens"]
+      });
+    } finally {
       await app.close();
     }
   });

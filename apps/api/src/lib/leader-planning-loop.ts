@@ -11,6 +11,8 @@ import {
   materializePlanArtifact
 } from "@codex-swarm/worker";
 
+import { checkpointRunBudget } from "./run-budget-guard.js";
+
 export interface LeaderPlanningLoopRequest {
   <T>(method: string, path: string, payload?: Record<string, unknown>): Promise<T>;
 }
@@ -81,6 +83,16 @@ export async function runLeaderPlanningLoop(input: LeaderPlanningLoopInput): Pro
     const startPrompt = input.startPrompt
       ?? `Start the leader orchestration session for run ${input.runId}.`;
     const started = await runtime.startSession(`bootstrap-${input.runId}`, startPrompt);
+    const startBudgetState = await checkpointRunBudget(
+      input.request,
+      input.runId,
+      "leader.start",
+      started.response
+    );
+
+    if (!startBudgetState.continueAllowed) {
+      throw new Error("run budget requires policy exception approval");
+    }
 
     const agent = await input.request<{
       id: string;
@@ -134,6 +146,17 @@ export async function runLeaderPlanningLoop(input: LeaderPlanningLoopInput): Pro
       persistedSession.id,
       input.planningPrompt ?? buildLeaderPlanningPrompt(runDetail.goal)
     );
+    const planningBudgetState = await checkpointRunBudget(
+      input.request,
+      input.runId,
+      "leader.plan",
+      continued.response
+    );
+
+    if (!planningBudgetState.continueAllowed) {
+      throw new Error("run budget requires policy exception approval");
+    }
+
     const plan = parseLeaderPlanOutput(continued.response.output);
     const orderedTasks = orderLeaderPlanTasks(plan);
 

@@ -13,6 +13,8 @@ import {
   SessionRegistry
 } from "@codex-swarm/worker";
 
+import { checkpointRunBudget } from "./run-budget-guard.js";
+
 export interface WorkerDispatchOrchestrationRequest {
   <T>(method: string, path: string, payload?: Record<string, unknown>): Promise<T>;
 }
@@ -161,6 +163,12 @@ export async function runManagedWorkerDispatch(
 
   try {
     const continued = await runtime.continueSession(session.id, assignment.prompt);
+    await checkpointRunBudget(
+      input.request,
+      assignment.runId,
+      "worker.dispatch",
+      continued.response
+    );
 
     if (assignment.taskId) {
       const task = runDetail.tasks.find((candidate) => candidate.id === assignment.taskId);
