@@ -272,6 +272,79 @@ async function synchronizeRunBranchContext(
   return branchName;
 }
 
+async function recordWorkerOutcomeArtifacts(
+  request: WorkerDispatchOrchestrationRequest,
+  assignment: WorkerDispatchAssignment,
+  outcome: ReturnType<typeof parseWorkerTaskOutcome>
+) {
+  for (const artifact of outcome.artifacts ?? []) {
+    await request(
+      "POST",
+      "/api/v1/artifacts",
+      {
+        runId: assignment.runId,
+        taskId: assignment.taskId,
+        kind: artifact.kind,
+        path: artifact.path,
+        contentType: artifact.contentType,
+        ...(artifact.contentBase64 ? { contentBase64: artifact.contentBase64 } : {}),
+        metadata: {
+          source: "worker-outcome",
+          assignmentId: assignment.id,
+          ...(artifact.metadata ?? {})
+        }
+      }
+    );
+  }
+}
+
+async function recordWorkerOutcomeHandoff(
+  request: WorkerDispatchOrchestrationRequest,
+  runDetail: RunDetail,
+  repository: Repository,
+  assignment: WorkerDispatchAssignment,
+  outcome: ReturnType<typeof parseWorkerTaskOutcome>,
+  branchName: string | null
+) {
+  const effectiveBranch = outcome.branchPublish?.branchName
+    ?? outcome.pullRequestHandoff?.headBranch
+    ?? branchName
+    ?? runDetail.branchName
+    ?? assignment.branchName
+    ?? repository.defaultBranch;
+
+  if (outcome.branchPublish) {
+    await request(
+      "POST",
+      `/api/v1/runs/${assignment.runId}/publish-branch`,
+      {
+        branchName: effectiveBranch,
+        publishedBy: assignment.agentId,
+        ...(outcome.branchPublish.commitSha ? { commitSha: outcome.branchPublish.commitSha } : {}),
+        ...(outcome.branchPublish.notes ? { notes: outcome.branchPublish.notes } : {})
+      }
+    );
+  }
+
+  if (outcome.pullRequestHandoff) {
+    await request(
+      "POST",
+      `/api/v1/runs/${assignment.runId}/pull-request-handoff`,
+      {
+        title: outcome.pullRequestHandoff.title,
+        body: outcome.pullRequestHandoff.body,
+        createdBy: assignment.agentId,
+        provider: repository.provider,
+        ...(outcome.pullRequestHandoff.baseBranch ? { baseBranch: outcome.pullRequestHandoff.baseBranch } : {}),
+        headBranch: outcome.pullRequestHandoff.headBranch ?? effectiveBranch,
+        ...(outcome.pullRequestHandoff.url ? { url: outcome.pullRequestHandoff.url } : {}),
+        ...(outcome.pullRequestHandoff.number ? { number: outcome.pullRequestHandoff.number } : {}),
+        ...(outcome.pullRequestHandoff.status ? { status: outcome.pullRequestHandoff.status } : {})
+      }
+    );
+  }
+}
+
 export async function runManagedWorkerDispatch(
   input: WorkerDispatchOrchestrationInput
 ): Promise<WorkerDispatchOrchestrationResult | null> {
@@ -436,7 +509,22 @@ export async function runManagedWorkerDispatch(
 
     if (responseOutput && assignment.taskId) {
       const outcome = parseWorkerTaskOutcome(responseOutput);
-      await synchronizeRunBranchContext(input.request, runDetail, workspace.path);
+      const synchronizedBranchName = await synchronizeRunBranchContext(input.request, runDetail, workspace.path);
+
+      await recordWorkerOutcomeArtifacts(
+        input.request,
+        assignment,
+        outcome
+      );
+
+      await recordWorkerOutcomeHandoff(
+        input.request,
+        runDetail,
+        repository,
+        assignment,
+        outcome,
+        synchronizedBranchName
+      );
 
       await publishWorkerOutcomeMessages(
         input.request,

@@ -5885,6 +5885,225 @@ describe("buildApp", () => {
     }
   });
 
+  it("records branch publish, PR handoff, and artifacts from a completed worker outcome", async () => {
+    const verticalSlice = new FakeVerticalSliceControlPlane();
+    const app = await buildApp({
+      config: getConfig({
+        NODE_ENV: "test",
+        PORT: 3000,
+        HOST: "127.0.0.1",
+        DATABASE_URL: "postgres://unused/test",
+        DEV_AUTH_TOKEN: "test-token",
+        OPENAI_TRACING_DISABLED: true
+      }),
+      controlPlane: verticalSlice as unknown as ControlPlaneService
+    });
+
+    const headers = {
+      authorization: "Bearer test-token"
+    };
+    const repoRoot = await mkdtemp(join(tmpdir(), "codex-swarm-handoff-dispatch-repo-"));
+    const worktreeRoot = await mkdtemp(join(tmpdir(), "codex-swarm-handoff-dispatch-"));
+
+    try {
+      await writeFile(join(repoRoot, "README.md"), "handoff worker dispatch\n", "utf8");
+      execFileSync("git", ["init", "--initial-branch=main"], { cwd: repoRoot, stdio: "pipe" });
+      execFileSync("git", ["config", "user.name", "Codex Swarm"], { cwd: repoRoot, stdio: "pipe" });
+      execFileSync("git", ["config", "user.email", "codex-swarm@example.com"], { cwd: repoRoot, stdio: "pipe" });
+      execFileSync("git", ["add", "README.md"], { cwd: repoRoot, stdio: "pipe" });
+      execFileSync("git", ["commit", "-m", "initial"], { cwd: repoRoot, stdio: "pipe" });
+      execFileSync("git", ["checkout", "-b", "feature/handoff-proof"], { cwd: repoRoot, stdio: "pipe" });
+      (verticalSlice as any).repositories[0].url = repoRoot;
+
+      const request: LeaderPlanningLoopRequest = async <T>(
+        method: string,
+        path: string,
+        payload?: Record<string, unknown>
+      ) => {
+        const response = await (app.inject as any)({
+          method,
+          url: path,
+          headers,
+          ...(payload ? { payload } : {})
+        }) as {
+          statusCode: number;
+          body: string;
+          json(): T;
+        };
+
+        if (response.statusCode >= 400) {
+          throw new Error(`${method} ${path} failed with ${response.statusCode}: ${response.body}`);
+        }
+
+        return response.json() as T;
+      };
+
+      const runResponse = await app.inject({
+        method: "POST",
+        url: "/api/v1/runs",
+        headers,
+        payload: {
+          repositoryId: ids.repository,
+          goal: "Publish the branch and record PR handoff",
+          concurrencyCap: 1,
+          metadata: {}
+        }
+      });
+
+      expect(runResponse.statusCode).toBe(201);
+
+      const agentResponse = await app.inject({
+        method: "POST",
+        url: "/api/v1/agents",
+        headers,
+        payload: {
+          runId: ids.run,
+          name: "tech-lead-handoff",
+          role: "tech-lead",
+          status: "idle"
+        }
+      });
+
+      expect(agentResponse.statusCode).toBe(201);
+      const agentId = ids.agent;
+
+      const taskResponse = await app.inject({
+        method: "POST",
+        url: "/api/v1/tasks",
+        headers,
+        payload: {
+          runId: ids.run,
+          title: "Commit changes and open the initial scaffold PR",
+          description: "Publish the working branch, record the PR handoff, and attach a PR summary artifact.",
+          role: "tech-lead",
+          priority: 1,
+          dependencyIds: [],
+          acceptanceCriteria: [
+            "run records the published branch",
+            "run records the pull request handoff",
+            "summary artifact is attached to the run"
+          ]
+        }
+      });
+
+      expect(taskResponse.statusCode).toBe(201);
+      const taskId = taskResponse.json().id as string;
+
+      const dispatchResponse = await app.inject({
+        method: "POST",
+        url: "/api/v1/worker-dispatch-assignments",
+        headers,
+        payload: {
+          runId: ids.run,
+          taskId,
+          agentId,
+          repositoryId: ids.repository,
+          repositoryName: "operations",
+          stickyNodeId: ids.workerNode,
+          requiredCapabilities: ["remote"],
+          worktreePath: join(worktreeRoot, "handoff"),
+          prompt: "Publish the branch and open the PR",
+          profile: "default",
+          sandbox: "workspace-write",
+          approvalPolicy: "never"
+        }
+      });
+
+      expect(dispatchResponse.statusCode).toBe(201);
+
+      const result = await runManagedWorkerDispatch({
+        request,
+        nodeId: ids.workerNode,
+        workspaceRoot: process.cwd(),
+        supervisorCommand: [
+          process.execPath,
+          "--input-type=module",
+          "-e",
+          "setInterval(() => {}, 1000);"
+        ],
+        executeTool: async () => ({
+          threadId: "thread-worker-handoff",
+          output: JSON.stringify({
+            summary: "Published feature/handoff-proof and opened PR #24.",
+            status: "completed",
+            messages: [],
+            blockingIssues: [],
+            branchPublish: {
+              branchName: "feature/handoff-proof",
+              commitSha: "3a51f57",
+              notes: "Published by worker outcome"
+            },
+            pullRequestHandoff: {
+              title: "Scaffold initial IaC repository",
+              body: "This PR adds the initial scaffold.",
+              baseBranch: "main",
+              headBranch: "feature/handoff-proof",
+              url: "https://github.com/beisel-it/operations/pull/24",
+              number: 24,
+              status: "open"
+            },
+            artifacts: [
+              {
+                kind: "pr_link",
+                path: "artifacts/pr-handoff.json",
+                contentType: "application/json",
+                contentBase64: Buffer.from(JSON.stringify({ pullRequestUrl: "https://github.com/beisel-it/operations/pull/24" }), "utf8").toString("base64"),
+                metadata: {
+                  source: "worker-test"
+                }
+              }
+            ]
+          })
+        })
+      });
+
+      expect(result).toMatchObject({
+        status: "completed",
+        output: expect.stringContaining("\"branchPublish\"")
+      });
+
+      const runDetailResponse = await app.inject({
+        method: "GET",
+        url: `/api/v1/runs/${ids.run}`,
+        headers
+      });
+
+      expect(runDetailResponse.statusCode).toBe(200);
+      expect(runDetailResponse.json()).toMatchObject({
+        id: ids.run,
+        branchName: "feature/handoff-proof",
+        publishedBranch: "feature/handoff-proof",
+        pullRequestUrl: "https://github.com/beisel-it/operations/pull/24",
+        pullRequestNumber: 24,
+        pullRequestStatus: "open",
+        handoffStatus: "pr_open"
+      });
+
+      const artifactResponse = await app.inject({
+        method: "GET",
+        url: `/api/v1/artifacts?runId=${ids.run}`,
+        headers
+      });
+
+      expect(artifactResponse.statusCode).toBe(200);
+      expect(artifactResponse.json()).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            runId: ids.run,
+            taskId,
+            kind: "pr_link",
+            path: "artifacts/pr-handoff.json",
+            contentType: "application/json"
+          })
+        ])
+      );
+    } finally {
+      await rm(worktreeRoot, { recursive: true, force: true });
+      await rm(repoRoot, { recursive: true, force: true });
+      await app.close();
+    }
+  });
+
   it("consumes inbound agent messages and lets the leader reslice follow-on work automatically", async () => {
     const verticalSlice = new FakeVerticalSliceControlPlane();
     const app = await buildApp({

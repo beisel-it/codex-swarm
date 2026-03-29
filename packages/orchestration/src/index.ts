@@ -31,11 +31,38 @@ export interface WorkerCoordinationMessage {
   body: string;
 }
 
+export interface WorkerOutcomeArtifact {
+  kind: "plan" | "patch" | "log" | "report" | "diff" | "screenshot" | "pr_link" | "other";
+  path: string;
+  contentType: string;
+  contentBase64?: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface WorkerOutcomeBranchPublish {
+  branchName?: string;
+  commitSha?: string;
+  notes?: string;
+}
+
+export interface WorkerOutcomePullRequestHandoff {
+  title: string;
+  body: string;
+  baseBranch?: string;
+  headBranch?: string;
+  url?: string;
+  number?: number;
+  status?: "draft" | "open" | "merged" | "closed";
+}
+
 export interface WorkerTaskOutcome {
   summary: string;
   status: "completed" | "needs_slicing" | "blocked";
   messages: WorkerCoordinationMessage[];
   blockingIssues: string[];
+  artifacts?: WorkerOutcomeArtifact[];
+  branchPublish?: WorkerOutcomeBranchPublish;
+  pullRequestHandoff?: WorkerOutcomePullRequestHandoff;
 }
 
 const leaderPlanSchema = {
@@ -83,7 +110,45 @@ const workerTaskOutcomeSchema = {
         }
       }
     },
-    blockingIssues: { type: "array", items: { type: "string" } }
+    blockingIssues: { type: "array", items: { type: "string" } },
+    artifacts: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["kind", "path", "contentType"],
+        properties: {
+          kind: { type: "string", enum: ["plan", "patch", "log", "report", "diff", "screenshot", "pr_link", "other"] },
+          path: { type: "string", minLength: 1 },
+          contentType: { type: "string", minLength: 1 },
+          contentBase64: { type: "string", minLength: 1 },
+          metadata: { type: "object" }
+        }
+      }
+    },
+    branchPublish: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        branchName: { type: "string", minLength: 1 },
+        commitSha: { type: "string", minLength: 1 },
+        notes: { type: "string", minLength: 1 }
+      }
+    },
+    pullRequestHandoff: {
+      type: "object",
+      additionalProperties: false,
+      required: ["title", "body"],
+      properties: {
+        title: { type: "string", minLength: 1 },
+        body: { type: "string", minLength: 1 },
+        baseBranch: { type: "string", minLength: 1 },
+        headBranch: { type: "string", minLength: 1 },
+        url: { type: "string", minLength: 1 },
+        number: { type: "number", minimum: 1 },
+        status: { type: "string", enum: ["draft", "open", "merged", "closed"] }
+      }
+    }
   }
 } as const;
 
@@ -180,6 +245,9 @@ export function buildWorkerTaskExecutionPrompt(input: {
     "- Use needs_slicing when the task should be broken into smaller follow-on tasks.",
     "- Use blocked when an external blocker prevents useful progress.",
     "- Include a leader message whenever status is needs_slicing or blocked.",
+    "- If you publish a branch, include branchPublish with the published branch details.",
+    "- If you open or prepare a PR handoff, include pullRequestHandoff with the PR details.",
+    "- If you produce durable evidence worth surfacing in codex-swarm, include it in artifacts.",
     "- do not add any properties beyond the schema"
   ].join("\n");
 }
@@ -294,12 +362,88 @@ export function parseWorkerTaskOutcome(output: string): WorkerTaskOutcome {
   });
 
   const blockingIssues = parseStringArray(parsed.blockingIssues);
+  const artifacts = Array.isArray(parsed.artifacts)
+    ? parsed.artifacts.map((artifact, index): WorkerOutcomeArtifact => {
+      if (!artifact || typeof artifact !== "object") {
+        throw new Error(`worker outcome artifact ${index} is not an object`);
+      }
+
+      const candidate = artifact as Partial<WorkerOutcomeArtifact>;
+      const kind = parseStringField(candidate.kind, `worker outcome artifact ${index} kind`);
+
+      if (!["plan", "patch", "log", "report", "diff", "screenshot", "pr_link", "other"].includes(kind)) {
+        throw new Error(`worker outcome artifact ${index} kind is invalid`);
+      }
+
+      return {
+        kind: kind as WorkerOutcomeArtifact["kind"],
+        path: parseStringField(candidate.path, `worker outcome artifact ${index} path`),
+        contentType: parseStringField(candidate.contentType, `worker outcome artifact ${index} contentType`),
+        ...(typeof candidate.contentBase64 === "string" && candidate.contentBase64.length > 0
+          ? { contentBase64: candidate.contentBase64 }
+          : {}),
+        ...(candidate.metadata && typeof candidate.metadata === "object"
+          ? { metadata: candidate.metadata as Record<string, unknown> }
+          : {})
+      };
+    })
+    : [];
+
+  let branchPublish: WorkerOutcomeBranchPublish | undefined;
+  if (parsed.branchPublish !== undefined) {
+    if (!parsed.branchPublish || typeof parsed.branchPublish !== "object") {
+      throw new Error("worker outcome branchPublish must be an object");
+    }
+    const candidate = parsed.branchPublish as Partial<WorkerOutcomeBranchPublish>;
+    branchPublish = {
+      ...(typeof candidate.branchName === "string" && candidate.branchName.trim().length > 0
+        ? { branchName: candidate.branchName }
+        : {}),
+      ...(typeof candidate.commitSha === "string" && candidate.commitSha.trim().length > 0
+        ? { commitSha: candidate.commitSha }
+        : {}),
+      ...(typeof candidate.notes === "string" && candidate.notes.trim().length > 0
+        ? { notes: candidate.notes }
+        : {})
+    };
+  }
+
+  let pullRequestHandoff: WorkerOutcomePullRequestHandoff | undefined;
+  if (parsed.pullRequestHandoff !== undefined) {
+    if (!parsed.pullRequestHandoff || typeof parsed.pullRequestHandoff !== "object") {
+      throw new Error("worker outcome pullRequestHandoff must be an object");
+    }
+
+    const candidate = parsed.pullRequestHandoff as Partial<WorkerOutcomePullRequestHandoff>;
+    pullRequestHandoff = {
+      title: parseStringField(candidate.title, "worker outcome pullRequestHandoff title"),
+      body: parseStringField(candidate.body, "worker outcome pullRequestHandoff body"),
+      ...(typeof candidate.baseBranch === "string" && candidate.baseBranch.trim().length > 0
+        ? { baseBranch: candidate.baseBranch }
+        : {}),
+      ...(typeof candidate.headBranch === "string" && candidate.headBranch.trim().length > 0
+        ? { headBranch: candidate.headBranch }
+        : {}),
+      ...(typeof candidate.url === "string" && candidate.url.trim().length > 0
+        ? { url: candidate.url }
+        : {}),
+      ...(typeof candidate.number === "number" && Number.isInteger(candidate.number) && candidate.number > 0
+        ? { number: candidate.number }
+        : {}),
+      ...(candidate.status === "draft" || candidate.status === "open" || candidate.status === "merged" || candidate.status === "closed"
+        ? { status: candidate.status }
+        : {})
+    };
+  }
 
   return {
     summary,
     status,
     messages,
-    blockingIssues
+    blockingIssues,
+    ...(artifacts.length > 0 ? { artifacts } : {}),
+    ...(branchPublish && Object.keys(branchPublish).length > 0 ? { branchPublish } : {}),
+    ...(pullRequestHandoff ? { pullRequestHandoff } : {})
   };
 }
 
