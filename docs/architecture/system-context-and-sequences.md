@@ -51,18 +51,16 @@ sequenceDiagram
     A->>D: Persist run
     A-->>F: Run created
 
-    F->>A: POST /api/v1/tasks
-    A->>D: Persist task DAG state
-    A-->>F: Tasks created
-
-    F->>A: POST /api/v1/agents
-    A->>D: Persist agent and session metadata
-    A-->>F: Agent/session registered
-
-    A->>W: Dispatch session metadata
-    W->>C: Start or resume Codex runtime flow
-    C-->>W: Session/thread state
-    W->>A: Task/message/validation/artifact updates
+    F->>A: Trigger leader planning loop for the run
+    A->>D: Persist leader agent/session metadata
+    A->>W: Start leader session
+    W->>C: codex session start
+    C-->>W: threadId
+    W->>A: Persist session threadId
+    A->>W: Continue leader session with planning prompt
+    W->>C: codex-reply planning turn
+    C-->>W: Plan output with task DAG
+    W->>A: Persist .swarm/plan.md artifact and task DAG
     A->>D: Persist workflow state
     A-->>F: Updated run/task state for board and review UI
 ```

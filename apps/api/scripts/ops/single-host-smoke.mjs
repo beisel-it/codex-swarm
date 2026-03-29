@@ -1,6 +1,8 @@
-import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+
+import { runLeaderPlanningLoop } from "../../src/lib/leader-planning-loop.ts";
 
 const baseUrl = process.env.SMOKE_BASE_URL;
 const authToken = process.env.SMOKE_AUTH_TOKEN ?? process.env.DEV_AUTH_TOKEN ?? "codex-swarm-dev-token";
@@ -40,35 +42,38 @@ async function request(method, path, payload) {
   return data;
 }
 
-function buildPlanMarkdown(goal) {
-  return [
-    "# Swarm Plan",
-    "",
-    "## Goal",
-    goal,
-    "",
-    "## Tasks",
-    "",
-    "1. Draft the leader plan",
-    "   Role: tech-lead",
-    "   Acceptance Criteria:",
-    "   - .swarm/plan.md exists",
-    "   - run.planArtifactPath is populated",
-    "",
-    "2. Execute the delegated task",
-    "   Role: backend-developer",
-    "   Acceptance Criteria:",
-    "   - worker receives a direct message from the leader",
-    "   - run detail shows both sessions"
-  ].join("\n");
+function buildFixturePlan(goal) {
+  return JSON.stringify({
+    summary: `Leader session planned the smoke workflow for: ${goal}`,
+    tasks: [
+      {
+        key: "leader-plan",
+        title: "Draft the leader plan",
+        role: "tech-lead",
+        description: "Write and persist the plan artifact",
+        acceptanceCriteria: [
+          ".swarm/plan.md exists",
+          "run.planArtifactPath is populated"
+        ],
+        dependencyKeys: []
+      },
+      {
+        key: "worker-task",
+        title: "Execute the delegated task",
+        role: "backend-developer",
+        description: "Pick up the next delegated backend action",
+        acceptanceCriteria: [
+          "worker receives a direct message from the leader",
+          "worker session is registered"
+        ],
+        dependencyKeys: ["leader-plan"]
+      }
+    ]
+  });
 }
 
 const workspaceRoot = await mkdtemp(join(tmpdir(), "codex-swarm-smoke-"));
-const planDir = join(workspaceRoot, ".swarm");
-const planPath = join(planDir, "plan.md");
-
-await mkdir(planDir, { recursive: true });
-await writeFile(planPath, `${buildPlanMarkdown(runGoal)}\n`, "utf8");
+await mkdir(join(workspaceRoot, ".swarm"), { recursive: true });
 
 const repository = await request("POST", "/api/v1/repositories", {
   name: repositoryName,
@@ -86,64 +91,42 @@ const run = await request("POST", "/api/v1/runs", {
   }
 });
 
-const leaderTask = await request("POST", "/api/v1/tasks", {
+const leaderFlow = await runLeaderPlanningLoop({
+  request,
   runId: run.id,
-  title: "Draft the leader plan",
-  description: "Write and persist the plan artifact",
-  role: "tech-lead",
-  priority: 1,
-  dependencyIds: [],
-  acceptanceCriteria: ["plan artifact exists", "run is linked to the plan artifact"]
-});
-
-const workerTask = await request("POST", "/api/v1/tasks", {
-  runId: run.id,
-  title: "Execute the delegated task",
-  description: "Pick up the next delegated backend action",
-  role: "backend-developer",
-  priority: 2,
-  dependencyIds: [leaderTask.id],
-  acceptanceCriteria: ["delegation message exists", "worker session is registered"]
-});
-
-const leaderAgent = await request("POST", "/api/v1/agents", {
-  runId: run.id,
-  name: "leader",
-  role: "tech-lead",
-  status: "idle",
-  currentTaskId: leaderTask.id,
-  session: {
-    threadId: leaderThreadId,
+  workspaceRoot,
+  actorId: "tech-lead",
+  runtimeConfig: {
     cwd: workspaceRoot,
+    profile: "default",
     sandbox: "workspace-write",
     approvalPolicy: "on-request",
-    includePlanTool: true,
-    metadata: {
-      source: "single-host-smoke"
-    }
-  }
+    includePlanTool: true
+  },
+  supervisorCommand: [
+    process.execPath,
+    "--input-type=module",
+    "-e",
+    "setInterval(() => {}, 1000);"
+  ],
+  executeTool: async (toolRequest) => ({
+    threadId: leaderThreadId,
+    output: toolRequest.tool === "codex"
+      ? "leader-started"
+      : buildFixturePlan(runGoal)
+  })
 });
 
-await request("POST", "/api/v1/artifacts", {
-  runId: run.id,
-  taskId: leaderTask.id,
-  kind: "plan",
-  path: planPath,
-  contentType: "text/markdown",
-  metadata: {
-    relativePath: ".swarm/plan.md",
-    source: "single-host-smoke"
-  }
-});
+const leaderTask = leaderFlow.tasks.find((task) => task.role === "tech-lead");
+const workerTask = leaderFlow.tasks.find((task) => task.role === "backend-developer");
 
-await request("PATCH", `/api/v1/runs/${run.id}/status`, {
-  status: "planning",
-  planArtifactPath: planPath
-});
+if (!leaderTask || !workerTask) {
+  throw new Error("leader planning loop did not produce both leader and worker tasks");
+}
 
 await request("PATCH", `/api/v1/tasks/${leaderTask.id}/status`, {
   status: "completed",
-  ownerAgentId: leaderAgent.id
+  ownerAgentId: leaderFlow.agentId
 });
 
 const workerAgent = await request("POST", "/api/v1/agents", {
@@ -166,10 +149,10 @@ const workerAgent = await request("POST", "/api/v1/agents", {
 
 await request("POST", "/api/v1/messages", {
   runId: run.id,
-  senderAgentId: leaderAgent.id,
+  senderAgentId: leaderFlow.agentId,
   recipientAgentId: workerAgent.id,
   kind: "direct",
-  body: `Implement task ${workerTask.id} using the persisted plan at ${planPath}`
+  body: `Implement task ${workerTask.id} using the persisted plan at ${leaderFlow.planArtifactPath}`
 });
 
 const runDetail = await request("GET", `/api/v1/runs/${run.id}`);
@@ -183,10 +166,11 @@ const verification = {
   workerTaskStatus: runDetail.tasks.find((task) => task.id === workerTask.id)?.status ?? null,
   agentCount: runDetail.agents.length,
   sessionThreadIds: runDetail.sessions.map((session) => session.threadId),
+  leaderSessionId: leaderFlow.sessionId,
   directMessages: messages.length
 };
 
-const ok = verification.planArtifactPath === planPath
+const ok = verification.planArtifactPath === leaderFlow.planArtifactPath
   && verification.leaderTaskStatus === "completed"
   && verification.workerTaskStatus === "pending"
   && verification.agentCount >= 2

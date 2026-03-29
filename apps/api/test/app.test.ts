@@ -2,6 +2,7 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { HTTPMethods } from "fastify";
 import {
   buildPlanMarkdown,
   CodexSessionRuntime,
@@ -12,6 +13,8 @@ import {
 import type { ControlPlaneService } from "../src/services/control-plane-service.js";
 import { buildApp } from "../src/app.js";
 import { getConfig } from "../src/config.js";
+import type { LeaderPlanningLoopRequest } from "../src/lib/leader-planning-loop.js";
+import { runLeaderPlanningLoop } from "../src/lib/leader-planning-loop.js";
 import { HttpError } from "../src/lib/http-error.js";
 
 const ids = {
@@ -3549,6 +3552,162 @@ describe("buildApp", () => {
         }
       });
     } finally {
+      await app.close();
+    }
+  });
+
+  it("executes a leader planning loop and persists the generated task DAG", async () => {
+    const app = await buildApp({
+      config: getConfig({
+        NODE_ENV: "test",
+        PORT: 3000,
+        HOST: "127.0.0.1",
+        DATABASE_URL: "postgres://unused/test",
+        DEV_AUTH_TOKEN: "test-token",
+        OPENAI_TRACING_DISABLED: true
+      }),
+      controlPlane: new FakeVerticalSliceControlPlane() as unknown as ControlPlaneService
+    });
+
+    const headers = {
+      authorization: "Bearer test-token"
+    };
+    const workspaceRoot = await mkdtemp(join(tmpdir(), "codex-swarm-leader-loop-"));
+
+    try {
+      const createRunResponse = await app.inject({
+        method: "POST",
+        url: "/api/v1/runs",
+        headers,
+        payload: {
+          repositoryId: ids.repository,
+          goal: "Plan a leader-driven hello-world backend slice",
+          concurrencyCap: 2,
+          metadata: {
+            scenario: "leader-planning-loop"
+          }
+        }
+      });
+
+      expect(createRunResponse.statusCode).toBe(201);
+
+      const request: LeaderPlanningLoopRequest = async <T>(
+        method: string,
+        path: string,
+        payload?: Record<string, unknown>
+      ) => {
+        const response = await (app.inject as any)({
+          method,
+          url: path,
+          headers,
+          ...(payload ? { payload } : {})
+        }) as {
+          statusCode: number;
+          body: string;
+          json(): T;
+        };
+
+        if (response.statusCode >= 400) {
+          throw new Error(`${method} ${path} failed with ${response.statusCode}: ${response.body}`);
+        }
+
+        return response.json() as T;
+      };
+
+      const result = await runLeaderPlanningLoop({
+        request,
+        runId: ids.run,
+        workspaceRoot,
+        actorId: "tech-lead",
+        runtimeConfig: {
+          cwd: workspaceRoot,
+          profile: "default",
+          sandbox: "workspace-write",
+          approvalPolicy: "on-request",
+          includePlanTool: true
+        },
+        supervisorCommand: [
+          process.execPath,
+          "--input-type=module",
+          "-e",
+          "setInterval(() => {}, 1000);"
+        ],
+        executeTool: async (toolRequest: unknown) => ({
+          threadId: "thread-leader-plan",
+          output: typeof toolRequest === "object" && toolRequest !== null && "tool" in toolRequest && toolRequest.tool === "codex"
+            ? "leader-started"
+            : JSON.stringify({
+              summary: "Leader produced a plan and delegated the implementation",
+              tasks: [
+                {
+                  key: "leader-plan",
+                  title: "Draft the leader plan",
+                  role: "tech-lead",
+                  description: "Persist the plan artifact and review the DAG",
+                  acceptanceCriteria: [
+                    ".swarm/plan.md exists",
+                    "plan artifact is linked to the run"
+                  ],
+                  dependencyKeys: []
+                },
+                {
+                  key: "backend-impl",
+                  title: "Implement the hello-world backend slice",
+                  role: "backend-developer",
+                  description: "Pick up the first delegated coding task",
+                  acceptanceCriteria: [
+                    "task is ready for implementation",
+                    "leader handoff is persisted"
+                  ],
+                  dependencyKeys: ["leader-plan"]
+                }
+              ]
+            })
+        })
+      });
+
+      expect(result.threadId).toBe("thread-leader-plan");
+      expect(result.tasks.map((task) => task.title)).toEqual([
+        "Draft the leader plan",
+        "Implement the hello-world backend slice"
+      ]);
+      expect(result.tasks[0]?.dependencyIds).toEqual([]);
+      expect(result.tasks[1]?.dependencyIds).toEqual([result.tasks[0]?.id]);
+      expect(result.continuedAt).toBeTruthy();
+
+      const planMarkdown = await readFile(result.planArtifactPath, "utf8");
+      expect(planMarkdown).toContain("Draft the leader plan");
+      expect(planMarkdown).toContain("Implement the hello-world backend slice");
+
+      const runDetailResponse = await app.inject({
+        method: "GET",
+        url: `/api/v1/runs/${ids.run}`,
+        headers
+      });
+
+      expect(runDetailResponse.statusCode).toBe(200);
+      expect(runDetailResponse.json()).toMatchObject({
+        id: ids.run,
+        status: "planning",
+        planArtifactPath: result.planArtifactPath,
+        sessions: [
+          {
+            threadId: "thread-leader-plan"
+          }
+        ],
+        tasks: [
+          {
+            title: "Draft the leader plan",
+            status: "pending"
+          },
+          {
+            title: "Implement the hello-world backend slice",
+            status: "blocked"
+          }
+        ]
+      });
+    } finally {
+      await rm(workspaceRoot, { recursive: true, force: true });
       await app.close();
     }
   });

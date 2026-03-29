@@ -118,6 +118,7 @@ const statements = [
     worker_node_id text references worker_nodes(id),
     sticky_node_id text references worker_nodes(id),
     placement_constraint_labels jsonb not null default '[]'::jsonb,
+    last_heartbeat_at timestamptz,
     state text not null default 'active',
     stale_reason text,
     metadata jsonb not null default '{}'::jsonb,
@@ -258,6 +259,7 @@ async function main() {
   await db.execute(sql.raw("alter table approvals add column if not exists delegation_reason text"));
   await db.execute(sql.raw("alter table tasks add column if not exists validation_templates jsonb not null default '[]'::jsonb"));
   await db.execute(sql.raw("alter table validations add column if not exists artifact_ids jsonb not null default '[]'::jsonb"));
+  await db.execute(sql.raw("alter table sessions add column if not exists last_heartbeat_at timestamptz"));
   await db.execute(sql.raw("alter table worker_dispatch_assignments add column if not exists claimed_at timestamptz"));
   await db.execute(sql.raw("alter table worker_dispatch_assignments add column if not exists completed_at timestamptz"));
   await db.execute(sql.raw("alter table worker_dispatch_assignments add column if not exists last_failure_reason text"));

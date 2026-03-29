@@ -271,6 +271,7 @@ export const sessionSchema = z.object({
   workerNodeId: z.uuid().nullable(),
   stickyNodeId: z.uuid().nullable(),
   placementConstraintLabels: z.array(z.string().min(1)).default([]),
+  lastHeartbeatAt: z.date().nullable(),
   state: z.enum(workerSessionStates),
   staleReason: z.string().min(1).nullable(),
   metadata: z.record(z.string(), z.unknown()).default({}),

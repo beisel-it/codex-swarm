@@ -126,6 +126,7 @@ export const sessions = pgTable("sessions", {
   workerNodeId: text("worker_node_id").references(() => workerNodes.id),
   stickyNodeId: text("sticky_node_id").references(() => workerNodes.id),
   placementConstraintLabels: jsonb("placement_constraint_labels").$type<string[]>().notNull().default([]),
+  lastHeartbeatAt: timestamp("last_heartbeat_at", { withTimezone: true }),
   state: text("state").notNull().default("active"),
   staleReason: text("stale_reason"),
   metadata: jsonb("metadata").$type<Record<string, unknown>>().notNull().default({}),
