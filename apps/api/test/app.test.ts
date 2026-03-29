@@ -1,4 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  CodexSessionRuntime,
+  CodexServerSupervisor,
+  SessionRegistry
+} from "@codex-swarm/worker";
 import type { ControlPlaneService } from "../src/services/control-plane-service.js";
 import { buildApp } from "../src/app.js";
 import { getConfig } from "../src/config.js";
@@ -2939,6 +2944,173 @@ describe("buildApp", () => {
       ]
     });
 
+    await app.close();
+  });
+
+  it("proves a hello-world control-plane launch and continuation path with persisted thread reuse", async () => {
+    const app = await buildApp({
+      config: getConfig({
+        NODE_ENV: "test",
+        PORT: 3000,
+        HOST: "127.0.0.1",
+        DATABASE_URL: "postgres://unused/test",
+        DEV_AUTH_TOKEN: "test-token",
+        OPENAI_TRACING_DISABLED: true
+      }),
+      controlPlane: new FakeVerticalSliceControlPlane() as unknown as ControlPlaneService
+    });
+
+    const headers = {
+      authorization: "Bearer test-token"
+    };
+
+    const createRunResponse = await app.inject({
+      method: "POST",
+      url: "/api/v1/runs",
+      headers,
+      payload: {
+        repositoryId: ids.repository,
+        goal: "Launch a hello-world leader session and continue it",
+        concurrencyCap: 1,
+        metadata: {
+          scenario: "hello-world"
+        }
+      }
+    });
+
+    expect(createRunResponse.statusCode).toBe(201);
+
+    const initialRegistry = new SessionRegistry();
+    initialRegistry.seed({
+      sessionId: ids.session,
+      runId: ids.run,
+      agentId: ids.agent,
+      worktreePath: process.cwd()
+    });
+
+    const launchSupervisor = new CodexServerSupervisor({
+      config: {
+        cwd: process.cwd(),
+        profile: "default",
+        sandbox: "workspace-write",
+        approvalPolicy: "on-request",
+        includePlanTool: true
+      },
+      command: [
+        process.execPath,
+        "--input-type=module",
+        "-e",
+        "setInterval(() => {}, 1000);"
+      ]
+    });
+    const launchRuntime = new CodexSessionRuntime({
+      registry: initialRegistry,
+      supervisor: launchSupervisor,
+      executeTool: async (request) => ({
+        threadId: "thread-hello-world",
+        output: request.tool === "codex" ? "leader-started" : "leader-continued"
+      }),
+      now: () => new Date("2026-03-29T12:00:00.000Z")
+    });
+
+    const launchResult = await launchRuntime.startSession(ids.session, "Create a hello-world leader session");
+    expect(launchResult.session.threadId).toBe("thread-hello-world");
+
+    const createLeaderResponse = await app.inject({
+      method: "POST",
+      url: "/api/v1/agents",
+      headers,
+      payload: {
+        runId: ids.run,
+        name: "leader",
+        role: "tech-lead",
+        status: "idle",
+        session: {
+          threadId: launchResult.session.threadId,
+          cwd: process.cwd(),
+          sandbox: "workspace-write",
+          approvalPolicy: "on-request",
+          includePlanTool: true,
+          metadata: {
+            scenario: "hello-world"
+          }
+        }
+      }
+    });
+
+    expect(createLeaderResponse.statusCode).toBe(201);
+
+    const persistedRunResponse = await app.inject({
+      method: "GET",
+      url: `/api/v1/runs/${ids.run}`,
+      headers
+    });
+
+    expect(persistedRunResponse.statusCode).toBe(200);
+    expect(persistedRunResponse.json()).toMatchObject({
+      id: ids.run,
+      sessions: [
+        {
+          id: ids.session,
+          threadId: "thread-hello-world",
+          agentId: ids.agent
+        }
+      ]
+    });
+
+    const rehydratedRegistry = new SessionRegistry();
+    rehydratedRegistry.hydrate([
+      {
+        sessionId: ids.session,
+        runId: ids.run,
+        agentId: ids.agent,
+        worktreePath: process.cwd(),
+        state: "active",
+        threadId: "thread-hello-world",
+        staleReason: null,
+        lastHeartbeatAt: new Date("2026-03-29T12:00:00.000Z"),
+        createdAt: new Date("2026-03-29T12:00:00.000Z"),
+        updatedAt: new Date("2026-03-29T12:00:00.000Z")
+      }
+    ]);
+
+    const continueSupervisor = new CodexServerSupervisor({
+      config: {
+        cwd: process.cwd(),
+        profile: "default",
+        sandbox: "workspace-write",
+        approvalPolicy: "on-request",
+        includePlanTool: true
+      },
+      command: [
+        process.execPath,
+        "--input-type=module",
+        "-e",
+        "setInterval(() => {}, 1000);"
+      ]
+    });
+    const continueRuntime = new CodexSessionRuntime({
+      registry: rehydratedRegistry,
+      supervisor: continueSupervisor,
+      executeTool: async () => ({
+        threadId: "thread-hello-world",
+        output: "leader-continued"
+      }),
+      now: () => new Date("2026-03-29T12:05:00.000Z")
+    });
+
+    const continueResult = await continueRuntime.continueSession(ids.session, "Continue the hello-world leader session");
+    expect(continueResult.request.tool).toBe("codex-reply");
+    if (continueResult.request.tool !== "codex-reply") {
+      throw new Error("expected a codex-reply request");
+    }
+    expect(continueResult.request.input.threadId).toBe("thread-hello-world");
+    expect(continueResult.session.lastHeartbeatAt?.toISOString()).toBe("2026-03-29T12:05:00.000Z");
+
+    const stopped = await continueRuntime.stopSession(ids.session);
+    expect(stopped.session.state).toBe("stopped");
+
+    await launchRuntime.stopSession(ids.session);
     await app.close();
   });
 
