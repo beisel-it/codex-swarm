@@ -11,7 +11,7 @@ TypeScript pnpm-workspace scaffold for the M0/M1 slice described in [PRD.md](./P
 - `packages/database`: database package stub plus initial Prisma schema
 - `packages/orchestration`: shared orchestration helpers for M1 task behavior
 - `.codex/agents`: curated starter role pack for leader, architect, implementer, reviewer, and tester
-- `.agents/skills`: reusable workflow skills for planning, DAG creation, milestone validation, and PR preparation
+- `.agents/skills`: reusable workflow skills for planning, DAG creation, milestone validation, PR preparation, and codex-swarm external-operator control
 - `templates/repo-profiles`: stack-specific onboarding templates for Node, Python, JVM, and Go repos
 
 ## Setup
@@ -80,6 +80,8 @@ Operations docs:
 - [`docs/user-guide.md`](./docs/user-guide.md)
 - [`docs/admin-guide.md`](./docs/admin-guide.md)
 - [`docs/operator-guide.md`](./docs/operator-guide.md)
+- [`docs/operator-skill-library.md`](./docs/operator-skill-library.md)
+- [`docs/operator-skill-workflows.md`](./docs/operator-skill-workflows.md)
 - [`docs/support-playbooks.md`](./docs/support-playbooks.md)
 - [`docs/reference-deployments.md`](./docs/reference-deployments.md)
 - [`docs/operations/security.md`](./docs/operations/security.md)
@@ -90,10 +92,12 @@ Operations docs:
 
 ## Productivity Packs
 
-The repository includes starter assets for the Phase 3 productivity-pack scope in the roadmap:
+The repository includes starter assets for the Phase 3 productivity-pack scope in the roadmap plus the M8 external-operator skill pack:
 
 - root [`AGENTS.md`](./AGENTS.md) for repo-specific guidance
 - `.codex/config.toml` and `.codex/agents/*.toml` for curated role packs
-- `.agents/skills/*/SKILL.md` for reusable execution workflows
+- `.agents/skills/README.md` for the codex-swarm operator-skill index
+- `.agents/skills/*/SKILL.md` for reusable execution workflows, including codex-swarm diagnostics and recovery
+- [`docs/operator-skill-workflows.md`](./docs/operator-skill-workflows.md) for grounded example flows
 - `.swarm/prompt.md`, `.swarm/runbook.md`, and `.swarm/status.md` for durable run context
 - `templates/repo-profiles/*.md` for stack-specific onboarding defaults
