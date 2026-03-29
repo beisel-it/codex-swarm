@@ -2482,6 +2482,13 @@ function App() {
     setActionPending(true)
 
     try {
+      setData((current) => ({
+        ...current,
+        repositories: current.repositories.filter((repository) => repository.id !== repositoryId),
+      }))
+      if (runDraftRepositoryId === repositoryId) {
+        setRunDraftRepositoryId('')
+      }
       await deleteRepository(repositoryId)
       if (editingRepositoryId === repositoryId) {
         setEditingRepositoryId(null)
@@ -2529,6 +2536,19 @@ function App() {
     setActionPending(true)
 
     try {
+      setData((current) => ({
+        ...current,
+        runs: current.runs.filter((run) => run.id !== runId),
+        tasks: current.tasks.filter((task) => task.runId !== runId),
+        agents: current.agents.filter((agent) => agent.runId !== runId),
+        approvals: current.approvals.filter((approval) => approval.runId !== runId),
+        validations: current.validations.filter((validation) => validation.runId !== runId),
+        artifacts: current.artifacts.filter((artifact) => artifact.runId !== runId),
+        messages: current.messages.filter((message) => message.runId !== runId),
+      }))
+      if (selectedRunId === runId) {
+        setSelectedRunId('')
+      }
       await deleteRun(runId)
       if (editingRunId === runId) {
         setEditingRunId(null)
