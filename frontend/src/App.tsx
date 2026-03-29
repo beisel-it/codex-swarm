@@ -1727,10 +1727,15 @@ function App() {
   const [taskDraftRole, setTaskDraftRole] = useState('developer')
   const [showRepoControls, setShowRepoControls] = useState(false)
   const [showRunControls, setShowRunControls] = useState(false)
+  const [showRepositoryInventory, setShowRepositoryInventory] = useState(true)
+  const [showRunInventory, setShowRunInventory] = useState(true)
   const [showDagSection, setShowDagSection] = useState(false)
   const [showAgentSection, setShowAgentSection] = useState(false)
   const [showAllRuns, setShowAllRuns] = useState(false)
   const [showAllRepositories, setShowAllRepositories] = useState(false)
+  const [runFormNotice, setRunFormNotice] = useState('')
+  const [repoFormNotice, setRepoFormNotice] = useState('')
+  const [highlightedPanel, setHighlightedPanel] = useState<'run' | 'repo' | null>(null)
   const [viewportWidth, setViewportWidth] = useState(() => {
     if (typeof window === 'undefined') {
       return 1280
@@ -1765,6 +1770,33 @@ function App() {
     window.addEventListener('resize', handleResize)
     return () => window.removeEventListener('resize', handleResize)
   }, [])
+
+  useEffect(() => {
+    if (!highlightedPanel) {
+      return
+    }
+
+    const timeoutId = window.setTimeout(() => setHighlightedPanel(null), 1800)
+    return () => window.clearTimeout(timeoutId)
+  }, [highlightedPanel])
+
+  useEffect(() => {
+    if (!runFormNotice) {
+      return
+    }
+
+    const timeoutId = window.setTimeout(() => setRunFormNotice(''), 2200)
+    return () => window.clearTimeout(timeoutId)
+  }, [runFormNotice])
+
+  useEffect(() => {
+    if (!repoFormNotice) {
+      return
+    }
+
+    const timeoutId = window.setTimeout(() => setRepoFormNotice(''), 2200)
+    return () => window.clearTimeout(timeoutId)
+  }, [repoFormNotice])
 
   useEffect(() => {
     let active = true
@@ -2267,6 +2299,8 @@ function App() {
     setRepoDraftUrl(repository.provider === 'local' ? '' : repository.url)
     setRepoDraftLocalPath(repository.localPath ?? '')
     setShowRepoControls(true)
+    setRepoFormNotice(`Editing ${repository.name}`)
+    setHighlightedPanel('repo')
     setErrorText('')
   }
 
@@ -2296,6 +2330,16 @@ function App() {
     setRunDraftGoal(run.goal)
     setRunDraftBranchName(run.branchName ?? '')
     setShowRunControls(true)
+    setRunFormNotice(`Editing ${run.goal}`)
+    setHighlightedPanel('run')
+    setErrorText('')
+  }
+
+  function handleUseRepository(repository: Repository) {
+    setRunDraftRepositoryId(repository.id)
+    setShowRunControls(true)
+    setRunFormNotice(`Using ${repository.name}`)
+    setHighlightedPanel('run')
     setErrorText('')
   }
 
@@ -2396,7 +2440,8 @@ function App() {
           </div>
 
           <div className="control-stack">
-            <section className={`control-card ${showRepoControls ? 'is-open' : 'is-collapsed'}`}>
+            <div className="control-group">
+            <section className={`control-card ${showRepoControls ? 'is-open' : 'is-collapsed'} ${highlightedPanel === 'repo' ? 'is-flash' : ''}`}>
               <div className="control-card-header">
                 <div className="control-card-heading">
                   <strong>{editingRepositoryId ? 'Edit repository' : 'Register repository'}</strong>
@@ -2460,9 +2505,10 @@ function App() {
                   </div>
                 </>
               ) : null}
+              {repoFormNotice ? <p className="control-feedback">{repoFormNotice}</p> : null}
             </section>
 
-            <section className={`control-card ${showRunControls ? 'is-open' : 'is-collapsed'}`}>
+            <section className={`control-card ${showRunControls ? 'is-open' : 'is-collapsed'} ${highlightedPanel === 'run' ? 'is-flash' : ''}`}>
               <div className="control-card-header">
                 <div className="control-card-heading">
                   <strong>{editingRunId ? 'Edit run' : 'Create and start run'}</strong>
@@ -2524,20 +2570,29 @@ function App() {
                   </div>
                 </>
               ) : null}
+              {runFormNotice ? <p className="control-feedback">{runFormNotice}</p> : null}
             </section>
+            </div>
 
-            <section className="control-card is-open">
+            <div className="control-group control-group-tracks">
+            <section className={`control-card ${showRepositoryInventory ? 'is-open' : 'is-collapsed'}`}>
               <div className="control-card-header">
                 <div className="control-card-heading">
                   <strong>Repositories</strong>
                   <span>{data.repositories.length} tracked</span>
                 </div>
-                {data.repositories.length > 6 ? (
-                  <button type="button" className="control-toggle" onClick={() => setShowAllRepositories((current) => !current)}>
-                    {showAllRepositories ? 'Less' : `All ${data.repositories.length}`}
+                <div className="control-card-actions">
+                  {data.repositories.length > 6 ? (
+                    <button type="button" className="control-toggle" onClick={() => setShowAllRepositories((current) => !current)}>
+                      {showAllRepositories ? 'Less' : `All ${data.repositories.length}`}
+                    </button>
+                  ) : null}
+                  <button type="button" className="control-toggle" aria-expanded={showRepositoryInventory} onClick={() => setShowRepositoryInventory((current) => !current)}>
+                    {showRepositoryInventory ? 'Hide' : 'Show'}
                   </button>
-                ) : null}
+                </div>
               </div>
+              {showRepositoryInventory ? (
               <div className="inventory-list">
                 {visibleRepositories.map((repository) => (
                   <article key={repository.id} className="inventory-item">
@@ -2546,7 +2601,7 @@ function App() {
                       <p>{repository.provider === 'local' ? repository.localPath ?? repository.url : repository.url}</p>
                     </div>
                     <div className="inventory-actions">
-                      <button type="button" className="table-action" onClick={() => setRunDraftRepositoryId(repository.id)}>
+                      <button type="button" className="table-action" onClick={() => handleUseRepository(repository)}>
                         Use
                       </button>
                       <button type="button" className="table-action" onClick={() => handleEditRepository(repository)}>
@@ -2560,72 +2615,88 @@ function App() {
                 ))}
                 {data.repositories.length === 0 ? <p className="inventory-empty">No repositories registered yet.</p> : null}
               </div>
+              ) : null}
             </section>
+            <section className={`control-card ${showRunInventory ? 'is-open' : 'is-collapsed'}`}>
+              <div className="control-card-header">
+                <div className="control-card-heading">
+                  <strong>Runs</strong>
+                  <span>{data.runs.length} tracked</span>
+                </div>
+                <div className="control-card-actions">
+                  {data.runs.length > 8 ? (
+                    <button type="button" className="control-toggle" onClick={() => setShowAllRuns((current) => !current)}>
+                      {showAllRuns ? 'Recent' : `All ${data.runs.length}`}
+                    </button>
+                  ) : null}
+                  <button type="button" className="control-toggle" aria-expanded={showRunInventory} onClick={() => setShowRunInventory((current) => !current)}>
+                    {showRunInventory ? 'Hide' : 'Show'}
+                  </button>
+                </div>
+              </div>
+              {showRunInventory ? (
+              <div className="run-stack">
+                {visibleRuns.map((run) => (
+                  <div key={run.id} className={`run-entry ${run.id === selectedRun?.id ? 'is-selected' : ''}`}>
+                    <button
+                      type="button"
+                      className={`run-card ${run.id === selectedRun?.id ? 'is-selected' : ''}`}
+                      onClick={() => {
+                        startTransition(() => setSelectedRunId(run.id))
+                      }}
+                    >
+                      <div className="run-card-topline">
+                        <span className="run-timestamp">{formatDate(run.updatedAt)}</span>
+                        <div className="run-status-badges">
+                          <div className="run-status-badge">
+                            <span className="badge-label">Run</span>
+                            <span className={`tone-chip tone-${runStatusTone[run.status]}`}>
+                              {formatLabel(run.status)}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                      <h3>{run.goal}</h3>
+                      <p>
+                        {run.pullRequestUrl
+                          ? `PR #${run.pullRequestNumber ?? 'pending'} · ${formatLabel(run.pullRequestStatus ?? 'open')}`
+                          : run.publishedBranch ?? run.branchName ?? 'Branch not assigned yet'}
+                      </p>
+                      <div className="run-card-meta">
+                        <span className="role-chip">
+                          {data.repositories.find((repository) => repository.id === run.repositoryId)?.provider ?? 'other'}
+                        </span>
+                        <span className="run-card-handoff">handoff {formatLabel(run.handoffStatus)}</span>
+                      </div>
+                    </button>
+                    {run.id === selectedRun?.id ? (
+                      <div className="run-card-actions">
+                        <button type="button" className="action-button run-start-button" onClick={handleStartSelectedRun} disabled={actionPending || !selectedRun}>
+                          Start selected run
+                        </button>
+                        <button type="button" className="table-action" onClick={() => handleEditRun(run)}>
+                          Edit
+                        </button>
+                        <button type="button" className="table-action table-action-danger" onClick={() => void handleDeleteRun(run)}>
+                          Delete
+                        </button>
+                      </div>
+                    ) : null}
+                  </div>
+                ))}
+                {data.runs.length === 0 ? (
+                  <article className="live-empty-state">
+                    <strong>No active runs yet.</strong>
+                    <p>Register a repository or create a run from this panel. The other views stay locked until a run exists.</p>
+                  </article>
+                ) : null}
+              </div>
+              ) : null}
+            </section>
+            </div>
           </div>
 
           {errorText ? <p className="control-error control-error-inline">{errorText}</p> : null}
-
-          <div className="run-stack">
-            {visibleRuns.map((run) => (
-              <div key={run.id} className={`run-entry ${run.id === selectedRun?.id ? 'is-selected' : ''}`}>
-                <button
-                  type="button"
-                  className={`run-card ${run.id === selectedRun?.id ? 'is-selected' : ''}`}
-                  onClick={() => {
-                    startTransition(() => setSelectedRunId(run.id))
-                  }}
-                >
-                  <div className="run-card-topline">
-                    <span className="run-timestamp">{formatDate(run.updatedAt)}</span>
-                    <div className="run-status-badges">
-                  <div className="run-status-badge">
-                    <span className="badge-label">Run</span>
-                    <span className={`tone-chip tone-${runStatusTone[run.status]}`}>
-                      {formatLabel(run.status)}
-                    </span>
-                  </div>
-                </div>
-              </div>
-                  <h3>{run.goal}</h3>
-                  <p>
-                    {run.pullRequestUrl
-                      ? `PR #${run.pullRequestNumber ?? 'pending'} · ${formatLabel(run.pullRequestStatus ?? 'open')}`
-                      : run.publishedBranch ?? run.branchName ?? 'Branch not assigned yet'}
-                  </p>
-              <div className="run-card-meta">
-                <span className="role-chip">
-                  {data.repositories.find((repository) => repository.id === run.repositoryId)?.provider ?? 'other'}
-                </span>
-                <span className="run-card-handoff">handoff {formatLabel(run.handoffStatus)}</span>
-              </div>
-            </button>
-                {run.id === selectedRun?.id ? (
-                  <div className="run-card-actions">
-                    <button type="button" className="action-button run-start-button" onClick={handleStartSelectedRun} disabled={actionPending || !selectedRun}>
-                      Start selected run
-                    </button>
-                    <button type="button" className="table-action" onClick={() => handleEditRun(run)}>
-                      Edit
-                    </button>
-                    <button type="button" className="table-action table-action-danger" onClick={() => void handleDeleteRun(run)}>
-                      Delete
-                    </button>
-                  </div>
-                ) : null}
-              </div>
-            ))}
-            {data.runs.length === 0 ? (
-              <article className="live-empty-state">
-                <strong>No active runs yet.</strong>
-                <p>Register a repository or create a run from this panel. The other views stay locked until a run exists.</p>
-              </article>
-            ) : null}
-            {data.runs.length > 8 ? (
-              <button type="button" className="control-toggle list-toggle" onClick={() => setShowAllRuns((current) => !current)}>
-                {showAllRuns ? 'Show recent only' : `Show all ${data.runs.length} runs`}
-              </button>
-            ) : null}
-          </div>
 
           <div className="run-summary-grid">
             <MiniStat label="Blocked tasks" value={String(blockedTasks.length)} />

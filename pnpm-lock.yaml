@@ -107,6 +107,15 @@ importers:
 
   frontend:
     dependencies:
+      '@fontsource/iosevka':
+        specifier: ^5.2.5
+        version: 5.2.5
+      '@fontsource/iosevka-aile':
+        specifier: ^5.2.5
+        version: 5.2.5
+      '@fontsource/iosevka-etoile':
+        specifier: ^5.2.5
+        version: 5.2.5
       react:
         specifier: ^19.2.4
         version: 19.2.4
@@ -470,6 +479,15 @@ packages:
 
   '@fastify/proxy-addr@5.1.0':
     resolution: {integrity: sha512-INS+6gh91cLUjB+PVHfu1UqcB76Sqtpyp7bnL+FYojhjygvOPA9ctiD/JDKsyD9Xgu4hUhCSJBPig/w7duNajw==}
+
+  '@fontsource/iosevka-aile@5.2.5':
+    resolution: {integrity: sha512-K9EwsSxfWPWjvrYM+NkgHaImpHgaVgC67l6uWf6W+4taeca6LKMJn/U11mQiRwLlecoI0PP2Q9o/8iIPaLOSgg==}
+
+  '@fontsource/iosevka-etoile@5.2.5':
+    resolution: {integrity: sha512-DaqaNB1G6qhGh+D+WxZUrln0UJmrM7qXgJgdeXm3U1ekcIph2aWPAcmI1edDj9FLkuGl2ZU9TYywIvzVF6lz0Q==}
+
+  '@fontsource/iosevka@5.2.5':
+    resolution: {integrity: sha512-Zv/UHJodDug1LcnWv2u2+GPp3oWP3U6Xp16cJOsqqZQNsCu8sA/ttT331N0NypxBZ+7c8szlSRlYDcy9liZ8pw==}
 
   '@hono/node-server@1.19.11':
     resolution: {integrity: sha512-dr8/3zEaB+p0D2n/IUrlPF1HZm586qgJNXK1a9fhg/PzdtkK7Ksd5l312tJX2yBuALqDYBlG20QEbayqPyxn+g==}
@@ -2684,6 +2702,12 @@ snapshots:
     dependencies:
       '@fastify/forwarded': 3.0.1
       ipaddr.js: 2.3.0
+
+  '@fontsource/iosevka-aile@5.2.5': {}
+
+  '@fontsource/iosevka-etoile@5.2.5': {}
+
+  '@fontsource/iosevka@5.2.5': {}
 
   '@hono/node-server@1.19.11(hono@4.12.9)':
     dependencies:
