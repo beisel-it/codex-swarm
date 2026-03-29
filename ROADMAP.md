@@ -132,7 +132,7 @@ Fastify HTTP API under `/api/v1`. The authoritative mapping is recorded in
 - Minimal CLI or admin script for smoke testing
 
 ### Exit criteria
-- One run can complete at least one multi-task coding workflow end-to-end.
+- One run can exercise the core orchestration control-plane flow from run creation through task and agent lifecycle progression.
 - Each worker executes in an isolated worktree.[^worktrees]
 - Each worker session is resumable through persisted `threadId`.[^codex-mcp-server]
 

@@ -1066,3 +1066,24 @@ Evidence:
 Residual risks:
 
 - The repo still does not contain an executable control-plane restart acceptance path that proves tasks and approvals remain intact across an actual restart boundary; a future stronger claim would need real restart evidence.
+
+## Task `b9b84f94`
+
+Follow-up objective:
+
+- Narrow the Phase 1 end-to-end workflow claim to the delivered single-host orchestration slice when no real multi-task coding workflow proof exists.
+
+Outcome:
+
+- completed by documentation narrowing
+
+Evidence:
+
+- `ROADMAP.md` now narrows the Phase 1 exit criterion from `One run can complete at least one multi-task coding workflow end-to-end` to `One run can exercise the core orchestration control-plane flow from run creation through task and agent lifecycle progression`.
+- The narrowed wording matches the live API vertical-slice coverage in `apps/api/test/app.test.ts`, which exercises repository-backed run creation, task creation and dependency progression, task completion, agent creation, session persistence, and run-detail readback.
+- The existing single-host architecture note in `docs/architecture/m0-m1-architecture.md` already frames Milestone 1 as `the first end-to-end orchestration slice on a single host`, which is consistent with the narrowed roadmap wording.
+- No repo-local acceptance path currently proves leader planning, delegated coding execution, artifact-producing implementation work, and workflow completion as a single executable run; the narrowing removes that unsupported implication from the canonical roadmap.
+
+Residual risks:
+
+- The repo still does not prove a real multi-task coding workflow from planning through implementation and completion; a future stronger claim would require a genuine smoke or end-to-end acceptance path rather than control-plane slice tests alone.
