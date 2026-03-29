@@ -694,6 +694,76 @@ code {
   border: 1px solid rgba(18, 23, 35, 0.08);
 }
 
+.diff-review-surface,
+.diff-summary-metrics,
+.diff-file-list {
+  display: grid;
+  gap: 14px;
+}
+
+.diff-review-surface {
+  padding: 18px;
+  border-radius: 22px;
+  background:
+    linear-gradient(180deg, rgba(191, 79, 47, 0.06), rgba(191, 79, 47, 0.02)),
+    rgba(255, 250, 244, 0.9);
+  border: 1px solid rgba(191, 79, 47, 0.14);
+}
+
+.diff-surface-header {
+  display: flex;
+  gap: 16px;
+  align-items: start;
+  justify-content: space-between;
+  flex-wrap: wrap;
+}
+
+.diff-surface-header h4 {
+  margin: 4px 0 0;
+}
+
+.artifact-picker {
+  display: grid;
+  gap: 8px;
+  min-width: min(100%, 280px);
+}
+
+.artifact-picker select {
+  width: 100%;
+  min-height: 42px;
+  padding: 0 14px;
+  border-radius: 14px;
+  border: 1px solid rgba(18, 23, 35, 0.12);
+  background: rgba(255, 255, 255, 0.88);
+  color: var(--text-strong);
+}
+
+.diff-summary-metrics {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.diff-metric-card,
+.diff-file-card {
+  padding: 16px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.82);
+  border: 1px solid rgba(18, 23, 35, 0.08);
+}
+
+.diff-metric-card strong,
+.diff-file-card strong {
+  display: block;
+  margin-bottom: 8px;
+}
+
+.diff-file-topline {
+  display: flex;
+  gap: 12px;
+  align-items: start;
+  justify-content: space-between;
+  flex-wrap: wrap;
+}
+
 .contract-card {
   padding: 16px;
   border-radius: 18px;
@@ -917,6 +987,7 @@ code {
   .run-summary-grid,
   .detail-grid,
   .review-grid,
+  .diff-summary-metrics,
   .contract-surface,
   .provider-grid,
   .board-signal-grid,

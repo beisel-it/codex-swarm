@@ -87,10 +87,11 @@ Use the review console when a run is waiting on human or delegated approval:
 
 1. Open `Review` and select the approval request from the left-side review list.
 2. Read the requested context and structured payload before deciding.
-3. Inspect recent validations and artifacts in the same surface so approval is tied to current evidence.
-4. Record resolution feedback directly in the browser, then approve or reject from the action row.
+3. Inspect the diff summary, changed files, and inline diff preview when the approval has a linked diff artifact.
+4. Cross-check recent validations and the generic artifact list in the same surface so approval is tied to current evidence.
+5. Record resolution feedback directly in the browser, then approve or reject from the action row.
 
-![Review console showing approval context, resolution workspace, validations, and artifacts](./assets/screenshots/user-review-console.png)
+![Review console showing approval context, diff summary, validations, and artifacts](./assets/screenshots/user-review-console.png)
 
 ## Walkthrough: Governance and Admin
 

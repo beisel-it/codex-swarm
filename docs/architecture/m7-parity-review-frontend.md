@@ -55,17 +55,15 @@ Reviewed against the live frontend implementation in `frontend/src/App.tsx`, cur
 ## Task 57
 
 - Roadmap entry: `ROADMAP.md` UI scope, `Review page for artifacts and diff summaries` ([ROADMAP.md](/home/florian/codex-swarm/ROADMAP.md#L151))
-- Verdict: `gap`
+- Verdict: `parity`
 - Evidence:
-  - Review workspace supports approval selection, requested context, resolution payloads, and approve/reject actions ([frontend/src/App.tsx](/home/florian/codex-swarm/frontend/src/App.tsx#L2222))
-  - Validation history and artifact review are present in the same surface ([frontend/src/App.tsx](/home/florian/codex-swarm/frontend/src/App.tsx#L2321), [frontend/src/App.tsx](/home/florian/codex-swarm/frontend/src/App.tsx#L2348))
-  - Artifact typing includes `diff`, but the artifact UI only renders kind, path/link, and content type, with no diff-summary-specific presentation ([frontend/src/App.tsx](/home/florian/codex-swarm/frontend/src/App.tsx#L33), [frontend/src/App.tsx](/home/florian/codex-swarm/frontend/src/App.tsx#L2356))
-  - User docs describe approvals, validations, and artifacts, but not in-browser diff summaries ([docs/user-guide.md](/home/florian/codex-swarm/docs/user-guide.md#L80))
-  - Screenshot evidence: [user-review-console.png](/home/florian/codex-swarm/docs/assets/screenshots/user-review-console.png)
+  - Review state now hydrates reviewer artifact detail from `GET /api/v1/artifacts/:id` and keeps the adapter local to the review surface ([frontend/src/App.tsx](/home/florian/codex-swarm/frontend/src/App.tsx#L1285), [frontend/src/App.tsx](/home/florian/codex-swarm/frontend/src/App.tsx#L1586))
+  - The review workspace renders an explicit diff-review surface with loading, error, and no-artifact states, rather than relying only on generic artifact cards ([frontend/src/App.tsx](/home/florian/codex-swarm/frontend/src/App.tsx#L2601))
+  - Reviewer-facing file evidence is visible directly in-browser through changed-file cards, insertions/deletions, summary text, and optional provider links ([frontend/src/App.tsx](/home/florian/codex-swarm/frontend/src/App.tsx#L2642))
+  - Inline reviewer context and raw diff preview remain in the same decision workspace as approve/reject actions, validations, and the generic artifact list ([frontend/src/App.tsx](/home/florian/codex-swarm/frontend/src/App.tsx#L2689), [frontend/src/App.tsx](/home/florian/codex-swarm/frontend/src/App.tsx#L2751), [frontend/src/App.tsx](/home/florian/codex-swarm/frontend/src/App.tsx#L2778))
+  - User docs now describe the in-browser diff-summary workflow for reviewers ([docs/user-guide.md](/home/florian/codex-swarm/docs/user-guide.md#L88))
 - Residual risk:
-  - Reviewers can inspect generic artifacts, but the roadmap wording promised explicit diff-summary behavior in the review page.
-- Follow-up:
-  - Reported to `tech-lead`; backlog follow-up has already been created per direct confirmation.
+  - Browser evidence still needs a refreshed screenshot pass once a stable live diff artifact is available in the running environment; current proof is strongest in the checked-in UI and docs.
 
 ## Task 54
 

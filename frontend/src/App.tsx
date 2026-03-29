@@ -309,7 +309,44 @@ type Artifact = {
   kind: ArtifactKind
   path: string
   contentType: string
+  url?: string | null
+  sizeBytes?: number | null
+  sha256?: string | null
+  metadata?: Record<string, unknown>
   createdAt?: string
+}
+
+type ArtifactContentState = 'available' | 'missing' | 'binary' | 'truncated'
+type ArtifactDiffChangeType = 'added' | 'modified' | 'deleted' | 'renamed' | 'copied' | 'unknown'
+
+type ArtifactDiffFileSummary = {
+  path: string
+  changeType: ArtifactDiffChangeType
+  additions: number
+  deletions: number
+  summary: string | null
+  previousPath: string | null
+  providerUrl: string | null
+}
+
+type ArtifactDiffSummary = {
+  title: string | null
+  changeSummary: string | null
+  filesChanged: number
+  insertions: number
+  deletions: number
+  truncated: boolean
+  fileSummaries: ArtifactDiffFileSummary[]
+  diffPreview: string | null
+  rawDiff: string | null
+  providerUrl: string | null
+}
+
+type ArtifactDetail = {
+  artifact: Artifact
+  contentState: ArtifactContentState
+  bodyText: string | null
+  diffSummary: ArtifactDiffSummary | null
 }
 
 type Message = {
@@ -354,6 +391,8 @@ type SwarmData = {
   auditExport: RunAuditExport | null
   source: 'mock' | 'api'
 }
+
+type LoadState = 'idle' | 'loading' | 'ready' | 'error'
 
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? '').replace(/\/$/, '')
 const API_TOKEN = import.meta.env.VITE_API_TOKEN ?? 'codex-swarm-dev-token'
@@ -576,6 +615,81 @@ const mockAuditExport: RunAuditExport = {
   },
   retention: mockGovernance.retention,
   exportedAt: '2026-03-28T22:17:00.000Z',
+}
+
+const mockArtifactDetails: Record<string, ArtifactDetail> = {
+  'artifact-diff-beta': {
+    artifact: {
+      id: 'artifact-diff-beta',
+      runId: 'run-beta',
+      taskId: 'task-review',
+      kind: 'diff',
+      path: 'artifacts/review/beta-handoff.diff',
+      contentType: 'text/x-diff',
+      url: null,
+      sizeBytes: 936,
+      sha256: null,
+      metadata: {},
+      createdAt: '2026-03-28T19:46:00.000Z',
+    },
+    contentState: 'available',
+    bodyText: `diff --git a/docs/user-guide.md b/docs/user-guide.md
+index 1234567..89abcde 100644
+--- a/docs/user-guide.md
++++ b/docs/user-guide.md
+@@ -81,7 +81,9 @@ Use the review console when a run is waiting on human or delegated approval:
+  1. Open \`Review\` and select the approval request from the left-side review list.
+  2. Read the requested context and structured payload before deciding.
+-3. Inspect recent validations and artifacts in the same surface so approval is tied to current evidence.
++3. Inspect the diff summary, changed files, recent validations, and linked artifacts in the same surface.
++4. Confirm the changed files match the requested review scope before approving.
+  4. Record resolution feedback directly in the browser, then approve or reject from the action row.
+
+diff --git a/frontend/src/App.tsx b/frontend/src/App.tsx
+index aaaaaaa..bbbbbbb 100644
+--- a/frontend/src/App.tsx
++++ b/frontend/src/App.tsx
+@@ -2300,6 +2300,24 @@ function App() {
++  <section className="diff-review-surface">
++    <h4>Diff summary</h4>
++    <p>Render changed-file evidence beside the approval decision controls.</p>
++  </section>`,
+    diffSummary: {
+      title: '2 files changed',
+      changeSummary: '2 files changed, 12 insertions, 3 deletions',
+      filesChanged: 2,
+      insertions: 12,
+      deletions: 3,
+      truncated: false,
+      fileSummaries: [
+        {
+          path: 'docs/user-guide.md',
+          changeType: 'modified',
+          additions: 6,
+          deletions: 1,
+          summary: 'Review workflow updated for in-browser diff inspection.',
+          previousPath: null,
+          providerUrl: null,
+        },
+        {
+          path: 'frontend/src/App.tsx',
+          changeType: 'modified',
+          additions: 6,
+          deletions: 2,
+          summary: 'Review workspace now includes diff-summary evidence.',
+          previousPath: null,
+          providerUrl: null,
+        },
+      ],
+      diffPreview: `docs/user-guide.md
+  + Inspect the diff summary, changed files, recent validations, and linked artifacts
+
+frontend/src/App.tsx
+  + <section className="diff-review-surface">`,
+      rawDiff: null,
+      providerUrl: null,
+    },
+  },
 }
 
 const mockData: SwarmData = {
@@ -912,6 +1026,7 @@ const mockData: SwarmData = {
       requestedPayload: {
         summary: 'Need explicit reviewer approval before the beta handoff opens.',
         target: 'beta handoff',
+        artifactIds: ['artifact-diff-beta'],
       },
       resolutionPayload: {},
       resolver: null,
@@ -1000,6 +1115,15 @@ const mockData: SwarmData = {
       path: 'https://github.com/example/codex-swarm/pull/42',
       contentType: 'text/uri-list',
       createdAt: '2026-03-28T21:18:00.000Z',
+    },
+    {
+      id: 'artifact-diff-beta',
+      runId: 'run-beta',
+      taskId: 'task-review',
+      kind: 'diff',
+      path: 'artifacts/review/beta-handoff.diff',
+      contentType: 'text/x-diff',
+      createdAt: '2026-03-28T19:46:00.000Z',
     },
     {
       id: 'artifact-log',
@@ -1158,6 +1282,10 @@ async function loadApprovalDetail(approvalId: string): Promise<Approval> {
   return requestJson<Approval>(`/api/v1/approvals/${encodeURIComponent(approvalId)}`)
 }
 
+async function loadArtifactDetail(artifactId: string): Promise<ArtifactDetail> {
+  return requestJson<ArtifactDetail>(`/api/v1/artifacts/${encodeURIComponent(artifactId)}`)
+}
+
 async function loadIdentity(): Promise<IdentityContext> {
   return requestJson<IdentityContext>('/api/v1/me')
 }
@@ -1289,6 +1417,31 @@ function formatPayload(payload?: Record<string, unknown> | null) {
   }
 
   return JSON.stringify(payload, null, 2)
+}
+
+function extractArtifactIds(payload?: Record<string, unknown> | null) {
+  const artifactIds = payload?.artifactIds
+  return Array.isArray(artifactIds) ? artifactIds.filter((value): value is string => typeof value === 'string') : []
+}
+
+function formatDiffChangeType(changeType: ArtifactDiffChangeType) {
+  return changeType === 'unknown' ? 'changed' : formatLabel(changeType)
+}
+
+function describeArtifactContentState(contentState: ArtifactContentState) {
+  if (contentState === 'available') {
+    return 'Full text content is available for review.'
+  }
+
+  if (contentState === 'truncated') {
+    return 'The stored artifact exceeded the preview limit, so only a partial diff is shown.'
+  }
+
+  if (contentState === 'binary') {
+    return 'This artifact is binary or unsupported for inline diff rendering.'
+  }
+
+  return 'The artifact blob is missing, so only stored summary metadata is available.'
 }
 
 function describeRepositoryOnboarding(repository: Repository | null) {
@@ -1457,11 +1610,15 @@ function App() {
   const [selectedRunId, setSelectedRunId] = useState(mockData.runs[0]?.id ?? '')
   const [selectedView, setSelectedView] = useState<ViewMode>('board')
   const [selectedApprovalId, setSelectedApprovalId] = useState<string>('')
+  const [selectedReviewArtifactId, setSelectedReviewArtifactId] = useState<string>('')
   const [selectedApprovalDetail, setSelectedApprovalDetail] = useState<Approval | null>(null)
+  const [selectedArtifactDetail, setSelectedArtifactDetail] = useState<ArtifactDetail | null>(null)
   const [reviewNotes, setReviewNotes] = useState('')
   const [taskQuery, setTaskQuery] = useState('')
   const [loading, setLoading] = useState(true)
   const [errorText, setErrorText] = useState<string>('')
+  const [artifactDetailState, setArtifactDetailState] = useState<LoadState>('idle')
+  const [artifactDetailError, setArtifactDetailError] = useState('')
   const [actionPending, setActionPending] = useState(false)
 
   const deferredTaskQuery = useDeferredValue(taskQuery)
@@ -1550,10 +1707,33 @@ function App() {
     runApprovals.find((approval) => approval.id === selectedApprovalId) ??
     runApprovals.find((approval) => approval.status === 'pending') ??
     null
+  const approvalArtifactIds = extractArtifactIds(selectedApprovalDetail?.requestedPayload ?? selectedApproval?.requestedPayload)
+  const reviewDiffArtifacts = runArtifacts.filter((artifact) =>
+    artifact.kind === 'diff'
+      && (approvalArtifactIds.length === 0 || approvalArtifactIds.includes(artifact.id)),
+  )
+  const selectedReviewArtifact =
+    reviewDiffArtifacts.find((artifact) => artifact.id === selectedReviewArtifactId) ??
+    reviewDiffArtifacts[0] ??
+    null
 
   useEffect(() => {
     setSelectedApprovalId(selectedApproval?.id ?? '')
   }, [selectedApproval?.id])
+
+  useEffect(() => {
+    setSelectedReviewArtifactId((current) => {
+      if (!selectedApprovalId) {
+        return ''
+      }
+
+      if (reviewDiffArtifacts.some((artifact) => artifact.id === current)) {
+        return current
+      }
+
+      return reviewDiffArtifacts[0]?.id ?? ''
+    })
+  }, [selectedApprovalId, reviewDiffArtifacts])
 
   useEffect(() => {
     let active = true
@@ -1590,6 +1770,53 @@ function App() {
       active = false
     }
   }, [selectedApprovalId, runApprovals])
+
+  useEffect(() => {
+    let active = true
+
+    async function hydrateArtifactDetail() {
+      if (!selectedReviewArtifactId) {
+        setSelectedArtifactDetail(null)
+        setArtifactDetailState('idle')
+        setArtifactDetailError('')
+        return
+      }
+
+      setArtifactDetailState('loading')
+      setArtifactDetailError('')
+
+      try {
+        const detail = await loadArtifactDetail(selectedReviewArtifactId)
+        if (!active) {
+          return
+        }
+
+        setSelectedArtifactDetail(detail)
+        setArtifactDetailState('ready')
+      } catch (error) {
+        if (!active) {
+          return
+        }
+
+        const fallback = mockArtifactDetails[selectedReviewArtifactId] ?? null
+        if (fallback) {
+          setSelectedArtifactDetail(fallback)
+          setArtifactDetailState('ready')
+          return
+        }
+
+        setSelectedArtifactDetail(null)
+        setArtifactDetailState('error')
+        setArtifactDetailError(error instanceof Error ? error.message : 'Unable to load artifact detail')
+      }
+    }
+
+    void hydrateArtifactDetail()
+
+    return () => {
+      active = false
+    }
+  }, [selectedReviewArtifactId])
 
   useEffect(() => {
     let active = true
@@ -2369,6 +2596,125 @@ function App() {
                           </p>
                           <pre>{formatPayload(selectedApprovalDetail?.resolutionPayload)}</pre>
                         </div>
+                      </div>
+
+                      <div className="diff-review-surface">
+                        <div className="diff-surface-header">
+                          <div>
+                            <p className="panel-kicker">Diff summary</p>
+                            <h4>{selectedArtifactDetail?.diffSummary?.title ?? selectedReviewArtifact?.path ?? 'Reviewer evidence'}</h4>
+                          </div>
+                          {reviewDiffArtifacts.length > 1 ? (
+                            <label className="artifact-picker">
+                              <span>Artifact</span>
+                              <select
+                                value={selectedReviewArtifact?.id ?? ''}
+                                onChange={(event) => setSelectedReviewArtifactId(event.target.value)}
+                              >
+                                {reviewDiffArtifacts.map((artifact) => (
+                                  <option key={artifact.id} value={artifact.id}>
+                                    {artifact.path}
+                                  </option>
+                                ))}
+                              </select>
+                            </label>
+                          ) : null}
+                        </div>
+
+                        {artifactDetailState === 'loading' ? (
+                          <div className="empty-state">Loading diff summary for reviewer inspection.</div>
+                        ) : null}
+
+                        {artifactDetailState === 'error' ? (
+                          <div className="empty-state">
+                            Unable to load diff detail. {artifactDetailError || 'The artifact endpoint returned an error.'}
+                          </div>
+                        ) : null}
+
+                        {artifactDetailState !== 'loading' && artifactDetailState !== 'error' && !selectedReviewArtifact ? (
+                          <div className="empty-state">
+                            No diff artifact is linked to this approval yet. Generic artifacts remain available below.
+                          </div>
+                        ) : null}
+
+                        {selectedArtifactDetail?.diffSummary ? (
+                          <>
+                            <div className="diff-summary-metrics">
+                              <article className="diff-metric-card">
+                                <span className="panel-kicker">Change summary</span>
+                                <strong>{selectedArtifactDetail.diffSummary.changeSummary ?? 'Diff metadata is available.'}</strong>
+                                <p>{describeArtifactContentState(selectedArtifactDetail.contentState)}</p>
+                              </article>
+                              <article className="diff-metric-card">
+                                <span className="panel-kicker">Files changed</span>
+                                <strong>{selectedArtifactDetail.diffSummary.filesChanged}</strong>
+                                <p>{selectedArtifactDetail.diffSummary.insertions} insertions · {selectedArtifactDetail.diffSummary.deletions} deletions</p>
+                              </article>
+                              <article className="diff-metric-card">
+                                <span className="panel-kicker">Artifact path</span>
+                                <strong>{selectedArtifactDetail.artifact.path}</strong>
+                                <p>{selectedArtifactDetail.artifact.contentType}</p>
+                              </article>
+                            </div>
+
+                            <div className="diff-file-list">
+                              {selectedArtifactDetail.diffSummary.fileSummaries.map((fileSummary) => (
+                                <article key={`${fileSummary.path}-${fileSummary.changeType}`} className="diff-file-card">
+                                  <div className="diff-file-topline">
+                                    <strong>{fileSummary.path}</strong>
+                                    <span className={`tone-chip tone-${fileSummary.changeType === 'deleted' ? 'danger' : fileSummary.changeType === 'added' ? 'success' : 'active'}`}>
+                                      {formatDiffChangeType(fileSummary.changeType)}
+                                    </span>
+                                  </div>
+                                  <p>{fileSummary.summary ?? `${fileSummary.additions} additions, ${fileSummary.deletions} deletions`}</p>
+                                  <div className="inline-meta">
+                                    <span>+{fileSummary.additions}</span>
+                                    <span>-{fileSummary.deletions}</span>
+                                    {fileSummary.previousPath ? <span>from {fileSummary.previousPath}</span> : null}
+                                    {fileSummary.providerUrl ? (
+                                      <a className="inline-link" href={fileSummary.providerUrl} target="_blank" rel="noreferrer">
+                                        Open provider view
+                                      </a>
+                                    ) : null}
+                                  </div>
+                                </article>
+                              ))}
+                              {selectedArtifactDetail.diffSummary.fileSummaries.length === 0 ? (
+                                <div className="empty-state">
+                                  The diff artifact did not return per-file summaries. Use the preview below for reviewer context.
+                                </div>
+                              ) : null}
+                            </div>
+
+                            <div className="contract-surface">
+                              <div className="contract-card">
+                                <span className="panel-kicker">Reviewer context</span>
+                                <strong>{selectedArtifactDetail.diffSummary.changeSummary ?? 'Stored diff metadata'}</strong>
+                                <p>{selectedArtifactDetail.bodyText ? 'The backend returned reviewer-readable diff text.' : 'Only summary metadata is available for this artifact.'}</p>
+                                <pre>{selectedArtifactDetail.bodyText ?? 'No inline body text returned for this artifact.'}</pre>
+                              </div>
+                              <div className="contract-card">
+                                <span className="panel-kicker">Raw diff preview</span>
+                                <strong>{selectedArtifactDetail.diffSummary.truncated ? 'Partial preview' : 'Inline preview'}</strong>
+                                <p>
+                                  {selectedArtifactDetail.diffSummary.providerUrl
+                                    ? 'A provider review link is available for deeper inspection.'
+                                    : 'This preview is rendered from the stored artifact detail endpoint.'}
+                                </p>
+                                <pre>
+                                  {selectedArtifactDetail.diffSummary.rawDiff
+                                    ?? selectedArtifactDetail.diffSummary.diffPreview
+                                    ?? 'No diff preview returned for this artifact.'}
+                                </pre>
+                                {selectedArtifactDetail.diffSummary.providerUrl ? (
+                                  <a className="inline-link" href={selectedArtifactDetail.diffSummary.providerUrl} target="_blank" rel="noreferrer">
+                                    Open provider diff
+                                  </a>
+                                ) : null}
+                              </div>
+                            </div>
+                          </>
+                        ) : null}
                       </div>
                       <label className="notes-field">
                         <span>Resolution notes</span>
