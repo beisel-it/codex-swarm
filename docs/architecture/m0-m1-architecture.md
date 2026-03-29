@@ -13,9 +13,9 @@ roadmap, see [`system-context-and-sequences.md`](./system-context-and-sequences.
 - Language: TypeScript across backend, frontend, shared contracts, and worker-facing libraries
 - Repository shape: pnpm workspace monorepo
 - Backend API: Fastify
-- Frontend: Next.js App Router
+- Frontend: Vite-based React frontend workspace
 - Validation and schemas: Zod
-- Database access: Prisma with PostgreSQL
+- Database access: Drizzle-backed SQL migrations over PostgreSQL
 - Cache/event bus: Redis
 - Tests: Vitest for unit/integration, Playwright for browser smoke coverage
 - Primary vertical slice: create a run, persist tasks/sessions, and render the run/task board shell
@@ -27,14 +27,14 @@ The PRD's Python examples are treated as reference architecture only. The user d
 ```text
 apps/
   api/              # Fastify control-plane API
-  web/              # Next.js board and review UI
   worker/           # Worker supervisor and Codex runtime integration
+frontend/           # Board, review, and governance UI
 packages/
-  config/           # Shared TS config, eslint, prettier, env helpers
   contracts/        # Shared Zod schemas and API/domain types
-  database/         # Prisma schema, client, seed/test helpers
+  database/         # Database package and historical schema assets
   orchestration/    # Task graph logic and run coordination services
-  ui/               # Shared frontend components once needed
+services/           # Service-level helpers as the workspace grows
+tooling/            # Shared scripts and support tooling
 docs/
   architecture/
   qa/
@@ -51,7 +51,7 @@ Required outcomes:
 1. Create the workspace, package manifests, TypeScript configuration, and shared scripts.
 2. Establish the monorepo package boundaries listed above.
 3. Add a minimal Fastify API process with a health endpoint.
-4. Add a Prisma schema for the core durable entities.
+4. Add a durable database schema and migration path for the core entities.
 5. Add a worker package with an executable stub for runtime supervision.
 6. Add the first shared contracts package so frontend and backend agree on shapes.
 7. Add test runner wiring and at least one runnable smoke test command.
@@ -108,7 +108,7 @@ Owns:
 - Codex runtime command construction
 - validation command execution
 
-### `apps/web`
+### `frontend`
 
 Owns:
 
@@ -119,7 +119,7 @@ Owns:
 ### Shared packages
 
 - `packages/contracts`: runtime-safe schemas and inferred types
-- `packages/database`: Prisma schema and client access
+- `packages/database`: database package assets and compatibility helpers
 - `packages/orchestration`: business rules for task graph behavior
 
 ## Sequence for the First Executable Slice
