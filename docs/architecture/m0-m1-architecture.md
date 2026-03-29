@@ -65,7 +65,9 @@ Milestone 1 is the first end-to-end orchestration slice on a single host.
 Required outcomes:
 
 1. Persist `Run`, `Task`, `Agent`, and `Session` records in PostgreSQL.
-2. Expose CRUD or minimal workflow endpoints for runs and tasks.
+2. Expose the workflow-oriented control-plane routes for repositories, runs,
+   tasks, agents, and session state, with sessions modeled through run detail
+   and recovery flows instead of standalone session CRUD endpoints.
 3. Implement task dependency persistence and unblock behavior in the service layer.
 4. Add worker supervisor primitives for:
    - worktree path generation

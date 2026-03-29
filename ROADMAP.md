@@ -90,7 +90,9 @@ Deliver the first vertical slice: create a run, plan tasks, spawn isolated worke
 - FastAPI service scaffold
 - Postgres migrations
 - Basic auth placeholder (single-user/dev token acceptable for alpha)
-- CRUD for repositories, runs, tasks, agents, sessions
+- Workflow-oriented repository/run/task/agent creation and state-progression
+  routes, with session state exposed through run detail and recovery surfaces
+  rather than standalone session CRUD
 
 #### Orchestrator
 - Leader agent flow

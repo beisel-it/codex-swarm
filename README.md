@@ -36,6 +36,13 @@ TypeScript pnpm-workspace scaffold for the M0/M1 slice described in [PRD.md](./P
 
 Use `Authorization: Bearer <DEV_AUTH_TOKEN>` for `/api/v1/*` requests.
 
+Control-plane API shape:
+
+- The supported backend surface is workflow-oriented rather than full table-by-table CRUD.
+- Repositories, runs, tasks, and agents expose create/list/detail or state-transition routes under `/api/v1`.
+- Session state is intentionally exposed through `GET /api/v1/runs/:id`, audit export, cleanup, and worker recovery flows instead of a standalone session CRUD endpoint.
+- The supersession note for the original roadmap wording lives in [`docs/architecture/control-plane-api-contract.md`](./docs/architecture/control-plane-api-contract.md).
+
 Admin-oriented governance endpoints:
 
 - `GET /api/v1/admin/governance-report`

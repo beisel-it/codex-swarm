@@ -21,6 +21,28 @@ This is an intentional supersession decision, not an unowned omission.
 The practical effect is that frontend, smoke-test, and operator integrations
 should target the HTTP control plane directly.
 
+## Workflow-Oriented Resource Model
+
+The delivered API is intentionally narrower than a full standalone CRUD surface
+for every control-plane entity.
+
+- repositories: created and listed through `POST /api/v1/repositories` and
+  `GET /api/v1/repositories`
+- runs: created, listed, inspected, and advanced through `POST /api/v1/runs`,
+  `GET /api/v1/runs`, `GET /api/v1/runs/:id`, `PATCH /api/v1/runs/:id/status`,
+  and the publish/handoff actions
+- tasks: created, listed, and status-transitioned through `POST /api/v1/tasks`,
+  `GET /api/v1/tasks`, and `PATCH /api/v1/tasks/:id/status`
+- agents: created and listed through `POST /api/v1/agents` and
+  `GET /api/v1/agents`
+- sessions: surfaced as durable state inside `GET /api/v1/runs/:id`,
+  `GET /api/v1/runs/:id/audit-export`, cleanup/recovery operations, and
+  worker-dispatch reconciliation rather than a separate session CRUD endpoint
+
+This is a product-boundary decision: Codex Swarm’s primary control actions are
+run orchestration, review, recovery, and handoff workflows, not arbitrary
+record editing for every persisted table.
+
 ## Supersession Mapping
 
 | Planned MCP tool | Delivered HTTP replacement | Live evidence |
@@ -35,6 +57,31 @@ should target the HTTP control plane directly.
 | `agent.spawn` | `POST /api/v1/agents` | `apps/api/src/routes/agents.ts`, `apps/api/test/app.test.ts` |
 | `agent.status` | `GET /api/v1/agents?runId=<id>` and `GET /api/v1/runs/:id` | `apps/api/src/routes/agents.ts`, `apps/api/src/routes/runs.ts`, `apps/api/test/app.test.ts` |
 | `agent.stop` | No one-to-one route. Current lifecycle control is expressed through run status changes, cleanup/recovery operations, and worker-node reconciliation. | `apps/api/src/routes/runs.ts`, `apps/api/src/routes/cleanup-jobs.ts`, `apps/api/src/routes/worker-nodes.ts`, `apps/api/test/control-plane-service.cleanup.test.ts`, `apps/api/test/app.test.ts` |
+
+## CRUD Supersession for Phase 1
+
+The roadmap's original `CRUD for repositories, runs, tasks, agents, sessions`
+wording overstated the intended API shape for the shipped TypeScript control
+plane.
+
+The supported replacement is:
+
+- workflow-safe creation and list/detail routes for repositories, runs, tasks,
+  and agents
+- explicit state-transition endpoints for runs and tasks
+- session visibility through run detail and audit export
+- session mutation through orchestrator-owned recovery, cleanup, and dispatch
+  flows instead of free-form session update/delete routes
+
+Live evidence for that delivered model:
+
+- route registration in `apps/api/src/app.ts`
+- resource and action routes in `apps/api/src/routes/repositories.ts`,
+  `apps/api/src/routes/runs.ts`, `apps/api/src/routes/tasks.ts`, and
+  `apps/api/src/routes/agents.ts`
+- session hydration in `ControlPlaneService.getRun(...)` and audit export in
+  `apps/api/src/services/control-plane-service.ts`
+- integration coverage in `apps/api/test/app.test.ts`
 
 ## Supported Integration Guidance
 

@@ -1087,3 +1087,40 @@ Evidence:
 Residual risks:
 
 - The repo still does not prove a real multi-task coding workflow from planning through implementation and completion; a future stronger claim would require a genuine smoke or end-to-end acceptance path rather than control-plane slice tests alone.
+
+## Task `d6d11714`
+
+Follow-up objective:
+
+- Resolve the roadmap CRUD gap by explicitly documenting the narrower
+  workflow-oriented API model as the supported replacement for full repository,
+  run, task, agent, and session CRUD.
+
+Outcome:
+
+- completed by documentation supersession
+
+Evidence:
+
+- `ROADMAP.md` now narrows the original Phase 1 scope item from
+  `CRUD for repositories, runs, tasks, agents, sessions` to a
+  workflow-oriented route model with session state exposed through run detail
+  and recovery surfaces.
+- `docs/architecture/m0-m1-architecture.md` now freezes the same decision in
+  the M0/M1 architecture baseline instead of leaving the CRUD wording implied.
+- `docs/architecture/control-plane-api-contract.md` now records the delivered
+  resource model, including the fact that sessions are surfaced through
+  `GET /api/v1/runs/:id`, audit export, cleanup, and worker-dispatch recovery
+  rather than standalone session CRUD.
+- The live route surface continues to match that wording in
+  `apps/api/src/routes/repositories.ts`, `apps/api/src/routes/runs.ts`,
+  `apps/api/src/routes/tasks.ts`, `apps/api/src/routes/agents.ts`, and
+  `apps/api/src/app.ts`.
+- Existing integration coverage already exercises the supported workflow model
+  in `apps/api/test/app.test.ts`.
+
+Residual risks:
+
+- The repo still does not provide arbitrary update/delete routes for every
+  persisted control-plane record; that is now an explicit product-boundary
+  choice rather than an undocumented omission.
