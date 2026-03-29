@@ -14,7 +14,7 @@
   --danger: #9e2f2f;
   --shadow: 0 28px 80px rgba(23, 27, 38, 0.16);
   --shadow-soft: 0 10px 30px rgba(23, 27, 38, 0.08);
-  --radius: 28px;
+  --radius: 3px;
   --sans: 'Manrope', sans-serif;
   --serif: 'Instrument Serif', serif;
   --mono: 'IBM Plex Mono', monospace;
@@ -71,16 +71,16 @@ code {
 
 .app-shell {
   position: relative;
-  width: min(1480px, calc(100vw - 32px));
-  margin: 0 auto;
-  padding: 20px 0 40px;
+  width: 100%;
+  margin: 0;
+  padding: 12px 16px 32px;
 }
 
 .backdrop-grid {
   position: absolute;
   inset: 24px 0 auto;
   height: 150px;
-  border-radius: 32px;
+  border-radius: 3px;
   border: 1px solid rgba(18, 23, 35, 0.08);
   background:
     linear-gradient(135deg, rgba(255, 255, 255, 0.3), transparent 55%),
@@ -102,7 +102,7 @@ code {
   align-items: end;
   gap: 14px;
   padding: 16px 18px;
-  border-radius: 26px;
+  border-radius: 3px;
   background:
     linear-gradient(135deg, rgba(255, 251, 245, 0.88), rgba(255, 246, 238, 0.7)),
     rgba(255, 255, 255, 0.8);
@@ -153,7 +153,7 @@ code {
 }
 
 .lede {
-  max-width: 48ch;
+  max-width: none;
   margin: 0;
   font-size: 0.9rem;
   line-height: 1.45;
@@ -175,7 +175,7 @@ code {
 .view-tab {
   min-height: 42px;
   padding: 0 16px;
-  border-radius: 999px;
+  border-radius: 3px;
   border: 1px solid rgba(18, 23, 35, 0.12);
   background: rgba(255, 255, 255, 0.62);
   color: var(--text-strong);
@@ -188,7 +188,7 @@ code {
 
 .metric-card {
   padding: 12px 14px;
-  border-radius: 18px;
+  border-radius: 3px;
   background: var(--bg-deep);
   color: var(--text-inverse);
   border: 1px solid rgba(255, 255, 255, 0.12);
@@ -322,7 +322,7 @@ code {
 .review-card,
 .mini-stat {
   border: 1px solid rgba(18, 23, 35, 0.08);
-  border-radius: 22px;
+  border-radius: 3px;
   background: rgba(255, 255, 255, 0.7);
   box-shadow: var(--shadow-soft);
 }
@@ -397,7 +397,7 @@ code {
   justify-content: center;
   min-height: 32px;
   padding: 0 12px;
-  border-radius: 999px;
+  border-radius: 3px;
   border: 1px solid rgba(18, 23, 35, 0.12);
   font-family: var(--mono);
   font-size: 0.74rem;
@@ -511,7 +511,7 @@ code {
   width: 100%;
   min-height: 48px;
   padding: 0 18px;
-  border-radius: 999px;
+  border-radius: 3px;
   border: 1px solid rgba(18, 23, 35, 0.12);
   background: rgba(255, 255, 255, 0.75);
 }
@@ -536,7 +536,7 @@ code {
 .control-card {
   padding: 16px;
   border: 1px solid rgba(18, 23, 35, 0.12);
-  border-radius: 20px;
+  border-radius: 3px;
   background: rgba(255, 255, 255, 0.72);
 }
 
@@ -573,7 +573,7 @@ code {
   width: 100%;
   min-height: 44px;
   padding: 10px 14px;
-  border-radius: 14px;
+  border-radius: 3px;
   border: 1px solid rgba(18, 23, 35, 0.12);
   background: rgba(255, 255, 255, 0.82);
   color: var(--text-strong);
@@ -587,7 +587,7 @@ code {
   min-height: 44px;
   padding: 0 16px;
   border: 0;
-  border-radius: 999px;
+  border-radius: 3px;
   background: var(--signal);
   color: white;
   font-family: var(--mono);
@@ -628,7 +628,7 @@ code {
 .task-column {
   min-width: 220px;
   padding: 14px;
-  border-radius: 24px;
+  border-radius: 3px;
   background: rgba(18, 23, 35, 0.04);
   border: 1px solid rgba(18, 23, 35, 0.06);
 }
@@ -684,7 +684,7 @@ code {
   align-items: center;
   min-height: 28px;
   padding: 0 10px;
-  border-radius: 999px;
+  border-radius: 3px;
   background: rgba(18, 23, 35, 0.08);
   font-family: var(--mono);
   font-size: 0.72rem;
@@ -751,7 +751,7 @@ code {
   display: grid;
   gap: 14px;
   padding: 18px;
-  border-radius: 22px;
+  border-radius: 3px;
   background: rgba(18, 23, 35, 0.04);
   border: 1px solid rgba(18, 23, 35, 0.08);
 }
@@ -787,7 +787,7 @@ code {
   display: grid;
   gap: 16px;
   padding: 18px;
-  border-radius: 22px;
+  border-radius: 3px;
   background: rgba(18, 23, 35, 0.04);
   border: 1px solid rgba(18, 23, 35, 0.08);
 }
@@ -801,7 +801,7 @@ code {
 
 .diff-review-surface {
   padding: 18px;
-  border-radius: 22px;
+  border-radius: 3px;
   background:
     linear-gradient(180deg, rgba(191, 79, 47, 0.06), rgba(191, 79, 47, 0.02)),
     rgba(255, 250, 244, 0.9);
@@ -830,7 +830,7 @@ code {
   width: 100%;
   min-height: 42px;
   padding: 0 14px;
-  border-radius: 14px;
+  border-radius: 3px;
   border: 1px solid rgba(18, 23, 35, 0.12);
   background: rgba(255, 255, 255, 0.88);
   color: var(--text-strong);
@@ -843,7 +843,7 @@ code {
 .diff-metric-card,
 .diff-file-card {
   padding: 16px;
-  border-radius: 18px;
+  border-radius: 3px;
   background: rgba(255, 255, 255, 0.82);
   border: 1px solid rgba(18, 23, 35, 0.08);
 }
@@ -864,7 +864,7 @@ code {
 
 .contract-card {
   padding: 16px;
-  border-radius: 18px;
+  border-radius: 3px;
   background: rgba(255, 255, 255, 0.82);
   border: 1px solid rgba(18, 23, 35, 0.08);
 }
@@ -892,7 +892,7 @@ code {
   width: fit-content;
   min-height: 36px;
   padding: 0 14px;
-  border-radius: 999px;
+  border-radius: 3px;
   background: rgba(18, 23, 35, 0.08);
   color: var(--text-strong);
   text-decoration: none;
@@ -911,7 +911,7 @@ code {
 .contract-card pre {
   margin: 14px 0 0;
   padding: 14px;
-  border-radius: 16px;
+  border-radius: 3px;
   background: rgba(18, 23, 35, 0.06);
   white-space: pre-wrap;
   word-break: break-word;
@@ -926,7 +926,7 @@ code {
 
 .notes-field textarea {
   width: 100%;
-  border-radius: 18px;
+  border-radius: 3px;
   border: 1px solid rgba(18, 23, 35, 0.12);
   padding: 14px 16px;
   resize: vertical;
@@ -937,7 +937,7 @@ code {
 .action-button {
   min-height: 44px;
   padding: 0 16px;
-  border-radius: 999px;
+  border-radius: 3px;
   border: none;
 }
 
@@ -963,7 +963,7 @@ code {
 
 .empty-state {
   padding: 22px 16px;
-  border-radius: 18px;
+  border-radius: 3px;
   border: 1px dashed rgba(18, 23, 35, 0.18);
   color: var(--muted);
   text-align: center;
@@ -997,7 +997,7 @@ code {
   display: inline-flex;
   margin: 12px 0 10px;
   padding: 8px 12px;
-  border-radius: 999px;
+  border-radius: 3px;
   background: rgba(18, 23, 35, 0.08);
   color: var(--text-strong);
 }
@@ -1031,8 +1031,8 @@ code {
 
 @media (max-width: 1180px) {
   .app-shell {
-    width: min(100vw - 20px, 1480px);
-    padding-top: 20px;
+    width: 100%;
+    padding-top: 12px;
   }
 
   .hero-panel,
@@ -1077,7 +1077,7 @@ code {
   .hero-panel,
   .panel {
     padding: 18px;
-    border-radius: 24px;
+    border-radius: 3px;
   }
 
   .hero-copy h1 {
