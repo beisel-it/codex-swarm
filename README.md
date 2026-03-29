@@ -9,6 +9,7 @@ Codex Swarm is a multi-agent software delivery control plane. It combines a work
 <p align="center">
   <a href="./"><img src="https://img.shields.io/badge/GitHub-beisel--it%2Fcodex--swarm-171515?style=for-the-badge&logo=github" alt="GitHub repository"></a>
   <a href="./docs/README.md"><img src="https://img.shields.io/badge/docs-product_and_ops-0A66C2?style=for-the-badge" alt="Product and operations docs"></a>
+  <a href="./docs/operator-journey.md"><img src="https://img.shields.io/badge/operator_journey-storyboard-0A7F5A?style=for-the-badge" alt="Operator journey storyboard"></a>
   <a href="./docs/operator-guide.md"><img src="https://img.shields.io/badge/operator_guide-external_codex-1D9BF0?style=for-the-badge" alt="Operator guide"></a>
 </p>
 
@@ -134,6 +135,8 @@ This repo also ships the assets needed to operate codex-swarm from Codex:
 6. Use admin to confirm governance posture, approval provenance, retention state, and audit export evidence.
 7. Publish the branch and attach provider PR metadata or a manual handoff artifact when the run is ready for external review.
 
+The end-to-end visual version of this flow is documented in [docs/operator-journey.md](./docs/operator-journey.md).
+
 ## Quick Start
 
 Install dependencies, configure local environment, and start the main services:
@@ -224,6 +227,7 @@ corepack pnpm ops:tailnet:status
 ## Read Next
 
 - [docs/README.md](./docs/README.md) for the documentation hub
+- [docs/operator-journey.md](./docs/operator-journey.md) for the end-to-end operator flow from onboarding to publish handoff
 - [docs/user-guide.md](./docs/user-guide.md) for a walkthrough of the main operator surfaces
 - [docs/admin-guide.md](./docs/admin-guide.md) for governance and admin workflows
 - [docs/operator-guide.md](./docs/operator-guide.md) for external Codex operation of this repo
