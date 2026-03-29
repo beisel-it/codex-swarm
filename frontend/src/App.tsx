@@ -6,6 +6,7 @@ import {
   type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
 } from 'react'
+import { useTheme } from './theme'
 
 type ViewMode = 'board' | 'detail' | 'review' | 'admin'
 type RepositoryProvider = 'github' | 'gitlab' | 'local' | 'other'
@@ -1807,6 +1808,7 @@ function deriveActivity(
 }
 
 function App() {
+  const { activeTheme, setActiveTheme, themes } = useTheme()
   const [data, setData] = useState<SwarmData>(createEmptySwarmData())
   const [teamTemplates, setTeamTemplates] = useState<TeamTemplate[]>(defaultTeamTemplates)
   const [selectedRunId, setSelectedRunId] = useState('')
@@ -2625,6 +2627,19 @@ function App() {
             {view === 'board' ? 'Board' : view === 'detail' ? 'Run Detail' : view === 'review' ? 'Review' : 'Admin'}
           </button>
         ))}
+        <label className="theme-switcher">
+          <span>Theme</span>
+          <select
+            value={activeTheme}
+            onChange={(event) => setActiveTheme(event.target.value as typeof activeTheme)}
+          >
+            {themes.map((theme) => (
+              <option key={theme.value} value={theme.value}>
+                {theme.label}
+              </option>
+            ))}
+          </select>
+        </label>
       </div>
 
       <main
