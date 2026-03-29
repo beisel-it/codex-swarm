@@ -909,3 +909,24 @@ Evidence:
 Residual risks:
 
 - The stricter-default proof is strongest on concurrency and secret-access policy. Additional differentiated defaults could be added later, but the roadmap wording only requires that sensitive repos run with stricter defaults than standard repos.
+
+## Task `6d9b27cf`
+
+Roadmap entry:
+
+- Phase 6 deliverable: `GA release candidate`
+
+Verdict:
+
+- parity
+
+Evidence:
+
+- The checked-in QA artifact `docs/qa/m6-rc-signoff.md` is an explicit release-candidate signoff record tied to task `2f4f7cd3`.
+- That signoff records passed workspace verification commands (`ci:test`, `ci:typecheck`, `ci:build`, and API versioning tests), validates recovery and upgrade evidence, and makes an explicit `RC decision: approved`.
+- The same artifact includes a concrete residual-risk section, which the M6 delivery plan names as a required part of the GA release-candidate gate in `docs/architecture/m6-delivery-plan.md`.
+- The signoff scope matches the final acceptance gate described in `docs/architecture/m6-delivery-plan.md`: recovery evidence, upgrade validation, docs sufficiency, and residual-risk notes.
+
+Residual risks:
+
+- The release candidate is approved with explicit residual risks, not represented as a zero-risk or production-unbounded claim.
