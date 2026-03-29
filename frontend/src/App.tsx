@@ -1,4 +1,11 @@
-import { startTransition, useDeferredValue, useEffect, useState, type PointerEvent as ReactPointerEvent } from 'react'
+import {
+  startTransition,
+  useDeferredValue,
+  useEffect,
+  useState,
+  type MouseEvent as ReactMouseEvent,
+  type PointerEvent as ReactPointerEvent,
+} from 'react'
 
 type ViewMode = 'board' | 'detail' | 'review' | 'admin'
 type RepositoryProvider = 'github' | 'gitlab' | 'local' | 'other'
@@ -2462,7 +2469,12 @@ function App() {
     setErrorText('')
   }
 
-  async function handleDeleteRepository(repository: Repository) {
+  async function handleDeleteRepository(repository: Repository, skipConfirmation = false) {
+    if (skipConfirmation) {
+      await confirmDeleteRepository(repository.id)
+      return
+    }
+
     setPendingDeleteAction({ kind: 'repository', id: repository.id, label: repository.name })
   }
 
@@ -2504,7 +2516,12 @@ function App() {
     setErrorText('')
   }
 
-  async function handleDeleteRun(run: Run) {
+  async function handleDeleteRun(run: Run, skipConfirmation = false) {
+    if (skipConfirmation) {
+      await confirmDeleteRun(run.id)
+      return
+    }
+
     setPendingDeleteAction({ kind: 'run', id: run.id, label: run.goal })
   }
 
@@ -2828,7 +2845,13 @@ function App() {
                       <button type="button" className="table-action" onClick={() => handleEditRepository(repository)}>
                         Edit
                       </button>
-                      <button type="button" className="table-action table-action-danger" onClick={() => void handleDeleteRepository(repository)}>
+                      <button
+                        type="button"
+                        className="table-action table-action-danger"
+                        onClick={(event: ReactMouseEvent<HTMLButtonElement>) =>
+                          void handleDeleteRepository(repository, event.shiftKey)
+                        }
+                      >
                         Delete
                       </button>
                     </div>
@@ -2898,7 +2921,13 @@ function App() {
                         <button type="button" className="table-action" onClick={() => handleEditRun(run)}>
                           Edit
                         </button>
-                        <button type="button" className="table-action table-action-danger" onClick={() => void handleDeleteRun(run)}>
+                        <button
+                          type="button"
+                          className="table-action table-action-danger"
+                          onClick={(event: ReactMouseEvent<HTMLButtonElement>) =>
+                            void handleDeleteRun(run, event.shiftKey)
+                          }
+                        >
                           Delete
                         </button>
                       </div>
