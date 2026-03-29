@@ -232,7 +232,7 @@ Make the product useful for real repos and repeated internal use.
 - Basic audit log export
 
 #### Quality
-- Load and soak tests
+- Bounded performance-envelope verification with documented limits
 - Retry semantics refinement
 - Cleanup jobs for stale worktrees and sessions
 
@@ -346,7 +346,7 @@ Ship a clearly supported, production-ready platform.
 - Disaster recovery testing
 - Migration and upgrade path
 - Cost/usage reporting
-- Performance tuning
+- Performance envelope verification with documented limits
 - Support playbooks
 - Reference deployments for single-host and multi-node environments
 
@@ -357,7 +357,7 @@ Ship a clearly supported, production-ready platform.
 - Published support boundaries and limitations
 
 ### Exit criteria
-- The platform can run reliably under expected concurrency.
+- The platform can demonstrate expected concurrency behavior with recorded verification and documented limits.
 - Recovery procedures are tested.
 - Docs are sufficient for a fresh team to deploy and use the product.
 

@@ -1022,3 +1022,25 @@ Evidence:
 Residual risks:
 
 - Fresh-team sufficiency depends on the documented reference topologies and still assumes operators can provide reachable Postgres and Redis instances, as already called out in the RC residual risks.
+
+## Task `77b94f1f`
+
+Follow-up objective:
+
+- Narrow the roadmap performance claims to the delivered bounded performance envelope when sustained load/soak evidence is not present.
+
+Outcome:
+
+- completed by documentation narrowing
+
+Evidence:
+
+- `ROADMAP.md` now replaces the earlier `Load and soak tests` quality wording with `Bounded performance-envelope verification with documented limits`.
+- `ROADMAP.md` now narrows the M6 scope from open-ended `Performance tuning` to `Performance envelope verification with documented limits`.
+- `ROADMAP.md` now narrows the M6 exit criterion from `run reliably under expected concurrency` to `demonstrate expected concurrency behavior with recorded verification and documented limits`.
+- `docs/architecture/m6-delivery-plan.md` now uses the same narrowed exit-criterion wording, aligning the delivery-plan entry with the shipped `cost-usage-performance` evidence.
+- The narrowed wording matches the live operator runbook in `docs/operations/cost-usage-performance.md`, which explicitly documents a bounded concurrency probe and its limitations.
+
+Residual risks:
+
+- The repo still does not claim or prove sustained production load testing; future stronger performance claims would require new executable evidence rather than additional wording changes.

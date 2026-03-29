@@ -15,7 +15,7 @@ Phase 6 objectives:
 
 Phase 6 is complete when:
 
-1. The platform can run reliably under expected concurrency.
+1. The platform can demonstrate expected concurrency behavior with recorded verification and documented limits.
 2. Recovery procedures are tested.
 3. Docs are sufficient for a fresh team to deploy and use the product.
 
