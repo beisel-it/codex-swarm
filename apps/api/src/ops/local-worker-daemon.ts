@@ -239,10 +239,6 @@ function deriveWorkerStatus(checks: WorkerRuntimeDependencyCheck[], lastError: s
     return "degraded";
   }
 
-  if (lastError) {
-    return "degraded";
-  }
-
   return "online";
 }
 

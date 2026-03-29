@@ -716,17 +716,49 @@ export class ControlPlaneService {
         eq(runs.workspaceId, boundary.workspaceId),
         eq(runs.teamId, boundary.teamId)
       )).orderBy(asc(runs.createdAt));
-      return rows.map((run) => this.mapRun(run));
+      await Promise.all(rows.map((run) => this.repairRunStateFromDispatchAssignments(run.id)));
+      for (const run of rows) {
+        const runDetail = await this.getRun(run.id, boundary);
+
+        if ((runDetail.status === "pending" || runDetail.status === "in_progress")
+          && runDetail.tasks.some((task) => task.status === "pending")
+          && runDetail.agents.length > 0) {
+          await this.enqueueRunnableWorkerDispatches(run.id, boundary);
+          await this.reconcileRunExecutionState(run.id, boundary);
+        }
+      }
+      const refreshedRows = await this.db.select().from(runs).where(and(
+        eq(runs.repositoryId, repository.id),
+        eq(runs.workspaceId, boundary.workspaceId),
+        eq(runs.teamId, boundary.teamId)
+      )).orderBy(asc(runs.createdAt));
+      return refreshedRows.map((run) => this.mapRun(run));
     }
 
     const rows = await this.db.select().from(runs).where(and(
       eq(runs.workspaceId, boundary.workspaceId),
       eq(runs.teamId, boundary.teamId)
     )).orderBy(asc(runs.createdAt));
-    return rows.map((run) => this.mapRun(run));
+    await Promise.all(rows.map((run) => this.repairRunStateFromDispatchAssignments(run.id)));
+    for (const run of rows) {
+      const runDetail = await this.getRun(run.id, boundary);
+
+      if ((runDetail.status === "pending" || runDetail.status === "in_progress")
+        && runDetail.tasks.some((task) => task.status === "pending")
+        && runDetail.agents.length > 0) {
+        await this.enqueueRunnableWorkerDispatches(run.id, boundary);
+        await this.reconcileRunExecutionState(run.id, boundary);
+      }
+    }
+    const refreshedRows = await this.db.select().from(runs).where(and(
+      eq(runs.workspaceId, boundary.workspaceId),
+      eq(runs.teamId, boundary.teamId)
+    )).orderBy(asc(runs.createdAt));
+    return refreshedRows.map((run) => this.mapRun(run));
   }
 
   async getRun(runId: string, access?: AccessBoundary): Promise<RunDetail> {
+    await this.repairRunStateFromDispatchAssignments(runId);
     const run = await this.assertRunExists(runId, access);
 
     const [runTasks, runAgents, runSessions] = await Promise.all([
@@ -1628,12 +1660,21 @@ export class ControlPlaneService {
         .map((assignment) => assignment.taskId)
     );
     const now = this.clock.now();
-    const activeAgentCount = runDetail.agents.filter((agent) =>
-      agent.status === "provisioning"
-      || agent.status === "idle"
-      || agent.status === "busy"
-      || agent.status === "paused").length;
-    const availableSlots = Math.max(0, runDetail.concurrencyCap - activeAgentCount);
+    const activeExecutionTaskIds = new Set<string>();
+
+    for (const assignment of assignmentRows) {
+      if (assignment.state === "queued" || assignment.state === "claimed" || assignment.state === "retrying") {
+        activeExecutionTaskIds.add(assignment.taskId);
+      }
+    }
+
+    for (const task of runDetail.tasks) {
+      if (task.status === "in_progress" || task.status === "awaiting_review") {
+        activeExecutionTaskIds.add(task.id);
+      }
+    }
+
+    const availableSlots = Math.max(0, runDetail.concurrencyCap - activeExecutionTaskIds.size);
     const tasksToQueue = runDetail.tasks
       .filter((task) => task.status === "pending" && !activeAssignmentTaskIds.has(task.id))
       .sort((left, right) => {
@@ -1644,10 +1685,19 @@ export class ControlPlaneService {
         return left.createdAt.getTime() - right.createdAt.getTime();
       })
       .slice(0, availableSlots);
+    const existingAgentsByTaskId = new Map(
+      runDetail.agents
+        .filter((agent) => agent.currentTaskId)
+        .map((agent) => [agent.currentTaskId!, agent] as const)
+    );
+    const existingSessionsByAgentId = new Map(
+      runDetail.sessions.map((session) => [session.agentId, session] as const)
+    );
     const queuedAssignments: WorkerDispatchAssignment[] = [];
 
     for (const task of tasksToQueue) {
-      const agent = await this.createAgent({
+      const existingAgent = existingAgentsByTaskId.get(task.id);
+      const agent = existingAgent ?? await this.createAgent({
         runId,
         name: `${task.role}-${task.title}`.slice(0, 72),
         role: task.role,
@@ -1655,7 +1705,7 @@ export class ControlPlaneService {
         branchName: runDetail.branchName ?? repository.defaultBranch,
         currentTaskId: task.id
       }, access);
-      const worktreePath = createWorktreePath({
+      const worktreePath = agent.worktreePath ?? createWorktreePath({
         rootDir: this.getWorkspaceRoot(),
         repositorySlug: repository.name,
         runId,
@@ -1665,13 +1715,16 @@ export class ControlPlaneService {
 
       const [updatedAgent] = await this.db.update(agents).set({
         worktreePath,
+        currentTaskId: task.id,
         updatedAt: now
       }).where(eq(agents.id, agent.id)).returning();
+      const session = existingSessionsByAgentId.get(agent.id) ?? null;
 
       const assignment = await this.createWorkerDispatchAssignment({
         runId,
         taskId: task.id,
         agentId: updatedAgent?.id ?? agent.id,
+        sessionId: session?.id ?? undefined,
         queue: "worker-dispatch",
         stickyNodeId: null,
         preferredNodeId: null,
@@ -2875,6 +2928,205 @@ export class ControlPlaneService {
       "Acceptance criteria:",
       acceptanceCriteria
     ].join("\n");
+  }
+
+  private async repairRunStateFromDispatchAssignments(runId: string) {
+    const [run, taskRows, assignmentRows] = await Promise.all([
+      this.db.select().from(runs).where(eq(runs.id, runId)).then((rows) => rows[0]),
+      this.db.select().from(tasks).where(eq(tasks.runId, runId)).orderBy(asc(tasks.createdAt)),
+      this.db.select().from(workerDispatchAssignments).where(eq(workerDispatchAssignments.runId, runId)).orderBy(asc(workerDispatchAssignments.createdAt))
+    ]);
+
+    if (!run || assignmentRows.length === 0) {
+      return;
+    }
+
+    const now = this.clock.now();
+    const latestAssignmentByTask = new Map<string, typeof workerDispatchAssignments.$inferSelect>();
+
+    for (const assignment of assignmentRows) {
+      latestAssignmentByTask.set(assignment.taskId, assignment);
+    }
+
+    const agentIdsToStop = new Set<string>();
+    const agentIdsToBusy = new Set<string>();
+    const agentIdsToIdle = new Set<string>();
+    const agentIdsToFail = new Set<string>();
+    const sessionIdsToStop = new Map<string, { workerNodeId: string | null; stickyNodeId: string | null }>();
+    const sessionIdsToActivate = new Map<string, { workerNodeId: string | null; stickyNodeId: string | null }>();
+    const sessionIdsToReset = new Set<string>();
+    const sessionIdsToStale = new Set<string>();
+
+    for (const task of taskRows) {
+      const assignment = latestAssignmentByTask.get(task.id);
+
+      if (!assignment) {
+        continue;
+      }
+
+      if (assignment.state === "completed") {
+        if (task.status !== "completed" || task.ownerAgentId !== assignment.agentId) {
+          await this.db.update(tasks).set({
+            status: "completed",
+            ownerAgentId: assignment.agentId,
+            updatedAt: now
+          }).where(eq(tasks.id, task.id));
+        }
+
+        agentIdsToStop.add(assignment.agentId);
+
+        if (assignment.sessionId) {
+          sessionIdsToStop.set(assignment.sessionId, {
+            workerNodeId: assignment.claimedByNodeId,
+            stickyNodeId: assignment.claimedByNodeId ?? assignment.stickyNodeId
+          });
+        }
+
+        continue;
+      }
+
+      if (assignment.state === "claimed") {
+        if (task.status !== "in_progress" || task.ownerAgentId !== assignment.agentId) {
+          await this.db.update(tasks).set({
+            status: "in_progress",
+            ownerAgentId: assignment.agentId,
+            updatedAt: now
+          }).where(eq(tasks.id, task.id));
+        }
+
+        agentIdsToBusy.add(assignment.agentId);
+
+        if (assignment.sessionId) {
+          sessionIdsToActivate.set(assignment.sessionId, {
+            workerNodeId: assignment.claimedByNodeId,
+            stickyNodeId: assignment.claimedByNodeId ?? assignment.stickyNodeId
+          });
+        }
+
+        continue;
+      }
+
+      if (assignment.state === "queued" || assignment.state === "retrying") {
+        if (task.status !== "pending" || task.ownerAgentId !== assignment.agentId) {
+          await this.db.update(tasks).set({
+            status: "pending",
+            ownerAgentId: assignment.agentId,
+            updatedAt: now
+          }).where(eq(tasks.id, task.id));
+        }
+
+        agentIdsToIdle.add(assignment.agentId);
+
+        if (assignment.sessionId) {
+          sessionIdsToReset.add(assignment.sessionId);
+        }
+
+        continue;
+      }
+
+      if (assignment.state === "failed") {
+        if (task.status !== "failed" || task.ownerAgentId !== assignment.agentId) {
+          await this.db.update(tasks).set({
+            status: "failed",
+            ownerAgentId: assignment.agentId,
+            updatedAt: now
+          }).where(eq(tasks.id, task.id));
+        }
+
+        agentIdsToFail.add(assignment.agentId);
+
+        if (assignment.sessionId) {
+          sessionIdsToStale.add(assignment.sessionId);
+        }
+      }
+    }
+
+    if (agentIdsToStop.size > 0) {
+      await this.db.update(agents).set({
+        status: "stopped",
+        updatedAt: now
+      }).where(inArray(agents.id, [...agentIdsToStop]));
+    }
+
+    if (agentIdsToBusy.size > 0) {
+      await this.db.update(agents).set({
+        status: "busy",
+        updatedAt: now
+      }).where(inArray(agents.id, [...agentIdsToBusy]));
+    }
+
+    if (agentIdsToIdle.size > 0) {
+      await this.db.update(agents).set({
+        status: "idle",
+        updatedAt: now
+      }).where(inArray(agents.id, [...agentIdsToIdle]));
+    }
+
+    if (agentIdsToFail.size > 0) {
+      await this.db.update(agents).set({
+        status: "failed",
+        updatedAt: now
+      }).where(inArray(agents.id, [...agentIdsToFail]));
+    }
+
+    for (const [sessionId, placement] of sessionIdsToStop) {
+      await this.db.update(sessions).set({
+        workerNodeId: placement.workerNodeId,
+        stickyNodeId: placement.stickyNodeId,
+        state: "stopped",
+        staleReason: null,
+        updatedAt: now
+      }).where(eq(sessions.id, sessionId));
+    }
+
+    for (const [sessionId, placement] of sessionIdsToActivate) {
+      await this.db.update(sessions).set({
+        workerNodeId: placement.workerNodeId,
+        stickyNodeId: placement.stickyNodeId,
+        state: "active",
+        staleReason: null,
+        updatedAt: now
+      }).where(eq(sessions.id, sessionId));
+    }
+
+    if (sessionIdsToReset.size > 0) {
+      await this.db.update(sessions).set({
+        workerNodeId: null,
+        stickyNodeId: null,
+        state: "pending",
+        staleReason: null,
+        updatedAt: now
+      }).where(inArray(sessions.id, [...sessionIdsToReset]));
+    }
+
+    if (sessionIdsToStale.size > 0) {
+      await this.db.update(sessions).set({
+        state: "stale",
+        updatedAt: now
+      }).where(inArray(sessions.id, [...sessionIdsToStale]));
+    }
+
+    const refreshedTasks = await this.db.select().from(tasks).where(eq(tasks.runId, runId)).orderBy(asc(tasks.createdAt));
+    const activeAssignments = assignmentRows.filter((assignment) =>
+      assignment.state === "queued" || assignment.state === "claimed" || assignment.state === "retrying");
+    const anyFailedTask = refreshedTasks.some((task) => task.status === "failed");
+    const allTasksCompleted = refreshedTasks.length > 0 && refreshedTasks.every((task) => task.status === "completed");
+    const currentStatus = run.status as Run["status"];
+    const nextStatus: Run["status"] =
+      anyFailedTask ? "failed"
+        : allTasksCompleted ? "completed"
+          : refreshedTasks.length > 0 && (activeAssignments.length > 0 || refreshedTasks.some((task) =>
+            task.status === "in_progress" || task.status === "awaiting_review" || task.status === "pending"))
+            ? "in_progress"
+            : currentStatus;
+
+    if (nextStatus !== currentStatus) {
+      await this.db.update(runs).set({
+        status: nextStatus,
+        completedAt: nextStatus === "completed" ? now : null,
+        updatedAt: now
+      }).where(eq(runs.id, runId));
+    }
   }
 
   async reconcileRunExecutionState(runId: string, access?: AccessBoundary) {
