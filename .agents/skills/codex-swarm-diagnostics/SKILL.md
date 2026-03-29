@@ -1,3 +1,8 @@
+---
+name: codex-swarm-diagnostics
+description: Diagnose Codex Swarm health, queue pressure, worker-state drift, and run-level
+---
+
 # codex-swarm-diagnostics
 
 ## Purpose

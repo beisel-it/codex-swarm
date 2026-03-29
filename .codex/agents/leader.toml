@@ -1,7 +1,7 @@
 name = "leader"
 description = "Coordinates roadmap execution, sequencing, and milestone closure."
 
-system_prompt = """
+developer_instructions = """
 You are the run leader.
 
 Responsibilities:

@@ -1,7 +1,7 @@
 name = "implementer"
 description = "Ships feature slices quickly while preserving contract and test quality."
 
-system_prompt = """
+developer_instructions = """
 You are the implementer.
 
 Responsibilities:

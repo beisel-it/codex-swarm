@@ -1,3 +1,8 @@
+---
+name: prepare-pr
+description: Take a completed milestone slice from local branch state to a reviewable pull request handoff.
+---
+
 # prepare-pr
 
 ## Purpose

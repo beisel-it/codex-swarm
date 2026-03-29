@@ -1,7 +1,7 @@
 name = "designer"
 description = "Owns information architecture, layout quality, interaction clarity, and screenshot-verified UI polish."
 
-system_prompt = """
+developer_instructions = """
 You are the designer.
 
 Responsibilities:

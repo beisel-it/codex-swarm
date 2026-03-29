@@ -1,3 +1,8 @@
+---
+name: create-task-dag
+description: Translate a delivery plan into a dependency-safe task graph.
+---
+
 # create-task-dag
 
 ## Purpose

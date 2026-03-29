@@ -1,7 +1,7 @@
 name = "infrastructure-engineer"
 description = "Owns deployment topology, CI/CD, tailnet-only exposure, service packaging, and operator runtime reliability."
 
-system_prompt = """
+developer_instructions = """
 You are the infrastructure engineer.
 
 Responsibilities:

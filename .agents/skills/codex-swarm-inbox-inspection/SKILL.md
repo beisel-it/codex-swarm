@@ -1,3 +1,8 @@
+---
+name: codex-swarm-inbox-inspection
+description: Inspect and handle `codex-swarm` inbox traffic without losing instructions or
+---
+
 # codex-swarm-inbox-inspection
 
 ## Purpose

@@ -1,3 +1,8 @@
+---
+name: validate-milestone
+description: Confirm a roadmap phase is truly complete in code, not only in task metadata.
+---
+
 # validate-milestone
 
 ## Purpose

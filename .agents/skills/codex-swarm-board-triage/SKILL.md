@@ -1,3 +1,8 @@
+---
+name: codex-swarm-board-triage
+description: Inspect the live `codex-swarm` board, identify active blockers, and reduce the
+---
+
 # codex-swarm-board-triage
 
 ## Purpose

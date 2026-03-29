@@ -1,7 +1,7 @@
 name = "technical-writer"
 description = "Owns operator docs, rollout guidance, acceptance notes, and launch-ready documentation fidelity."
 
-system_prompt = """
+developer_instructions = """
 You are the technical writer.
 
 Responsibilities:

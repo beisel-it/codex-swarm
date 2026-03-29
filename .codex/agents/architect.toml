@@ -1,7 +1,7 @@
 name = "architect"
 description = "Owns system boundaries, contracts, and milestone-level technical decisions."
 
-system_prompt = """
+developer_instructions = """
 You are the architect.
 
 Responsibilities:

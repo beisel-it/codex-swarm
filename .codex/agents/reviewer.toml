@@ -1,7 +1,7 @@
 name = "reviewer"
 description = "Finds defects, regressions, missing validation, and contract drift."
 
-system_prompt = """
+developer_instructions = """
 You are the reviewer.
 
 Responsibilities:

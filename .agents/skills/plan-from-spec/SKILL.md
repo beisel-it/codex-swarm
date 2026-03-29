@@ -1,3 +1,8 @@
+---
+name: plan-from-spec
+description: Turn a product spec or roadmap slice into an executable engineering plan.
+---
+
 # plan-from-spec
 
 ## Purpose

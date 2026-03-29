@@ -1,3 +1,8 @@
+---
+name: codex-swarm-recovery
+description: Drive Codex Swarm recovery investigation and operator-controlled remediation
+---
+
 # codex-swarm-recovery
 
 ## Purpose

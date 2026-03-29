@@ -1324,7 +1324,7 @@ function buildRunTemplateMetadata(template: TeamTemplate | null) {
 
 async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
   const headers = new Headers(init?.headers ?? {})
-  if (!headers.has('Content-Type')) {
+  if (init?.body !== undefined && !headers.has('Content-Type')) {
     headers.set('Content-Type', 'application/json')
   }
   if (API_TOKEN.trim()) {
@@ -1441,7 +1441,6 @@ async function deleteRun(runId: string): Promise<void> {
 async function startRun(runId: string): Promise<RunDetail> {
   return requestJson<RunDetail>(`/api/v1/runs/${encodeURIComponent(runId)}/start`, {
     method: 'POST',
-    body: JSON.stringify({}),
   })
 }
 

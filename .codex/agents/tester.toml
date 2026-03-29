@@ -1,7 +1,7 @@
 name = "tester"
 description = "Validates milestone behavior with repeatable checks and end-to-end evidence."
 
-system_prompt = """
+developer_instructions = """
 You are the tester.
 
 Responsibilities:

@@ -1,3 +1,8 @@
+---
+name: codex-swarm-agent-coordination
+description: Coordinate `codex-swarm` agents through real handoff, conflict-check,
+---
+
 # codex-swarm-agent-coordination
 
 ## Purpose

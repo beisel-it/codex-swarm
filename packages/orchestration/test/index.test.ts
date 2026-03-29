@@ -52,8 +52,8 @@ describe("parseLeaderPlanOutput", () => {
     expect(plan.tasks).toHaveLength(1);
   });
 
-  it("parses fenced JSON leader plans", () => {
-    const plan = parseLeaderPlanOutput([
+  it("rejects wrapped or fenced output", () => {
+    expect(() => parseLeaderPlanOutput([
       "```json",
       "{",
       '  "tasks": [',
@@ -68,9 +68,7 @@ describe("parseLeaderPlanOutput", () => {
       "  ]",
       "}",
       "```"
-    ].join("\n"));
-
-    expect(plan.tasks[0]?.key).toBe("leader-plan");
+    ].join("\n"))).toThrow(/exactly one JSON object|must be exactly one JSON object/);
   });
 });
 
@@ -126,11 +124,12 @@ describe("orderLeaderPlanTasks", () => {
 });
 
 describe("buildLeaderPlanningPrompt", () => {
-  it("includes the run goal and JSON contract guidance", () => {
+  it("includes the run goal and JSON schema guidance", () => {
     const prompt = buildLeaderPlanningPrompt("Ship a hello-world planning loop");
     expect(prompt).toContain("Ship a hello-world planning loop");
     expect(prompt).toContain("\"tasks\"");
-    expect(prompt).toContain("Respond with JSON only");
+    expect(prompt).toContain("Follow this JSON Schema exactly:");
+    expect(prompt).toContain("\"additionalProperties\": false");
   });
 });
 
@@ -153,7 +152,8 @@ describe("buildWorkerTaskExecutionPrompt", () => {
 
     expect(prompt).toContain("Inbound agent messages:");
     expect(prompt).toContain("leader: Take the task and report blockers.");
-    expect(prompt).toContain("\"status\": \"completed | needs_slicing | blocked\"");
+    expect(prompt).toContain("\"enum\": [");
+    expect(prompt).toContain("\"needs_slicing\"");
   });
 });
 
@@ -177,6 +177,7 @@ describe("buildLeaderReslicePrompt", () => {
     expect(prompt).toContain("Worker outcome summary: Need smaller slices.");
     expect(prompt).toContain("\"tasks\"");
     expect(prompt).toContain("Please split this into smaller tasks.");
+    expect(prompt).toContain("Follow this JSON Schema exactly:");
   });
 });
 
@@ -203,14 +204,7 @@ describe("parseWorkerTaskOutcome", () => {
     expect(outcome.blockingIssues).toEqual(["Current task spans too many concerns."]);
   });
 
-  it("falls back to a plain-text completion summary", () => {
-    const outcome = parseWorkerTaskOutcome("plain worker output");
-
-    expect(outcome).toEqual({
-      summary: "plain worker output",
-      status: "completed",
-      messages: [],
-      blockingIssues: []
-    });
+  it("rejects non-json worker output", () => {
+    expect(() => parseWorkerTaskOutcome("plain worker output")).toThrow(/exactly one JSON object|must be exactly one JSON object/);
   });
 });

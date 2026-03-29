@@ -1,3 +1,8 @@
+---
+name: codex-swarm-task-control
+description: Create, update, reassign, and rewire `codex-swarm` tasks using explicit board
+---
+
 # codex-swarm-task-control
 
 ## Purpose

@@ -1,8 +1,16 @@
 import { mkdir } from "node:fs/promises";
 
 import type { FastifyPluginAsync } from "fastify";
-import { createLocalCodexCliExecutor, createWorktreePath } from "@codex-swarm/worker";
-import type { ActorIdentity, AgentCreateInput, ArtifactCreateInput, RunBudgetCheckpointInput, RunStatusUpdateInput, TaskCreateInput } from "@codex-swarm/contracts";
+import { createLocalCodexCliExecutor, createWorktreePath, materializeRepositoryWorkspace } from "@codex-swarm/worker";
+import type {
+  ActorIdentity,
+  AgentCreateInput,
+  ArtifactCreateInput,
+  RunBudgetCheckpointInput,
+  RunStatusUpdateInput,
+  SessionTranscriptEntryCreateInput,
+  TaskCreateInput
+} from "@codex-swarm/contracts";
 
 import {
   idParamSchema,
@@ -64,6 +72,12 @@ function createLeaderPlanningRequest(app: Parameters<FastifyPluginAsync>[0], aut
 
     if (method === "POST" && path === "/api/v1/tasks") {
       return app.controlPlane.createTask(payload as unknown as TaskCreateInput, authContext) as Promise<T>;
+    }
+
+    if (method === "POST" && path.startsWith("/api/v1/sessions/") && path.endsWith("/transcript")) {
+      const sessionId = path.split("/")[4] ?? "";
+      const entries = ((payload as { entries?: SessionTranscriptEntryCreateInput[] } | undefined)?.entries) ?? [];
+      return app.controlPlane.appendSessionTranscript(sessionId, entries, authContext) as Promise<T>;
     }
 
     if (method === "POST" && path.includes("/budget-checkpoints")) {
@@ -162,7 +176,11 @@ export const runRoutes: FastifyPluginAsync = async (app) => {
           runId: run.id,
           agentId: "leader"
         });
-        await mkdir(leaderWorkspace, { recursive: true });
+        await materializeRepositoryWorkspace({
+          repository,
+          destinationPath: leaderWorkspace,
+          branch: run.branchName ?? repository.defaultBranch
+        });
 
         await runLeaderPlanningLoop({
           request: createLeaderPlanningRequest(app, request.authContext),

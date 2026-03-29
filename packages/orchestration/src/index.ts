@@ -38,6 +38,55 @@ export interface WorkerTaskOutcome {
   blockingIssues: string[];
 }
 
+const leaderPlanSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["tasks"],
+  properties: {
+    summary: { type: "string" },
+    tasks: {
+      type: "array",
+      minItems: 1,
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["key", "title", "role", "description", "acceptanceCriteria", "dependencyKeys"],
+        properties: {
+          key: { type: "string", minLength: 1 },
+          title: { type: "string", minLength: 1 },
+          role: { type: "string", minLength: 1 },
+          description: { type: "string", minLength: 1 },
+          acceptanceCriteria: { type: "array", items: { type: "string" } },
+          dependencyKeys: { type: "array", items: { type: "string" } }
+        }
+      }
+    }
+  }
+} as const;
+
+const workerTaskOutcomeSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["summary", "status", "messages", "blockingIssues"],
+  properties: {
+    summary: { type: "string", minLength: 1 },
+    status: { type: "string", enum: ["completed", "needs_slicing", "blocked"] },
+    messages: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["target", "body"],
+        properties: {
+          target: { type: "string", minLength: 1 },
+          body: { type: "string", minLength: 1 }
+        }
+      }
+    },
+    blockingIssues: { type: "array", items: { type: "string" } }
+  }
+} as const;
+
 function parseStringField(value: unknown, fieldName: string) {
   if (typeof value !== "string" || value.trim().length === 0) {
     throw new Error(`leader plan ${fieldName} must be a non-empty string`);
@@ -57,23 +106,11 @@ function parseStringArray(value: unknown) {
 function extractJsonDocument(output: string) {
   const trimmed = output.trim();
 
-  if (trimmed.startsWith("{")) {
+  if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
     return trimmed;
   }
 
-  const fencedJson = trimmed.match(/```json\s*([\s\S]+?)```/i);
-
-  if (fencedJson?.[1]) {
-    return fencedJson[1].trim();
-  }
-
-  const genericFence = trimmed.match(/```\s*([\s\S]+?)```/);
-
-  if (genericFence?.[1]) {
-    return genericFence[1].trim();
-  }
-
-  throw new Error("leader plan output did not contain a JSON document");
+  throw new Error("output must be exactly one JSON object");
 }
 
 export function buildLeaderPlanningPrompt(goal: string) {
@@ -81,26 +118,18 @@ export function buildLeaderPlanningPrompt(goal: string) {
     "You are the leader agent for a Codex Swarm orchestration run.",
     `Goal: ${goal}`,
     "",
-    "Respond with JSON only using this shape:",
-    "{",
-    '  "summary": "short plan summary",',
-    '  "tasks": [',
-    "    {",
-    '      "key": "leader-plan",',
-    '      "title": "Draft the plan",',
-    '      "role": "tech-lead",',
-    '      "description": "clear task description",',
-    '      "acceptanceCriteria": ["criterion"],',
-    '      "dependencyKeys": []',
-    "    }",
-    "  ]",
-    "}",
+    "Return exactly one JSON object and nothing else.",
+    "The response must start with `{` and end with `}`.",
+    "Do not include markdown fences, prose, headings, explanations, or any text outside the JSON object.",
+    "Follow this JSON Schema exactly:",
+    JSON.stringify(leaderPlanSchema, null, 2),
     "",
     "Rules:",
     "- provide at least one task",
     "- keys must be unique",
     "- dependencyKeys must reference earlier or later task keys in the same JSON",
-    "- do not include markdown outside the JSON object"
+    "- use concrete role names such as `frontend-developer`, `backend-developer`, `infrastructure-engineer`, `technical-writer`, or `tech-lead`",
+    "- do not add any properties beyond the schema"
   ].join("\n");
 }
 
@@ -139,25 +168,19 @@ export function buildWorkerTaskExecutionPrompt(input: {
     "Inbound agent messages:",
     inbox,
     "",
-    "Respond with JSON only using this shape:",
-    "{",
-    '  "summary": "short outcome summary",',
-    '  "status": "completed | needs_slicing | blocked",',
-    '  "messages": [',
-    "    {",
-    '      "target": "leader | broadcast | role:<role> | agent:<agentId>",',
-    '      "body": "message text"',
-    "    }",
-    "  ],",
-    '  "blockingIssues": ["issue summary"]',
-    "}",
+    "Return exactly one JSON object and nothing else.",
+    "The response must start with `{` and end with `}`.",
+    "Do not include markdown fences, prose, headings, explanations, or any text outside the JSON object.",
+    "Follow this JSON Schema exactly:",
+    JSON.stringify(workerTaskOutcomeSchema, null, 2),
     "",
     "Rules:",
+    "- every message target must be one of `leader`, `broadcast`, `role:<role>`, or `agent:<agentId>`",
     "- Use completed when the task can stand as done for this slice.",
     "- Use needs_slicing when the task should be broken into smaller follow-on tasks.",
     "- Use blocked when an external blocker prevents useful progress.",
     "- Include a leader message whenever status is needs_slicing or blocked.",
-    "- Do not include markdown outside the JSON object."
+    "- do not add any properties beyond the schema"
   ].join("\n");
 }
 
@@ -194,26 +217,17 @@ export function buildLeaderReslicePrompt(input: {
     "Worker coordination messages:",
     workerMessages,
     "",
-    "Respond with JSON only using this shape:",
-    "{",
-    '  "summary": "short coordination summary",',
-    '  "tasks": [',
-    "    {",
-    '      "key": "slice-a",',
-    '      "title": "follow-on task title",',
-    '      "role": "backend-developer",',
-    '      "description": "clear task description",',
-    '      "acceptanceCriteria": ["criterion"],',
-    '      "dependencyKeys": []',
-    "    }",
-    "  ]",
-    "}",
+    "Return exactly one JSON object and nothing else.",
+    "The response must start with `{` and end with `}`.",
+    "Do not include markdown fences, prose, headings, explanations, or any text outside the JSON object.",
+    "Follow this JSON Schema exactly:",
+    JSON.stringify(leaderPlanSchema, null, 2),
     "",
     "Rules:",
     "- Return at least one follow-on task when the worker asked for more slicing.",
     "- dependencyKeys may only reference keys from the same response.",
     "- Keep the tasks specific enough for workers to execute without hidden context.",
-    "- Do not include markdown outside the JSON object."
+    "- do not add any properties beyond the schema"
   ].join("\n");
 }
 
@@ -248,56 +262,45 @@ export function parseLeaderPlanOutput(output: string): LeaderPlan {
 }
 
 export function parseWorkerTaskOutcome(output: string): WorkerTaskOutcome {
-  try {
-    const parsed = JSON.parse(extractJsonDocument(output)) as Partial<WorkerTaskOutcome>;
+  const parsed = JSON.parse(extractJsonDocument(output)) as Partial<WorkerTaskOutcome>;
 
-    const summary = typeof parsed.summary === "string" && parsed.summary.trim().length > 0
-      ? parsed.summary
-      : output.trim() || "Worker completed the task.";
-    const status = parsed.status === "needs_slicing" || parsed.status === "blocked" || parsed.status === "completed"
-      ? parsed.status
-      : "completed";
-    const messages = Array.isArray(parsed.messages)
-      ? parsed.messages.flatMap((message) => {
-        if (!message || typeof message !== "object") {
-          return [];
-        }
+  const summary = parseStringField(parsed.summary, "worker outcome summary");
+  const status = parsed.status;
 
-        const target = (message as { target?: unknown }).target;
-        const body = (message as { body?: unknown }).body;
-
-        if (typeof target !== "string" || typeof body !== "string" || body.trim().length === 0) {
-          return [];
-        }
-
-        if (target !== "leader" && target !== "broadcast" && !target.startsWith("agent:") && !target.startsWith("role:")) {
-          return [];
-        }
-
-        return [{
-          target: target as WorkerCoordinationMessageTarget,
-          body
-        }];
-      })
-      : [];
-    const blockingIssues = Array.isArray(parsed.blockingIssues)
-      ? parsed.blockingIssues.filter((issue): issue is string => typeof issue === "string" && issue.trim().length > 0)
-      : [];
-
-    return {
-      summary,
-      status,
-      messages,
-      blockingIssues
-    };
-  } catch {
-    return {
-      summary: output.trim() || "Worker completed the task.",
-      status: "completed",
-      messages: [],
-      blockingIssues: []
-    };
+  if (status !== "needs_slicing" && status !== "blocked" && status !== "completed") {
+    throw new Error("worker outcome status must be completed, needs_slicing, or blocked");
   }
+
+  if (!Array.isArray(parsed.messages)) {
+    throw new Error("worker outcome messages must be an array");
+  }
+
+  const messages = parsed.messages.map((message, index) => {
+    if (!message || typeof message !== "object") {
+      throw new Error(`worker outcome message ${index} is not an object`);
+    }
+
+    const target = parseStringField((message as { target?: unknown }).target, `worker outcome message ${index} target`);
+    const body = parseStringField((message as { body?: unknown }).body, `worker outcome message ${index} body`);
+
+    if (target !== "leader" && target !== "broadcast" && !target.startsWith("agent:") && !target.startsWith("role:")) {
+      throw new Error(`worker outcome message ${index} target is invalid`);
+    }
+
+    return {
+      target: target as WorkerCoordinationMessageTarget,
+      body
+    };
+  });
+
+  const blockingIssues = parseStringArray(parsed.blockingIssues);
+
+  return {
+    summary,
+    status,
+    messages,
+    blockingIssues
+  };
 }
 
 export function orderLeaderPlanTasks(plan: LeaderPlan): LeaderPlanTask[] {
