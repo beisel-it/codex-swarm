@@ -728,3 +728,29 @@ Evidence:
 Residual risks:
 
 - This verdict covers the delivered restart-safe model and recovery primitives. The stronger end-to-end proof that a run survives an orchestrator restart without losing task or approval state remains the separate exit criterion tracked in `[077]`.
+
+## Task `9496d26d`
+
+Roadmap entry:
+
+- Phase 2 exit criterion: `A run survives orchestrator restart without losing task or approval state.`
+
+Verdict:
+
+- gap
+
+Evidence:
+
+- The repo does include restart-oriented building blocks: `buildSessionRecoveryPlan(...)` in `apps/worker/src/runtime.ts` and persisted-session hydration in `apps/worker/src/session-registry.ts` with test coverage in `apps/worker/test/runtime.test.ts` and `apps/worker/test/session-registry.test.ts`.
+- The API layer persists run, task, agent, session, and approval records in the database-backed schema and control-plane service, which is necessary for restart durability in `apps/api/src/db/schema.ts` and `apps/api/src/services/control-plane-service.ts`.
+- However, I found no executable acceptance test or smoke path that simulates an orchestrator restart and then proves the same run still exposes intact task state plus approval state afterward.
+- The existing API tests exercise approvals, tasks, and run detail on an in-memory fake control plane, but they do not restart the orchestrator/service process between writes and reads in `apps/api/test/app.test.ts`.
+- The QA strategy document names restart recovery as a desired scenario, which underscores that this proof was planned, but it is not yet present as shipped evidence in `docs/qa/test-strategy.md`.
+
+Residual risks:
+
+- Reviewers can support the durability model and recovery helpers, but not the stronger roadmap claim that a real run survives orchestrator restart without losing task or approval state.
+
+Backlog follow-up:
+
+- Add an executable restart-recovery acceptance path that persists a run with tasks and approvals, restarts the control-plane/orchestrator layer, and proves those states remain intact afterward.
