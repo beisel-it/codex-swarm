@@ -64,7 +64,12 @@ import {
   type WorkerNodeRegisterInput
 } from "@codex-swarm/contracts";
 import { resolveInitialTaskStatus } from "@codex-swarm/orchestration";
-import { buildSessionRecoveryPlan, cleanupWorktreePaths, createWorktreePath } from "@codex-swarm/worker";
+import {
+  buildSessionRecoveryPlan,
+  cleanupWorktreePaths,
+  createWorktreePath,
+  resolveWorkspaceProvisioningMode
+} from "@codex-swarm/worker";
 
 import type { AppDb } from "../db/client.js";
 import {
@@ -2128,6 +2133,7 @@ export class ControlPlaneService {
     const queuedAssignments: WorkerDispatchAssignment[] = [];
     const workerSandbox = process.env.CODEX_SWARM_WORKER_SANDBOX?.trim() || "workspace-write";
     const workerApprovalPolicy = process.env.CODEX_SWARM_WORKER_APPROVAL_POLICY?.trim() || "on-request";
+    const workspaceProvisioningMode = resolveWorkspaceProvisioningMode();
 
     for (const task of tasksToQueue) {
       const existingAgent = existingAgentsByTaskId.get(task.id);
@@ -2144,7 +2150,8 @@ export class ControlPlaneService {
         repositorySlug: repository.name,
         runId,
         agentId: agent.id,
-        taskId: task.id
+        taskId: task.id,
+        mode: workspaceProvisioningMode
       });
 
       const [updatedAgent] = await this.db.update(agents).set({
@@ -2948,7 +2955,7 @@ export class ControlPlaneService {
       existingWorktreePaths: input.existingWorktreePaths
     });
     const rowBySessionId = new Map(rows.map((row) => [row.sessionId, row] as const));
-    const worktreeCleanup = input.deleteStaleWorktrees
+    const worktreeCleanup = input.deleteStaleWorktrees && resolveWorkspaceProvisioningMode() === "isolated"
       ? await cleanupWorktreePaths(
         recoveryPlan
           .filter((item) => item.action === "mark_stale" || item.action === "archive")

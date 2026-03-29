@@ -1,7 +1,12 @@
 import { mkdir, rm } from "node:fs/promises";
 
 import type { FastifyPluginAsync } from "fastify";
-import { createLocalCodexCliExecutor, createWorktreePath, materializeRepositoryWorkspace } from "@codex-swarm/worker";
+import {
+  createLocalCodexCliExecutor,
+  createWorktreePath,
+  materializeRepositoryWorkspace,
+  resolveWorkspaceProvisioningMode
+} from "@codex-swarm/worker";
 import type {
   ActorIdentity,
   AgentCreateInput,
@@ -182,11 +187,13 @@ export const runRoutes: FastifyPluginAsync = async (app) => {
         }
 
         const workspaceRoot = getOptionalEnv("CODEX_SWARM_WORKSPACE_ROOT") ?? ".swarm/worktrees";
+        const workspaceProvisioningMode = resolveWorkspaceProvisioningMode();
         const leaderWorkspace = createWorktreePath({
           rootDir: workspaceRoot,
           repositorySlug: repository.name,
           runId: run.id,
-          agentId: "leader"
+          agentId: "leader",
+          mode: workspaceProvisioningMode
         });
         await rm(leaderWorkspace, {
           recursive: true,
@@ -195,7 +202,8 @@ export const runRoutes: FastifyPluginAsync = async (app) => {
         await materializeRepositoryWorkspace({
           repository,
           destinationPath: leaderWorkspace,
-          branch: run.branchName ?? repository.defaultBranch
+          branch: run.branchName ?? repository.defaultBranch,
+          reuseExisting: workspaceProvisioningMode === "shared"
         });
 
         await runLeaderPlanningLoop({

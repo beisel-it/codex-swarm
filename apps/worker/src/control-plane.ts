@@ -11,7 +11,8 @@ import type {
 import { buildRemoteWorkerBootstrap } from "./dispatch.js";
 import {
   type MaterializedRepositoryWorkspace,
-  materializeRepositoryWorkspace
+  materializeRepositoryWorkspace,
+  resolveWorkspaceProvisioningMode
 } from "./runtime.js";
 
 export interface WorkerControlPlaneClientConfig {
@@ -114,7 +115,8 @@ export async function claimAndProvisionDispatchWorkspace(
   const workspace = await materializeRepositoryWorkspace({
     repository,
     destinationPath: resolveWorktreePath(input.runtime, assignment),
-    branch: assignment.branchName ?? repository.defaultBranch
+    branch: assignment.branchName ?? repository.defaultBranch,
+    reuseExisting: resolveWorkspaceProvisioningMode() === "shared"
   });
 
   return {
