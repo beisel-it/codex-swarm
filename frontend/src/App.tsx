@@ -1292,6 +1292,7 @@ async function createRepository(input: {
   name: string
   url: string
   provider?: RepositoryProvider
+  localPath?: string
 }): Promise<Repository> {
   return requestJson<Repository>('/api/v1/repositories', {
     method: 'POST',
@@ -1711,6 +1712,7 @@ function App() {
   const [actionPending, setActionPending] = useState(false)
   const [repoDraftName, setRepoDraftName] = useState('codex-swarm')
   const [repoDraftUrl, setRepoDraftUrl] = useState('https://github.com/beisel-it/codex-swarm.git')
+  const [repoDraftLocalPath, setRepoDraftLocalPath] = useState('/home/florian/codex-swarm')
   const [repoDraftProvider, setRepoDraftProvider] = useState<RepositoryProvider>('github')
   const [runDraftRepositoryId, setRunDraftRepositoryId] = useState('')
   const [runDraftGoal, setRunDraftGoal] = useState('Ship the next iteration through codex-swarm.')
@@ -2008,18 +2010,33 @@ function App() {
   }
 
   async function handleCreateRepository() {
-    if (!repoDraftName.trim() || !repoDraftUrl.trim()) {
-      setErrorText('Repository name and URL are required.')
+    if (!repoDraftName.trim()) {
+      setErrorText('Repository name is required.')
+      return
+    }
+
+    if (repoDraftProvider === 'local' && !repoDraftLocalPath.trim()) {
+      setErrorText('Local checkout path is required.')
+      return
+    }
+
+    if (repoDraftProvider !== 'local' && !repoDraftUrl.trim()) {
+      setErrorText('Remote URL is required.')
       return
     }
 
     setActionPending(true)
 
     try {
+      const localPath = repoDraftProvider === 'local' ? repoDraftLocalPath.trim() : undefined
+      const url = repoDraftProvider === 'local'
+        ? `file://${localPath}`
+        : repoDraftUrl.trim()
       const repository = await createRepository({
         name: repoDraftName.trim(),
-        url: repoDraftUrl.trim(),
+        url,
         provider: repoDraftProvider,
+        localPath,
       })
       setRunDraftRepositoryId(repository.id)
       await refreshSwarmData()
@@ -2164,10 +2181,6 @@ function App() {
                     <input value={repoDraftName} onChange={(event) => setRepoDraftName(event.target.value)} />
                   </label>
                   <label className="control-field">
-                    <span>Remote URL</span>
-                    <input value={repoDraftUrl} onChange={(event) => setRepoDraftUrl(event.target.value)} />
-                  </label>
-                  <label className="control-field">
                     <span>Provider</span>
                     <select value={repoDraftProvider} onChange={(event) => setRepoDraftProvider(event.target.value as RepositoryProvider)}>
                       <option value="github">GitHub</option>
@@ -2176,6 +2189,17 @@ function App() {
                       <option value="other">Other</option>
                     </select>
                   </label>
+                  {repoDraftProvider === 'local' ? (
+                    <label className="control-field">
+                      <span>Local checkout path</span>
+                      <input value={repoDraftLocalPath} onChange={(event) => setRepoDraftLocalPath(event.target.value)} />
+                    </label>
+                  ) : (
+                    <label className="control-field">
+                      <span>Remote URL</span>
+                      <input value={repoDraftUrl} onChange={(event) => setRepoDraftUrl(event.target.value)} />
+                    </label>
+                  )}
                   <button type="button" className="action-button" onClick={handleCreateRepository} disabled={actionPending}>
                     Register repository
                   </button>
