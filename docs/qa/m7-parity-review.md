@@ -754,3 +754,24 @@ Residual risks:
 Backlog follow-up:
 
 - Add an executable restart-recovery acceptance path that persists a run with tasks and approvals, restarts the control-plane/orchestrator layer, and proves those states remain intact afterward.
+
+## Task `5bc0b2a9`
+
+Roadmap entry:
+
+- Phase 3 quality item: `Retry semantics refinement`
+
+Verdict:
+
+- parity
+
+Evidence:
+
+- Worker dispatch failure handling is bounded and explicit in `apps/api/src/services/control-plane-service.ts`: failed dispatches either move to `retrying` with incremented attempts and cleared placement, or to terminal `failed` once `maxAttempts` is exhausted.
+- Worker-node reconciliation applies the same semantics during node loss, producing counted `retriedAssignments` versus `failedAssignments` and marking stranded sessions stale or pending rather than silently drifting in `apps/api/src/services/control-plane-service.ts`.
+- The Redis dispatch queue requeues assignments with retry metadata and clears inflight leases in `apps/worker/src/dispatch.ts`, with direct coverage in `apps/worker/test/dispatch.test.ts`.
+- The distributed regression `preserves distributed run visibility across two-node retry recovery` proves safe retry behavior across node loss and reassignment in `apps/api/test/app.test.ts`.
+
+Residual risks:
+
+- This verifies retry/refinement behavior at the dispatch and control-plane layers; it does not by itself prove production-scale load behavior, which remains a separate gap under `[093]`.
