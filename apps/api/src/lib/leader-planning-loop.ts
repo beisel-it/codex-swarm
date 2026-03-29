@@ -8,6 +8,7 @@ import {
   CodexServerSupervisor,
   CodexSessionRuntime,
   SessionRegistry,
+  type CodexToolExecutor,
   materializePlanArtifact
 } from "@codex-swarm/worker";
 
@@ -31,11 +32,7 @@ export interface LeaderPlanningLoopInput {
     workerNodeId?: string;
     placementConstraintLabels?: string[];
   };
-  executeTool: (request: unknown) => Promise<{
-    threadId: string;
-    output: string;
-    metadata?: Record<string, unknown>;
-  }>;
+  executeTool: CodexToolExecutor;
   supervisorCommand?: string[];
   startPrompt?: string;
   planningPrompt?: string;

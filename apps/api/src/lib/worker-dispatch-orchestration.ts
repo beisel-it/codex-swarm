@@ -8,6 +8,7 @@ import {
   cleanupWorktreePaths,
   CodexServerSupervisor,
   CodexSessionRuntime,
+  type CodexToolExecutor,
   executeTaskValidationTemplate,
   materializeRepositoryWorkspace,
   SessionRegistry
@@ -23,11 +24,7 @@ export interface WorkerDispatchOrchestrationInput {
   request: WorkerDispatchOrchestrationRequest;
   nodeId: string;
   workspaceRoot: string;
-  executeTool: (request: unknown) => Promise<{
-    threadId: string;
-    output: string;
-    metadata?: Record<string, unknown>;
-  }>;
+  executeTool: CodexToolExecutor;
   supervisorCommand?: string[];
 }
 
