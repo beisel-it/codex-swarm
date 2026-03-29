@@ -10,8 +10,8 @@
 
 - M7 parity review is active across roadmap commitments and is verifying live implementation against `ROADMAP.md`
 - M7 parity review has verified the roadmap's security-defaults and observability commitments as implemented, with richer secret-boundary and operator-metrics surfaces than the original milestone wording
-- devops review `09ee2cf4` identified a gap on the Phase 4 `Shared artifact store` commitment; the current runtime still permits local-only artifact uploads when no shared store URL is configured
-- devops review `186ffaf5` identified a gap on the Phase 4 MCP transport split; the current worker runtime is stdio-only and does not implement the roadmap's remote streamable HTTP path
+- devops follow-up `45aaf257` closed the Phase 4 shared-artifact-store gap with durable artifact persistence, download serving, and remote-worker enforcement
+- devops follow-up `8e4cd968` closes the Phase 4 MCP transport split with explicit stdio vs streamable-HTTP runtime wiring for local and remote/shared worker execution
 
 ## Current Validation
 

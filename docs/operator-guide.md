@@ -56,6 +56,13 @@ Follow the detailed runbook in [Upgrade Path](./operations/upgrade-path.md).
 - `GET /api/v1/artifacts/:id/content` is the supported retrieval path for operators, dashboards, and remote workers.
 - Multi-node workers must be configured with an `artifactBaseUrl`; without it, the runtime dependency check leaves the node unschedulable for remote execution.
 
+### Codex MCP transport rules
+
+- Single-host workers should keep `codexTransport.kind = "stdio"` and run the local `codex mcp-server` subprocess.
+- Remote or shared-service worker deployments can set `codexTransport.kind = "streamable_http"` with the shared MCP endpoint URL and headers in the worker runtime/bootstrap envelope.
+- The runtime uses MCP Streamable HTTP request framing for that path: one POST per JSON-RPC message, `Accept: application/json, text/event-stream`, and `MCP-Protocol-Version`.
+- For remote/shared services, bind the MCP server safely, validate `Origin`, and require authentication on the HTTP endpoint per the current MCP transport guidance.
+
 ### Cleanup job behavior
 
 - `POST /api/v1/cleanup-jobs/run` still supports dry classification of missing or stale sessions through `existingWorktreePaths`.

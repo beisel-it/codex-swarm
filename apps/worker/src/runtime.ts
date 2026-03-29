@@ -3,6 +3,8 @@ import { lstat, mkdir, readlink, rm, symlink, writeFile } from "node:fs/promises
 import { dirname, join, resolve } from "node:path";
 import { spawn, type ChildProcess, type SpawnOptions } from "node:child_process";
 
+import type { CodexMcpTransport } from "@codex-swarm/contracts";
+
 import { SessionRegistry, type WorkerSessionRecord } from "./session-registry.js";
 
 export interface WorktreePathInput {
@@ -19,6 +21,7 @@ export interface CodexServerConfig {
   sandbox: string;
   approvalPolicy: string;
   includePlanTool?: boolean;
+  transport?: CodexMcpTransport;
 }
 
 export interface CodexSessionStartInput {
@@ -29,6 +32,7 @@ export interface CodexSessionStartInput {
 export interface CodexSessionReplyInput {
   threadId: string;
   prompt: string;
+  config?: CodexServerConfig;
 }
 
 export interface CodexServerSupervisorState {
@@ -61,6 +65,22 @@ export interface CodexToolExecutionResult {
   metadata?: Record<string, unknown>;
 }
 
+export interface CodexStreamableHttpToolRequest {
+  transport: "streamable_http";
+  endpoint: string;
+  headers: Record<string, string>;
+  message: {
+    jsonrpc: "2.0";
+    id: string;
+    method: "codex/session/start" | "codex/session/reply";
+    params: Record<string, unknown>;
+  };
+}
+
+export interface StreamableHttpExecutorOptions {
+  fetchImpl?: typeof fetch;
+}
+
 export interface PlanTaskDocument {
   title: string;
   role: string;
@@ -82,7 +102,8 @@ export type CodexToolExecutor = (request: CodexToolRequest) => Promise<CodexTool
 
 export interface CodexSessionRuntimeOptions {
   registry: SessionRegistry;
-  supervisor: CodexServerSupervisor;
+  supervisor?: CodexServerSupervisor;
+  config?: CodexServerConfig;
   executeTool: CodexToolExecutor;
   now?: () => Date;
 }
@@ -160,6 +181,10 @@ function sanitizePathSegment(value: string) {
     .replace(/[^a-z0-9-_]+/g, "-")
     .replace(/-+/g, "-")
     .replace(/^-|-$/g, "");
+}
+
+function getCodexTransport(config: CodexServerConfig): CodexMcpTransport {
+  return config.transport ?? { kind: "stdio" };
 }
 
 async function ensureDestinationMissing(destinationPath: string) {
@@ -380,6 +405,15 @@ export function createWorktreePath(input: WorktreePathInput) {
 }
 
 export function buildCodexServerCommand(config: CodexServerConfig) {
+  const transport = getCodexTransport(config);
+
+  if (transport.kind === "streamable_http") {
+    return [
+      "streamable_http",
+      transport.url
+    ];
+  }
+
   const command = [
     "codex",
     "mcp-server",
@@ -451,6 +485,17 @@ export class CodexServerSupervisor {
 
   async start() {
     if (this.process && this.state.status === "running") {
+      return this.snapshot();
+    }
+
+    if (getCodexTransport(this.options.config).kind === "streamable_http") {
+      this.process = null;
+      this.state = {
+        ...createIdleSupervisorState(buildCodexServerCommand(this.options.config)),
+        status: "running",
+        startedAt: new Date()
+      };
+
       return this.snapshot();
     }
 
@@ -543,6 +588,18 @@ export class CodexServerSupervisor {
   }
 
   async stop(signal: NodeJS.Signals = "SIGTERM") {
+    if (getCodexTransport(this.options.config).kind === "streamable_http") {
+      this.state = {
+        ...this.state,
+        status: "stopped",
+        stoppedAt: new Date(),
+        signal,
+        pid: null
+      };
+
+      return this.snapshot();
+    }
+
     const child = this.process;
 
     if (!child || child.exitCode !== null || this.state.status === "stopped" || this.state.status === "failed") {
@@ -568,18 +625,27 @@ export class CodexServerSupervisor {
 
 export class CodexSessionRuntime {
   private readonly now: () => Date;
+  private readonly supervisor: CodexServerSupervisor;
 
   constructor(private readonly options: CodexSessionRuntimeOptions) {
     this.now = options.now ?? (() => new Date());
+    this.supervisor = options.supervisor ?? new CodexServerSupervisor({
+      config: options.config ?? {
+        cwd: process.cwd(),
+        profile: "default",
+        sandbox: "workspace-write",
+        approvalPolicy: "on-request"
+      }
+    });
   }
 
   async startSession(sessionId: string, prompt: string): Promise<CodexSessionExecutionResult> {
     const session = this.options.registry.get(sessionId);
-    await this.options.supervisor.start();
+    await this.supervisor.start();
 
     const request = buildCodexSessionStartRequest({
       prompt,
-      config: this.options.supervisor.getConfig()
+      config: this.supervisor.getConfig()
     });
     const response = await this.options.executeTool(request);
     const activated = this.options.registry.activate(session.sessionId, response.threadId);
@@ -588,7 +654,7 @@ export class CodexSessionRuntime {
       request,
       response,
       session: activated,
-      supervisor: this.options.supervisor.snapshot()
+      supervisor: this.supervisor.snapshot()
     };
   }
 
@@ -599,11 +665,12 @@ export class CodexSessionRuntime {
       throw new Error(`session ${sessionId} has no persisted threadId`);
     }
 
-    await this.options.supervisor.start();
+    await this.supervisor.start();
 
     const request = buildCodexSessionReplyRequest({
       threadId: session.threadId,
-      prompt
+      prompt,
+      config: this.supervisor.getConfig()
     });
     const response = await this.options.executeTool(request);
 
@@ -617,22 +684,50 @@ export class CodexSessionRuntime {
       request,
       response,
       session: updated,
-      supervisor: this.options.supervisor.snapshot()
+      supervisor: this.supervisor.snapshot()
     };
   }
 
   async stopSession(sessionId: string) {
     const session = this.options.registry.get(sessionId);
-    await this.options.supervisor.stop();
+    await this.supervisor.stop();
 
     return {
       session: this.options.registry.stop(session.sessionId),
-      supervisor: this.options.supervisor.snapshot()
+      supervisor: this.supervisor.snapshot()
     };
   }
 }
 
 export function buildCodexSessionStartRequest(input: CodexSessionStartInput) {
+  const transport = getCodexTransport(input.config);
+
+  if (transport.kind === "streamable_http") {
+    return {
+      transport: "streamable_http",
+      endpoint: transport.url,
+      headers: {
+        Accept: "application/json, text/event-stream",
+        "Content-Type": "application/json",
+        "MCP-Protocol-Version": transport.protocolVersion,
+        ...transport.headers
+      },
+      message: {
+        jsonrpc: "2.0",
+        id: "codex-session-start",
+        method: "codex/session/start",
+        params: {
+          prompt: input.prompt,
+          cwd: input.config.cwd,
+          profile: input.config.profile,
+          sandbox: input.config.sandbox,
+          approvalPolicy: input.config.approvalPolicy,
+          includePlanTool: input.config.includePlanTool ?? false
+        }
+      }
+    } as const;
+  }
+
   return {
     tool: "codex",
     input: {
@@ -647,6 +742,31 @@ export function buildCodexSessionStartRequest(input: CodexSessionStartInput) {
 }
 
 export function buildCodexSessionReplyRequest(input: CodexSessionReplyInput) {
+  const transport = input.config ? getCodexTransport(input.config) : null;
+
+  if (transport?.kind === "streamable_http") {
+
+    return {
+      transport: "streamable_http",
+      endpoint: transport.url,
+      headers: {
+        Accept: "application/json, text/event-stream",
+        "Content-Type": "application/json",
+        "MCP-Protocol-Version": transport.protocolVersion,
+        ...transport.headers
+      },
+      message: {
+        jsonrpc: "2.0",
+        id: "codex-session-reply",
+        method: "codex/session/reply",
+        params: {
+          threadId: input.threadId,
+          prompt: input.prompt
+        }
+      }
+    } as const;
+  }
+
   return {
     tool: "codex-reply",
     input: {
@@ -654,6 +774,78 @@ export function buildCodexSessionReplyRequest(input: CodexSessionReplyInput) {
       prompt: input.prompt
     }
   } as const;
+}
+
+async function parseStreamableHttpBody(response: Response) {
+  const contentType = response.headers.get("content-type") ?? "";
+
+  if (contentType.includes("text/event-stream")) {
+    const body = await response.text();
+    const events = body
+      .split(/\r?\n\r?\n/)
+      .map((chunk) => chunk
+        .split(/\r?\n/)
+        .filter((line) => line.startsWith("data:"))
+        .map((line) => line.slice("data:".length).trim())
+        .join(""))
+      .filter((chunk) => chunk.length > 0);
+
+    if (events.length === 0) {
+      throw new Error("streamable HTTP response did not include any data events");
+    }
+
+    return JSON.parse(events.at(-1) ?? "");
+  }
+
+  return response.json();
+}
+
+function normalizeCodexToolExecutionResult(payload: unknown, response: Response): CodexToolExecutionResult {
+  const normalized = payload && typeof payload === "object" && "result" in payload
+    ? (payload as { result: unknown }).result
+    : payload;
+
+  if (
+    !normalized
+    || typeof normalized !== "object"
+    || typeof (normalized as { threadId?: unknown }).threadId !== "string"
+    || typeof (normalized as { output?: unknown }).output !== "string"
+  ) {
+    throw new Error("streamable HTTP response did not contain a valid Codex tool result");
+  }
+
+  const sessionId = response.headers.get("MCP-Session-Id");
+
+  return {
+    threadId: (normalized as { threadId: string }).threadId,
+    output: (normalized as { output: string }).output,
+    metadata: {
+      ...(((normalized as { metadata?: Record<string, unknown> }).metadata) ?? {}),
+      ...(sessionId ? { mcpSessionId: sessionId } : {})
+    }
+  };
+}
+
+export function createStreamableHttpToolExecutor(options: StreamableHttpExecutorOptions = {}): CodexToolExecutor {
+  const fetchImpl = options.fetchImpl ?? fetch;
+
+  return async (request) => {
+    if (!("transport" in request) || request.transport !== "streamable_http") {
+      throw new Error("streamable HTTP executor requires a streamable_http request");
+    }
+
+    const response = await fetchImpl(request.endpoint, {
+      method: "POST",
+      headers: request.headers,
+      body: JSON.stringify(request.message)
+    });
+
+    if (!response.ok) {
+      throw new Error(`streamable HTTP Codex request failed with status ${response.status}`);
+    }
+
+    return normalizeCodexToolExecutionResult(await parseStreamableHttpBody(response), response);
+  };
 }
 
 export function buildSessionRecoveryPlan(

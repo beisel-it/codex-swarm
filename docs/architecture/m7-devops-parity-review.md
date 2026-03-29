@@ -31,27 +31,24 @@ Backlog follow-up:
 ## 186ffaf5 — Review [115] MCP transport evolution
 
 - Roadmap entry: `ROADMAP.md` Phase 4, Distributed execution, MCP transport evolution, `prefer stdio locally and streamable HTTP for remote/shared services`
-- Verdict: `gap`
-- Reasoning: the live worker runtime implements only local stdio `codex mcp-server` command construction and request payload builders. There is no remote HTTP MCP transport implementation, no streamable HTTP client/server path for shared services, and no operator doc that shows such a transport being deployed.
+- Verdict: `parity`
+- Reasoning: the worker runtime now models both local stdio and remote/shared streamable-HTTP Codex MCP execution. The shared runtime contract carries an explicit transport choice, the worker package can build and execute streamable HTTP requests for remote services, the remote bootstrap envelope exposes the transport to worker nodes, and the operator docs now describe how to deploy that split.
 
 Evidence:
 
 - [ROADMAP.md](/home/florian/codex-swarm/ROADMAP.md): the Phase 4 MCP transport entry explicitly calls for `prefer stdio locally and streamable HTTP for remote/shared services`.
-- [apps/worker/src/runtime.ts](/home/florian/codex-swarm/apps/worker/src/runtime.ts): `buildCodexServerCommand()` only constructs a local `codex mcp-server` process invocation and does not model an HTTP transport.
-- [apps/worker/src/runtime.ts](/home/florian/codex-swarm/apps/worker/src/runtime.ts): `buildCodexSessionStartRequest()` and `buildCodexSessionReplyRequest()` build local tool invocation payloads, not remote transport envelopes.
-- [apps/worker/test/runtime.test.ts](/home/florian/codex-swarm/apps/worker/test/runtime.test.ts): tests verify the stdio command shape and local request payloads only.
-- [docs/reference-deployments.md](/home/florian/codex-swarm/docs/reference-deployments.md): the multi-node deployment reference documents shared Postgres, Redis, and artifact access, but does not describe any remote MCP HTTP transport path.
-- Repo-wide search for `streamable`, `SSE`, and MCP-over-HTTP transport terms finds the roadmap/review text and stdio-oriented worker runtime code, but no remote implementation surface.
+- [packages/contracts/src/index.ts](/home/florian/codex-swarm/packages/contracts/src/index.ts): `codexMcpTransportSchema` and `workerNodeRuntimeSchema` now encode either `stdio` or `streamable_http` as part of the shared worker runtime contract.
+- [apps/worker/src/runtime.ts](/home/florian/codex-swarm/apps/worker/src/runtime.ts): `buildCodexServerCommand()`, `buildCodexSessionStartRequest()`, `buildCodexSessionReplyRequest()`, and `createStreamableHttpToolExecutor()` implement the local-vs-remote transport split.
+- [apps/worker/src/dispatch.ts](/home/florian/codex-swarm/apps/worker/src/dispatch.ts): `buildRemoteWorkerBootstrap()` exports the Codex MCP transport into the remote worker bootstrap environment.
+- [apps/worker/test/runtime.test.ts](/home/florian/codex-swarm/apps/worker/test/runtime.test.ts): runtime tests now verify streamable HTTP request shaping, remote supervisor behavior, and a live HTTP executor round-trip.
+- [apps/worker/test/dispatch.test.ts](/home/florian/codex-swarm/apps/worker/test/dispatch.test.ts): bootstrap tests verify streamable HTTP transport metadata in the remote worker envelope.
+- [docs/operator-guide.md](/home/florian/codex-swarm/docs/operator-guide.md): operator guidance now documents `stdio` for local workers and `streamable_http` for remote/shared Codex MCP services.
+- [docs/reference-deployments.md](/home/florian/codex-swarm/docs/reference-deployments.md): the multi-node deployment reference now includes the shared MCP endpoint deployment shape.
 
 Residual risks:
 
-- Remote workers currently rely on ad hoc runtime assumptions rather than a documented or implemented MCP-over-HTTP transport boundary.
-- The roadmap claim suggests transport evolution away from stdio-only local execution, but operators cannot validate or deploy that split from the current repo.
-- Distributed debugging and compatibility expectations may be overstated until a remote/shared MCP transport exists.
-
-Backlog follow-up:
-
-- Create a backlog item for a concrete MCP-over-HTTP transport implementation and operator runbook for remote/shared services, or narrow the roadmap wording to match the current stdio-only runtime.
+- The repo now ships a worker-side streamable HTTP client boundary, but it still assumes the shared Codex MCP service speaks the documented JSON-RPC-over-streamable-HTTP contract for `codex/session/start` and `codex/session/reply`.
+- Production-hardening of a shared Codex MCP service deployment, including auth/origin policy and rollout topologies, remains an operator concern rather than a separate in-repo server implementation.
 
 ## 42381f59 — Review [010] Confirm security defaults
 

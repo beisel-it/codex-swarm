@@ -1,5 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { createServer } from "node:http";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { describe, expect, it } from "vitest";
@@ -13,6 +14,7 @@ import {
   cleanupWorktreePaths,
   CodexSessionRuntime,
   CodexServerSupervisor,
+  createStreamableHttpToolExecutor,
   materializeRepositoryWorkspace,
   materializePlanArtifact,
   createWorktreePath
@@ -59,6 +61,26 @@ describe("worker runtime helpers", () => {
     ]);
   });
 
+  it("builds a streamable HTTP codex transport descriptor", () => {
+    expect(buildCodexServerCommand({
+      cwd: "/tmp/run-001/backend-dev",
+      profile: "default",
+      sandbox: "workspace-write",
+      approvalPolicy: "on-request",
+      transport: {
+        kind: "streamable_http",
+        url: "https://codex-mcp.internal/mcp",
+        headers: {
+          authorization: "Bearer shared-token"
+        },
+        protocolVersion: "2025-11-25"
+      }
+    })).toEqual([
+      "streamable_http",
+      "https://codex-mcp.internal/mcp"
+    ]);
+  });
+
   it("builds a start-session request payload", () => {
     expect(buildCodexSessionStartRequest({
       prompt: "Start the worker",
@@ -81,6 +103,48 @@ describe("worker runtime helpers", () => {
     });
   });
 
+  it("builds a streamable HTTP start-session request payload", () => {
+    expect(buildCodexSessionStartRequest({
+      prompt: "Start the remote worker",
+      config: {
+        cwd: "/tmp/run-001/backend-dev",
+        profile: "default",
+        sandbox: "workspace-write",
+        approvalPolicy: "on-request",
+        transport: {
+          kind: "streamable_http",
+          url: "https://codex-mcp.internal/mcp",
+          headers: {
+            authorization: "Bearer shared-token"
+          },
+          protocolVersion: "2025-11-25"
+        }
+      }
+    })).toEqual({
+      transport: "streamable_http",
+      endpoint: "https://codex-mcp.internal/mcp",
+      headers: {
+        Accept: "application/json, text/event-stream",
+        "Content-Type": "application/json",
+        "MCP-Protocol-Version": "2025-11-25",
+        authorization: "Bearer shared-token"
+      },
+      message: {
+        jsonrpc: "2.0",
+        id: "codex-session-start",
+        method: "codex/session/start",
+        params: {
+          prompt: "Start the remote worker",
+          cwd: "/tmp/run-001/backend-dev",
+          profile: "default",
+          sandbox: "workspace-write",
+          approvalPolicy: "on-request",
+          includePlanTool: false
+        }
+      }
+    });
+  });
+
   it("builds a reply-session request payload", () => {
     expect(buildCodexSessionReplyRequest({
       threadId: "thread-001",
@@ -90,6 +154,42 @@ describe("worker runtime helpers", () => {
       input: {
         threadId: "thread-001",
         prompt: "Continue the worker"
+      }
+    });
+  });
+
+  it("builds a streamable HTTP reply-session request payload", () => {
+    expect(buildCodexSessionReplyRequest({
+      threadId: "thread-001",
+      prompt: "Continue the remote worker",
+      config: {
+        cwd: "/tmp/run-001/backend-dev",
+        profile: "default",
+        sandbox: "workspace-write",
+        approvalPolicy: "on-request",
+        transport: {
+          kind: "streamable_http",
+          url: "https://codex-mcp.internal/mcp",
+          headers: {},
+          protocolVersion: "2025-11-25"
+        }
+      }
+    })).toEqual({
+      transport: "streamable_http",
+      endpoint: "https://codex-mcp.internal/mcp",
+      headers: {
+        Accept: "application/json, text/event-stream",
+        "Content-Type": "application/json",
+        "MCP-Protocol-Version": "2025-11-25"
+      },
+      message: {
+        jsonrpc: "2.0",
+        id: "codex-session-reply",
+        method: "codex/session/reply",
+        params: {
+          threadId: "thread-001",
+          prompt: "Continue the remote worker"
+        }
       }
     });
   });
@@ -293,6 +393,117 @@ describe("worker runtime helpers", () => {
     expect(stopped.failureReason).toBe("codex_mcp_server_exit_7");
   });
 
+  it("treats streamable HTTP transport as a remote service instead of spawning a local process", async () => {
+    const supervisor = new CodexServerSupervisor({
+      config: {
+        cwd: process.cwd(),
+        profile: "default",
+        sandbox: "workspace-write",
+        approvalPolicy: "on-request",
+        transport: {
+          kind: "streamable_http",
+          url: "https://codex-mcp.internal/mcp",
+          headers: {},
+          protocolVersion: "2025-11-25"
+        }
+      }
+    });
+
+    const started = await supervisor.start();
+    expect(started.status).toBe("running");
+    expect(started.pid).toBeNull();
+
+    const stopped = await supervisor.stop();
+    expect(stopped.status).toBe("stopped");
+    expect(stopped.pid).toBeNull();
+  });
+
+  it("executes streamable HTTP transport requests against a shared MCP endpoint", async () => {
+    const requests: Array<{
+      headers: Record<string, string | string[] | undefined>;
+      body: string;
+    }> = [];
+    const server = createServer((req, res) => {
+      let body = "";
+      req.setEncoding("utf8");
+      req.on("data", (chunk) => {
+        body += chunk;
+      });
+      req.on("end", () => {
+        requests.push({
+          headers: req.headers,
+          body
+        });
+        res.writeHead(200, {
+          "Content-Type": "application/json",
+          "MCP-Session-Id": "mcp-session-001"
+        });
+        res.end(JSON.stringify({
+          jsonrpc: "2.0",
+          result: {
+            threadId: "thread-remote-001",
+            output: "remote-ok",
+            metadata: {
+              source: "shared-service"
+            }
+          }
+        }));
+      });
+    });
+
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
+    const address = server.address();
+
+    if (!address || typeof address === "string") {
+      throw new Error("expected an inet server address");
+    }
+
+    try {
+      const executeTool = createStreamableHttpToolExecutor();
+      const result = await executeTool(buildCodexSessionStartRequest({
+        prompt: "Start remote worker",
+        config: {
+          cwd: "/tmp/run-001/backend-dev",
+          profile: "default",
+          sandbox: "workspace-write",
+          approvalPolicy: "on-request",
+          transport: {
+            kind: "streamable_http",
+            url: `http://127.0.0.1:${address.port}/mcp`,
+            headers: {
+              authorization: "Bearer shared-token"
+            },
+            protocolVersion: "2025-11-25"
+          }
+        }
+      }));
+
+      expect(result).toEqual({
+        threadId: "thread-remote-001",
+        output: "remote-ok",
+        metadata: {
+          source: "shared-service",
+          mcpSessionId: "mcp-session-001"
+        }
+      });
+      expect(requests).toHaveLength(1);
+      expect(requests[0]?.headers["accept"]).toBe("application/json, text/event-stream");
+      expect(requests[0]?.headers["mcp-protocol-version"]).toBe("2025-11-25");
+      expect(requests[0]?.body).toContain("\"method\":\"codex/session/start\"");
+    } finally {
+      await new Promise<void>((resolve, reject) => {
+        server.close((error) => {
+          if (error) {
+            reject(error);
+            return;
+          }
+
+          resolve();
+        });
+      });
+    }
+  });
+
   it("executes codex start and reply flows with persisted thread reuse", async () => {
     const registry = new SessionRegistry();
     registry.seed({
@@ -327,6 +538,10 @@ describe("worker runtime helpers", () => {
       registry,
       supervisor,
       executeTool: async (request) => {
+        if (!("tool" in request)) {
+          throw new Error("expected stdio codex request");
+        }
+
         requests.push(request.tool === "codex-reply"
           ? {
               tool: request.tool,

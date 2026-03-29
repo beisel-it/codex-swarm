@@ -3,6 +3,7 @@ import {
   buildPlanMarkdown,
   CodexSessionRuntime,
   CodexServerSupervisor,
+  createStreamableHttpToolExecutor,
   buildCodexSessionReplyRequest,
   buildCodexSessionStartRequest,
   cleanupWorktreePaths,
@@ -31,6 +32,7 @@ export {
   buildPlanMarkdown,
   CodexSessionRuntime,
   CodexServerSupervisor,
+  createStreamableHttpToolExecutor,
   buildCodexSessionReplyRequest,
   buildCodexSessionStartRequest,
   buildRedisDispatchQueueKeys,
@@ -51,6 +53,11 @@ export {
   serializeDispatchAssignment,
   serializeDispatchLease
 };
+
+export type {
+  CodexServerConfig,
+  CodexToolExecutor
+} from "./runtime.js";
 
 if (process.argv[1] && import.meta.url.endsWith(process.argv[1])) {
   const worktreePath = createWorktreePath({

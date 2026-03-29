@@ -159,8 +159,16 @@ export function evaluateWorkerRuntimeDependencies(runtime: WorkerNodeRuntime): W
     },
     {
       name: "codex_cli",
-      status: runtime.codexCommand.length > 0 ? "ready" : "missing",
-      detail: runtime.codexCommand.length > 0 ? `codex command: ${runtime.codexCommand.join(" ")}` : "codexCommand is missing"
+      status: runtime.codexTransport.kind === "streamable_http"
+        ? "ready"
+        : runtime.codexCommand.length > 0
+          ? "ready"
+          : "missing",
+      detail: runtime.codexTransport.kind === "streamable_http"
+        ? `streamable HTTP transport via ${runtime.codexTransport.url}`
+        : runtime.codexCommand.length > 0
+          ? `codex command: ${runtime.codexCommand.join(" ")}`
+          : "codexCommand is missing"
     },
     {
       name: "workspace_root",
@@ -182,12 +190,19 @@ export function buildRemoteWorkerBootstrap(input: BuildRemoteWorkerBootstrapInpu
       CODEX_SWARM_CONTROL_PLANE_URL: input.runtime.controlPlaneUrl,
       CODEX_SWARM_POSTGRES_URL: input.runtime.postgresUrl,
       CODEX_SWARM_REDIS_URL: input.runtime.redisUrl,
+      CODEX_SWARM_MCP_TRANSPORT: input.runtime.codexTransport.kind,
       CODEX_SWARM_QUEUE_PREFIX: input.runtime.queueKeyPrefix,
       CODEX_SWARM_WORKSPACE_ROOT: input.runtime.workspaceRoot,
       CODEX_SWARM_DISPATCH_ID: input.dispatch.id,
       CODEX_SWARM_RUN_ID: input.dispatch.runId,
       CODEX_SWARM_TASK_ID: input.dispatch.taskId,
-      CODEX_SWARM_AGENT_ID: input.dispatch.agentId
+      CODEX_SWARM_AGENT_ID: input.dispatch.agentId,
+      ...(input.runtime.codexTransport.kind === "streamable_http"
+        ? {
+            CODEX_SWARM_MCP_SERVER_URL: input.runtime.codexTransport.url,
+            CODEX_SWARM_MCP_PROTOCOL_VERSION: input.runtime.codexTransport.protocolVersion
+          }
+        : {})
     },
     checks: evaluateWorkerRuntimeDependencies(input.runtime)
   };

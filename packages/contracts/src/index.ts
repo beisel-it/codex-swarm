@@ -674,12 +674,27 @@ export const workerNodeReconcileReportSchema = z.object({
   completedAt: z.date()
 });
 
+export const codexMcpTransportSchema = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("stdio")
+  }),
+  z.object({
+    kind: z.literal("streamable_http"),
+    url: z.string().url(),
+    headers: z.record(z.string().min(1), z.string()).default({}),
+    protocolVersion: z.string().min(1).default("2025-11-25")
+  })
+]);
+
 export const workerNodeRuntimeSchema = z.object({
   nodeId: z.string().min(1),
   nodeName: z.string().min(1),
   state: z.enum(workerNodeStates),
   workspaceRoot: z.string().min(1),
   codexCommand: z.array(z.string().min(1)).min(1),
+  codexTransport: codexMcpTransportSchema.default({
+    kind: "stdio"
+  }),
   controlPlaneUrl: z.string().url(),
   artifactBaseUrl: z.string().url().optional(),
   postgresUrl: z.string().min(1),
@@ -895,6 +910,7 @@ export type WorkerDispatchAssignment = z.infer<typeof workerDispatchAssignmentSc
 export type WorkerDispatchCreateInput = z.infer<typeof workerDispatchCreateSchema>;
 export type WorkerDispatchListQuery = z.infer<typeof workerDispatchListQuerySchema>;
 export type WorkerDispatchCompleteInput = z.infer<typeof workerDispatchCompleteSchema>;
+export type CodexMcpTransport = z.infer<typeof codexMcpTransportSchema>;
 export type WorkerNodeRuntime = z.infer<typeof workerNodeRuntimeSchema>;
 export type WorkerRuntimeDependencyCheck = z.infer<typeof workerRuntimeDependencyCheckSchema>;
 export type RemoteWorkerBootstrap = z.infer<typeof remoteWorkerBootstrapSchema>;

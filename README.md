@@ -68,6 +68,12 @@ Artifact persistence:
 - `GET /api/v1/artifacts/:id/content` serves the stored artifact bytes through the control-plane API.
 - Remote worker nodes should not run without `artifactBaseUrl`; the runtime dependency check treats shared artifact access as mandatory for multi-node execution.
 
+Codex MCP transport:
+
+- Worker runtime now supports `codexTransport.kind = "stdio"` for local execution and `codexTransport.kind = "streamable_http"` for remote/shared Codex MCP services.
+- Streamable HTTP requests use a single MCP endpoint, send `Accept: application/json, text/event-stream`, and include `MCP-Protocol-Version`.
+- Multi-node/shared-service deployments should configure the remote Codex MCP endpoint in the worker bootstrap/runtime contract instead of assuming a local `codex mcp-server` subprocess on every node.
+
 Operations docs:
 
 - [`docs/README.md`](./docs/README.md)

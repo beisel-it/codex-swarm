@@ -122,6 +122,14 @@ function createRuntime(overrides: Partial<WorkerNodeRuntime> = {}): WorkerNodeRu
     state: "active",
     workspaceRoot: "/srv/codex-swarm",
     codexCommand: ["codex", "mcp-server"],
+    codexTransport: {
+      kind: "streamable_http",
+      url: "https://codex-mcp.internal/mcp",
+      headers: {
+        authorization: "Bearer shared-token"
+      },
+      protocolVersion: "2025-11-25"
+    },
     controlPlaneUrl: "https://control-plane.internal",
     postgresUrl: "postgres://postgres:postgres@db.internal:5432/codex",
     redisUrl: "redis://cache.internal:6379/0",
@@ -158,6 +166,9 @@ describe("dispatch helpers", () => {
       CODEX_SWARM_NODE_ID: "node-a",
       CODEX_SWARM_CONTROL_PLANE_URL: "https://control-plane.internal",
       CODEX_SWARM_REDIS_URL: "redis://cache.internal:6379/0",
+      CODEX_SWARM_MCP_TRANSPORT: "streamable_http",
+      CODEX_SWARM_MCP_SERVER_URL: "https://codex-mcp.internal/mcp",
+      CODEX_SWARM_MCP_PROTOCOL_VERSION: "2025-11-25",
       CODEX_SWARM_DISPATCH_ID: dispatch.id,
       CODEX_SWARM_AGENT_ID: dispatch.agentId
     });
@@ -165,6 +176,11 @@ describe("dispatch helpers", () => {
       name: "artifact_store",
       status: "missing",
       detail: "artifactBaseUrl is required for remote workers because artifacts must remain accessible across nodes"
+    });
+    expect(bootstrap.checks).toContainEqual({
+      name: "codex_cli",
+      status: "ready",
+      detail: "streamable HTTP transport via https://codex-mcp.internal/mcp"
     });
     expect(evaluateWorkerRuntimeDependencies(runtime).map((check) => check.name)).toEqual([
       "control_plane",
@@ -178,7 +194,10 @@ describe("dispatch helpers", () => {
 
   it("keeps artifact store optional for single-host workers", () => {
     const runtime = createRuntime({
-      capabilities: ["default"]
+      capabilities: ["default"],
+      codexTransport: {
+        kind: "stdio"
+      }
     });
 
     expect(evaluateWorkerRuntimeDependencies(runtime)).toContainEqual({

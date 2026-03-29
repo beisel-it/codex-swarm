@@ -44,6 +44,7 @@ Notes:
 - worker placement is sticky and explicit
 - drain-mode procedures should be documented and exercised
 - remote worker bootstrap must include an `artifactBaseUrl` that resolves back to the control-plane API
+- remote/shared Codex execution may use `codexTransport.kind = "streamable_http"` with a shared MCP endpoint instead of requiring a local subprocess on every node
 - the control-plane API must persist artifact blobs under shared durable storage and expose them through `/api/v1/artifacts/:id/content`
 - restore and upgrade procedures must account for both control-plane and worker coordination
 

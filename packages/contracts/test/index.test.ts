@@ -474,6 +474,9 @@ describe("workerNodeRuntimeSchema", () => {
     });
 
     expect(runtime.queueKeyPrefix).toBe("codex-swarm");
+    expect(runtime.codexTransport).toEqual({
+      kind: "stdio"
+    });
     expect(runtime.capabilities).toEqual([]);
     expect(runtime.credentialEnvNames).toEqual([]);
     expect(runtime.heartbeatIntervalSeconds).toBe(30);
@@ -489,6 +492,14 @@ describe("remoteWorkerBootstrapSchema", () => {
         state: "active",
         workspaceRoot: "/srv/codex-swarm",
         codexCommand: ["codex", "mcp-server"],
+        codexTransport: {
+          kind: "streamable_http",
+          url: "https://codex-mcp.internal/mcp",
+          headers: {
+            authorization: "Bearer shared-token"
+          },
+          protocolVersion: "2025-11-25"
+        },
         controlPlaneUrl: "https://control-plane.internal",
         postgresUrl: "postgres://postgres:postgres@db.internal:5432/codex",
         redisUrl: "redis://cache.internal:6379/0"
@@ -519,6 +530,7 @@ describe("remoteWorkerBootstrapSchema", () => {
 
     expect(bootstrap.environment.CODEX_SWARM_NODE_ID).toBe("node-a");
     expect(bootstrap.dispatch.queue).toBe("worker-dispatch");
+    expect(bootstrap.runtime.codexTransport.kind).toBe("streamable_http");
   });
 });
 
