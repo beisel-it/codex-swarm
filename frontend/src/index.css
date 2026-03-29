@@ -1462,10 +1462,29 @@ code {
 }
 
 @media (max-width: 820px) {
+  html,
+  body,
+  #root,
+  .app-shell {
+    overflow-x: hidden;
+  }
+
   .hero-panel,
   .panel {
     padding: 14px;
     border-radius: 3px;
+  }
+
+  .board-layout {
+    grid-template-columns: minmax(0, 1fr) !important;
+    gap: 12px;
+  }
+
+  .board-layout > * {
+    grid-column: 1 !important;
+    width: auto !important;
+    min-width: 0;
+    max-width: 100%;
   }
 
   .hero-copy h1 {
@@ -1496,6 +1515,39 @@ code {
   .run-card-topline,
   .run-card-meta {
     flex-direction: column;
+  }
+
+  .panel-runs {
+    max-height: none;
+    overflow: visible;
+  }
+
+  .run-stack,
+  .inventory-list,
+  .review-list,
+  .panel-activity .activity-list,
+  .panel-admin-provenance .provenance-list,
+  .panel-transcript .activity-list,
+  .panel-recovery .recovery-list {
+    max-height: none;
+    overflow: visible;
+    padding-right: 0;
+    margin-right: 0;
+  }
+
+  .panel-overview,
+  .panel-detail,
+  .panel-provider-detail,
+  .panel-placement,
+  .panel-recovery,
+  .panel-activity,
+  .panel-transcript,
+  .panel-review,
+  .panel-admin-identity,
+  .panel-admin-governance,
+  .panel-admin-provenance,
+  .panel-admin-audit {
+    overflow: hidden;
   }
 
   .run-status-badges {

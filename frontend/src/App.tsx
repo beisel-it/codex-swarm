@@ -1731,6 +1731,13 @@ function App() {
   const [showAgentSection, setShowAgentSection] = useState(false)
   const [showAllRuns, setShowAllRuns] = useState(false)
   const [showAllRepositories, setShowAllRepositories] = useState(false)
+  const [viewportWidth, setViewportWidth] = useState(() => {
+    if (typeof window === 'undefined') {
+      return 1280
+    }
+
+    return window.innerWidth
+  })
   const [sidebarWidth, setSidebarWidth] = useState(() => {
     if (typeof window === 'undefined') {
       return 344
@@ -1749,6 +1756,15 @@ function App() {
   useEffect(() => {
     window.localStorage.setItem(SIDEBAR_WIDTH_STORAGE_KEY, String(sidebarWidth))
   }, [sidebarWidth])
+
+  useEffect(() => {
+    function handleResize() {
+      setViewportWidth(window.innerWidth)
+    }
+
+    window.addEventListener('resize', handleResize)
+    return () => window.removeEventListener('resize', handleResize)
+  }, [])
 
   useEffect(() => {
     let active = true
@@ -1865,6 +1881,7 @@ function App() {
     reviewDiffArtifacts.find((artifact) => artifact.id === selectedReviewArtifactId) ??
     reviewDiffArtifacts[0] ??
     null
+  const isCompactViewport = viewportWidth <= 820
 
   useEffect(() => {
     setSelectedApprovalId(selectedApproval?.id ?? '')
@@ -2358,16 +2375,18 @@ function App() {
       <main
         className={`board-layout ${selectedRun ? '' : 'is-empty'}`}
         style={
-          selectedRun
-            ? {
-                gridTemplateColumns: `${sidebarWidth}px minmax(0, 1fr) minmax(260px, 340px)`,
-              }
-            : {
-                gridTemplateColumns: `${sidebarWidth}px`,
-              }
+          isCompactViewport
+            ? undefined
+            : selectedRun
+              ? {
+                  gridTemplateColumns: `${sidebarWidth}px minmax(0, 1fr) minmax(260px, 340px)`,
+                }
+              : {
+                  gridTemplateColumns: `${sidebarWidth}px`,
+                }
         }
       >
-        <aside className="panel panel-runs" style={{ width: sidebarWidth }}>
+        <aside className="panel panel-runs" style={isCompactViewport ? undefined : { width: sidebarWidth }}>
           <div className="panel-header">
             <div>
               <p className="panel-kicker">Active runs</p>
@@ -2614,13 +2633,15 @@ function App() {
             <MiniStat label="Fleet alerts" value={String(runWorkerNodes.filter((node) => node.status !== 'online' || node.drainState !== 'active').length)} />
           </div>
 
-          <div
-            className="sidebar-resize-handle"
-            role="separator"
-            aria-label="Resize active runs sidebar"
-            aria-orientation="vertical"
-            onPointerDown={handleSidebarResizeStart}
-          />
+          {!isCompactViewport ? (
+            <div
+              className="sidebar-resize-handle"
+              role="separator"
+              aria-label="Resize active runs sidebar"
+              aria-orientation="vertical"
+              onPointerDown={handleSidebarResizeStart}
+            />
+          ) : null}
         </aside>
 
         {selectedRun ? (
