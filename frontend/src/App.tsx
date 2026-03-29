@@ -3310,10 +3310,9 @@ function MetricCard({
   hint: string
 }) {
   return (
-    <article className="metric-card">
+    <article className="metric-card" title={hint}>
       <p>{label}</p>
       <strong>{value}</strong>
-      <span>{hint}</span>
     </article>
   )
 }

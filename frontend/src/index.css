@@ -199,7 +199,6 @@ code {
   grid-template-columns: auto auto;
   align-items: center;
   column-gap: 10px;
-  row-gap: 2px;
   min-height: 0;
   padding: 6px 10px;
   border-radius: 3px;
@@ -213,18 +212,11 @@ code {
   display: block;
   margin: 0;
   grid-column: 2;
-  grid-row: 1 / span 2;
+  grid-row: 1;
   justify-self: end;
   font-size: clamp(1rem, 1.4vw, 1.2rem);
   line-height: 1;
   letter-spacing: -0.06em;
-}
-
-.metric-card span {
-  grid-column: 1;
-  font-size: 0.68rem;
-  color: rgba(247, 240, 232, 0.7);
-  line-height: 1.2;
 }
 
 .metric-card p {
