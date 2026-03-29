@@ -665,3 +665,24 @@ Residual risks:
 Backlog follow-up:
 
 - Add real stale-worktree cleanup behavior with filesystem-level acceptance evidence, or intentionally narrow the roadmap item to session-state reconciliation plus missing-worktree detection.
+
+## Task `7717800b`
+
+Roadmap entry:
+
+- Phase 0 exit criterion: `The architecture no longer depends on filesystem JSON as the source of truth.`
+
+Verdict:
+
+- parity
+
+Evidence:
+
+- The durable control-plane model is defined in Postgres-backed schema and migrations for repositories, runs, tasks, agents, sessions, worker nodes, approvals, validations, artifacts, events, workspaces, and teams in `packages/database/prisma/schema.prisma`, `apps/api/src/db/schema.ts`, and `apps/api/src/db/migrate.ts`.
+- The API service reads and writes operational state through that database model in `apps/api/src/services/control-plane-service.ts`; task/session/run behavior is expressed through SQL/Drizzle persistence rather than filesystem JSON files.
+- Versioning and compatibility checks also read authoritative metadata from the database, with tests asserting the control-plane compatibility row is loaded from Postgres in `apps/api/test/versioning.test.ts`.
+- A repo-wide search shows filesystem JSON usage only for operational snapshot/backup scripts and incidental serialized transport payloads, not as the runtime source of truth for orchestration state.
+
+Residual risks:
+
+- The repo still emits JSON for backup snapshots and some transport payloads, but those are support utilities and wire formats rather than the control plane’s authoritative state store.
