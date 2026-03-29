@@ -4,6 +4,7 @@ This directory contains the release-facing documentation set for Codex Swarm.
 
 ## Start Here
 
+- External Codex operators should start with [Operator Guide](./operator-guide.md). It is the repo-facing entry doc for the checked-in role pack, skills, and grounded operator workflows.
 - [User Guide](./user-guide.md)
 - [Admin Guide](./admin-guide.md)
 - [Operator Guide](./operator-guide.md)

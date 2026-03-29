@@ -26,6 +26,20 @@ For day-to-day work, an external Codex operator should combine:
 2. codex-swarm coordination commands through `clawteam` for board, inbox, and task state
 3. API and ops commands for health, metrics, backups, restore, and diagnostics
 
+## Skill-to-flow map
+
+Use this map when an external Codex session needs to decide which checked-in
+skill or surface to reach for first.
+
+| Operator goal | Primary checked-in asset | Codex Swarm surface to inspect or drive |
+| --- | --- | --- |
+| Triage blocked or approval-gated work | [leader.toml](/home/florian/codex-swarm/.codex/agents/leader.toml) | board overview, board signals, `clawteam task list`, `clawteam inbox receive` |
+| Reshape milestone scope into executable work | [plan-from-spec](/home/florian/codex-swarm/.agents/skills/plan-from-spec/SKILL.md) | roadmap slice, `.swarm/plan.md`, `docs/architecture/` |
+| Turn a plan into dependency-safe tasks | [create-task-dag](/home/florian/codex-swarm/.agents/skills/create-task-dag/SKILL.md) | task DAG, board lanes, `clawteam task update` |
+| Monitor execution and decide whether a slice is really done | [validate-milestone](/home/florian/codex-swarm/.agents/skills/validate-milestone/SKILL.md) | review surface, validation history, artifacts, build/test commands |
+| Prepare a reviewable handoff | [prepare-pr](/home/florian/codex-swarm/.agents/skills/prepare-pr/SKILL.md) | review surface, PR reflection, commit state, validation results |
+| Diagnose stale placement or recovery issues | [leader.toml](/home/florian/codex-swarm/.codex/agents/leader.toml) plus this operator guide | run detail, metrics, artifact downloads, `ops:*` commands |
+
 ## Operator walkthroughs
 
 ### 1. Board triage walkthrough
@@ -150,6 +164,46 @@ Expected outputs:
 - a bounded diagnosis: workflow issue, worker/runtime issue, or restore/DR issue
 - preserved evidence for escalation
 - a documented recovery result, not just an operator assumption
+
+### 4. Execution monitoring and review handoff walkthrough
+
+Use this when an external Codex session needs to verify that an active slice is
+actually ready for review or PR preparation instead of only looking complete on
+the board.
+
+Grounding surfaces:
+
+- execution/review skills: [validate-milestone](/home/florian/codex-swarm/.agents/skills/validate-milestone/SKILL.md), [prepare-pr](/home/florian/codex-swarm/.agents/skills/prepare-pr/SKILL.md)
+- review screenshot: [user-review-console.png](/home/florian/codex-swarm/docs/assets/screenshots/user-review-console.png)
+- board screenshot: [user-board-overview.png](/home/florian/codex-swarm/docs/assets/screenshots/user-board-overview.png)
+
+Workflow:
+
+1. Start from the board and identify the slice approaching review:
+   - a run in `awaiting_approval`
+   - a task lane near completion
+   - recent validations that look current
+2. Open the review surface and inspect:
+   - approval request summary
+   - validation history
+   - artifact list
+3. Use the repo's validation and handoff discipline before claiming the slice is done:
+   - run the commands required by the active milestone
+   - compare the result to [validate-milestone](/home/florian/codex-swarm/.agents/skills/validate-milestone/SKILL.md)
+   - only move to handoff once the evidence is current
+4. If the slice is genuinely reviewable, use [prepare-pr](/home/florian/codex-swarm/.agents/skills/prepare-pr/SKILL.md) to gather:
+   - commit summary
+   - reviewer-facing notes
+   - rollout or operational caveats
+5. Leave the system in one of two explicit states:
+   - approved and handoff-ready
+   - rejected or still in-progress with the missing evidence called out
+
+Expected outputs:
+
+- a clear go or no-go review decision
+- validation-backed handoff notes instead of file-inventory prose
+- a repeatable path from board state to review-ready slice
 
 ## Core Checks
 
