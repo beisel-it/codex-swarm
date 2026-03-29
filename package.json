@@ -25,6 +25,8 @@
     "ops:drill": "node ./apps/api/scripts/ops/dr-exercise.mjs",
     "ops:m9:prepare": "node ./apps/api/scripts/ops/prepare-m9-workdir.mjs",
     "ops:perf": "node ./apps/api/scripts/ops/perf-envelope.mjs",
-    "ops:smoke": "node ./apps/api/scripts/ops/single-host-smoke.mjs"
+    "ops:smoke": "node ./apps/api/scripts/ops/single-host-smoke.mjs",
+    "ops:tailnet:status": "bash ./ops/deploy/check-tailnet-instance.sh",
+    "ops:tailnet:tui": "bash ./ops/deploy/run-tailnet-tui.sh"
   }
 }

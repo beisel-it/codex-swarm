@@ -1,0 +1,18 @@
+[Unit]
+Description=Codex Swarm API (tailnet-only deployment)
+After=network-online.target codex-swarm-postgres.service codex-swarm-redis.service
+Requires=codex-swarm-postgres.service codex-swarm-redis.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/florian/codex-swarm
+EnvironmentFile=%h/.config/codex-swarm/tailnet.env
+Restart=always
+RestartSec=5
+ExecStartPre=/bin/sh -lc 'corepack pnpm install --frozen-lockfile'
+ExecStartPre=/bin/sh -lc 'export NODE_ENV=production HOST="$CODEX_SWARM_HOST" PORT="$CODEX_SWARM_API_PORT" DATABASE_URL="$CODEX_SWARM_DATABASE_URL" ARTIFACT_STORAGE_ROOT="$CODEX_SWARM_ARTIFACT_STORAGE_ROOT" ARTIFACT_BASE_URL="$CODEX_SWARM_ARTIFACT_BASE_URL" DEV_AUTH_TOKEN="$CODEX_SWARM_DEV_AUTH_TOKEN"; corepack pnpm --dir apps/api db:migrate'
+ExecStart=/bin/sh -lc 'export NODE_ENV=production HOST="$CODEX_SWARM_HOST" PORT="$CODEX_SWARM_API_PORT" DATABASE_URL="$CODEX_SWARM_DATABASE_URL" ARTIFACT_STORAGE_ROOT="$CODEX_SWARM_ARTIFACT_STORAGE_ROOT" ARTIFACT_BASE_URL="$CODEX_SWARM_ARTIFACT_BASE_URL" DEV_AUTH_TOKEN="$CODEX_SWARM_DEV_AUTH_TOKEN"; corepack pnpm --dir apps/api exec tsx src/server.ts'
+
+[Install]
+WantedBy=default.target

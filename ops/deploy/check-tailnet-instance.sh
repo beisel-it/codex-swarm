@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ENV_FILE="${CODEX_SWARM_TAILNET_ENV_FILE:-$HOME/.config/codex-swarm/tailnet.env}"
+
+if [[ ! -f "$ENV_FILE" ]]; then
+  echo "Missing tailnet env file: $ENV_FILE" >&2
+  exit 1
+fi
+
+set -a
+# shellcheck disable=SC1090
+source "$ENV_FILE"
+set +a
+
+echo "tailnet env: $ENV_FILE"
+echo "api:      http://${CODEX_SWARM_TAILNET_DNS}:${CODEX_SWARM_API_PORT}"
+echo "frontend: http://${CODEX_SWARM_TAILNET_DNS}:${CODEX_SWARM_FRONTEND_PORT}"
+echo
+
+systemctl --user --no-pager --full status \
+  codex-swarm-postgres.service \
+  codex-swarm-redis.service \
+  codex-swarm-api.service \
+  codex-swarm-frontend.service
+
+echo
+echo "listeners:"
+ss -lnt | grep -E ":((${CODEX_SWARM_API_PORT})|(${CODEX_SWARM_FRONTEND_PORT})|(${CODEX_SWARM_POSTGRES_PORT})|(${CODEX_SWARM_REDIS_PORT}))\\b" || true
+
+echo
+echo "health:"
+curl -fsS "http://${CODEX_SWARM_TAILNET_DNS}:${CODEX_SWARM_API_PORT}/health"
+echo
+
