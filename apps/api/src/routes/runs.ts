@@ -10,6 +10,7 @@ import {
   runBranchPublishSchema,
   runCreateSchema,
   runPullRequestHandoffSchema,
+  runUpdateSchema,
   runStatusUpdateSchema
 } from "../http/schemas.js";
 import { requireAuthorizedAction, resolveRunStatusAction } from "../lib/authorization.js";
@@ -229,6 +230,24 @@ export const runRoutes: FastifyPluginAsync = async (app) => {
 
       return run;
     }, { route: "runs.update-status" });
+  });
+
+  app.patch("/runs/:id", async (request) => {
+    return app.observability.withTrace("api.runs.update", async () => {
+      const { id } = idParamSchema.parse(request.params);
+      const input = runUpdateSchema.parse(request.body);
+      requireAuthorizedAction(request.authContext, "run.create");
+      return app.controlPlane.updateRun(id, input, request.authContext);
+    }, { route: "runs.update" });
+  });
+
+  app.delete("/runs/:id", async (request, reply) => {
+    return app.observability.withTrace("api.runs.delete", async () => {
+      const { id } = idParamSchema.parse(request.params);
+      requireAuthorizedAction(request.authContext, "run.create");
+      await app.controlPlane.deleteRun(id, request.authContext);
+      return reply.code(204).send();
+    }, { route: "runs.delete" });
   });
 
   app.post("/runs/:id/budget-checkpoints", async (request) => {

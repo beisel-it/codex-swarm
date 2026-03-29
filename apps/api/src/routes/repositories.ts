@@ -1,6 +1,6 @@
 import type { FastifyPluginAsync } from "fastify";
 
-import { repositoryCreateSchema } from "../http/schemas.js";
+import { idParamSchema, repositoryCreateSchema, repositoryUpdateSchema } from "../http/schemas.js";
 import { controlPlaneEvents, timelineEvent } from "../lib/control-plane-events.js";
 import { isRecoverableDatabaseError } from "../lib/database-fallback.js";
 import { requireValue } from "../lib/require-value.js";
@@ -36,5 +36,21 @@ export const repositoryRoutes: FastifyPluginAsync = async (app) => {
 
       return reply.code(201).send(repository);
     }, { route: "repositories.create" });
+  });
+
+  app.patch("/repositories/:id", async (request) => {
+    return app.observability.withTrace("api.repositories.update", async () => {
+      const { id } = idParamSchema.parse(request.params);
+      const input = repositoryUpdateSchema.parse(request.body);
+      return app.controlPlane.updateRepository(id, input, request.authContext);
+    }, { route: "repositories.update" });
+  });
+
+  app.delete("/repositories/:id", async (request, reply) => {
+    return app.observability.withTrace("api.repositories.delete", async () => {
+      const { id } = idParamSchema.parse(request.params);
+      await app.controlPlane.deleteRepository(id, request.authContext);
+      return reply.code(204).send();
+    }, { route: "repositories.delete" });
   });
 };

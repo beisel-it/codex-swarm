@@ -1,4 +1,4 @@
-import { startTransition, useDeferredValue, useEffect, useState } from 'react'
+import { startTransition, useDeferredValue, useEffect, useState, type PointerEvent as ReactPointerEvent } from 'react'
 
 type ViewMode = 'board' | 'detail' | 'review' | 'admin'
 type RepositoryProvider = 'github' | 'gitlab' | 'local' | 'other'
@@ -1205,6 +1205,10 @@ const workerSessionTone: Record<WorkerSessionState, ActivityItem['tone']> = {
   archived: 'muted',
 }
 
+const SIDEBAR_WIDTH_STORAGE_KEY = 'codex-swarm.sidebar-width'
+const SIDEBAR_MIN_WIDTH = 280
+const SIDEBAR_MAX_WIDTH = 560
+
 function buildApiUrl(path: string) {
   return `${API_BASE_URL}${path}`
 }
@@ -1225,6 +1229,10 @@ async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
 
   if (!response.ok) {
     throw new Error(`Request failed: ${response.status}`)
+  }
+
+  if (response.status === 204) {
+    return undefined as T
   }
 
   return (await response.json()) as T
@@ -1262,6 +1270,27 @@ async function createRepository(input: {
   })
 }
 
+async function updateRepository(
+  repositoryId: string,
+  input: {
+    name?: string
+    url?: string
+    provider?: RepositoryProvider
+    localPath?: string | null
+  },
+): Promise<Repository> {
+  return requestJson<Repository>(`/api/v1/repositories/${encodeURIComponent(repositoryId)}`, {
+    method: 'PATCH',
+    body: JSON.stringify(input),
+  })
+}
+
+async function deleteRepository(repositoryId: string): Promise<void> {
+  await requestJson(`/api/v1/repositories/${encodeURIComponent(repositoryId)}`, {
+    method: 'DELETE',
+  })
+}
+
 async function createRun(input: {
   repositoryId: string
   goal: string
@@ -1270,6 +1299,25 @@ async function createRun(input: {
   return requestJson<Run>('/api/v1/runs', {
     method: 'POST',
     body: JSON.stringify(input),
+  })
+}
+
+async function updateRun(
+  runId: string,
+  input: {
+    goal?: string
+    branchName?: string | null
+  },
+): Promise<Run> {
+  return requestJson<Run>(`/api/v1/runs/${encodeURIComponent(runId)}`, {
+    method: 'PATCH',
+    body: JSON.stringify(input),
+  })
+}
+
+async function deleteRun(runId: string): Promise<void> {
+  await requestJson(`/api/v1/runs/${encodeURIComponent(runId)}`, {
+    method: 'DELETE',
   })
 }
 
@@ -1669,16 +1717,34 @@ function App() {
   const [repoDraftUrl, setRepoDraftUrl] = useState('https://github.com/beisel-it/codex-swarm.git')
   const [repoDraftLocalPath, setRepoDraftLocalPath] = useState('/home/florian/codex-swarm')
   const [repoDraftProvider, setRepoDraftProvider] = useState<RepositoryProvider>('github')
+  const [editingRepositoryId, setEditingRepositoryId] = useState<string | null>(null)
   const [runDraftRepositoryId, setRunDraftRepositoryId] = useState('')
   const [runDraftGoal, setRunDraftGoal] = useState('Ship the next iteration through codex-swarm.')
   const [runDraftBranchName, setRunDraftBranchName] = useState('main')
+  const [editingRunId, setEditingRunId] = useState<string | null>(null)
   const [taskDraftTitle, setTaskDraftTitle] = useState('')
   const [taskDraftDescription, setTaskDraftDescription] = useState('')
   const [taskDraftRole, setTaskDraftRole] = useState('developer')
   const [showRepoControls, setShowRepoControls] = useState(false)
   const [showRunControls, setShowRunControls] = useState(false)
+  const [sidebarWidth, setSidebarWidth] = useState(() => {
+    if (typeof window === 'undefined') {
+      return 344
+    }
+
+    const storedWidth = Number(window.localStorage.getItem(SIDEBAR_WIDTH_STORAGE_KEY))
+    if (!Number.isFinite(storedWidth)) {
+      return 344
+    }
+
+    return Math.min(SIDEBAR_MAX_WIDTH, Math.max(SIDEBAR_MIN_WIDTH, storedWidth))
+  })
 
   const deferredTaskQuery = useDeferredValue(taskQuery)
+
+  useEffect(() => {
+    window.localStorage.setItem(SIDEBAR_WIDTH_STORAGE_KEY, String(sidebarWidth))
+  }, [sidebarWidth])
 
   useEffect(() => {
     let active = true
@@ -2062,16 +2128,24 @@ function App() {
       const url = repoDraftProvider === 'local'
         ? `file://${localPath}`
         : repoDraftUrl.trim()
-      const repository = await createRepository({
-        name: repoDraftName.trim(),
-        url,
-        provider: repoDraftProvider,
-        localPath,
-      })
+      const repository = editingRepositoryId
+        ? await updateRepository(editingRepositoryId, {
+            name: repoDraftName.trim(),
+            url,
+            provider: repoDraftProvider,
+            localPath: localPath ?? null,
+          })
+        : await createRepository({
+            name: repoDraftName.trim(),
+            url,
+            provider: repoDraftProvider,
+            localPath,
+          })
       setRunDraftRepositoryId(repository.id)
+      setEditingRepositoryId(null)
       await refreshSwarmData()
     } catch (error) {
-      setErrorText(error instanceof Error ? error.message : 'Unable to register repository')
+      setErrorText(error instanceof Error ? error.message : `Unable to ${editingRepositoryId ? 'update' : 'register'} repository`)
     } finally {
       setActionPending(false)
     }
@@ -2086,19 +2160,25 @@ function App() {
     setActionPending(true)
 
     try {
-      const run = await createRun({
-        repositoryId: runDraftRepositoryId,
-        goal: runDraftGoal.trim(),
-        branchName: runDraftBranchName.trim() || undefined,
-      })
+      const run = editingRunId
+        ? await updateRun(editingRunId, {
+            goal: runDraftGoal.trim(),
+            branchName: runDraftBranchName.trim() || null,
+          })
+        : await createRun({
+            repositoryId: runDraftRepositoryId,
+            goal: runDraftGoal.trim(),
+            branchName: runDraftBranchName.trim() || undefined,
+          })
 
-      if (autoStart) {
+      if (autoStart && !editingRunId) {
         await startRun(run.id)
       }
 
+      setEditingRunId(null)
       await refreshSwarmData(run.id)
     } catch (error) {
-      setErrorText(error instanceof Error ? error.message : 'Unable to create run')
+      setErrorText(error instanceof Error ? error.message : `Unable to ${editingRunId ? 'update' : 'create'} run`)
     } finally {
       setActionPending(false)
     }
@@ -2147,6 +2227,85 @@ function App() {
     }
   }
 
+  function handleEditRepository(repository: Repository) {
+    setEditingRepositoryId(repository.id)
+    setRepoDraftName(repository.name)
+    setRepoDraftProvider(repository.provider)
+    setRepoDraftUrl(repository.provider === 'local' ? '' : repository.url)
+    setRepoDraftLocalPath(repository.localPath ?? '')
+    setShowRepoControls(true)
+    setErrorText('')
+  }
+
+  async function handleDeleteRepository(repository: Repository) {
+    if (!window.confirm(`Delete repository “${repository.name}”?`)) {
+      return
+    }
+
+    setActionPending(true)
+
+    try {
+      await deleteRepository(repository.id)
+      if (editingRepositoryId === repository.id) {
+        setEditingRepositoryId(null)
+      }
+      await refreshSwarmData()
+    } catch (error) {
+      setErrorText(error instanceof Error ? error.message : 'Unable to delete repository')
+    } finally {
+      setActionPending(false)
+    }
+  }
+
+  function handleEditRun(run: Run) {
+    setEditingRunId(run.id)
+    setRunDraftRepositoryId(run.repositoryId)
+    setRunDraftGoal(run.goal)
+    setRunDraftBranchName(run.branchName ?? '')
+    setShowRunControls(true)
+    setErrorText('')
+  }
+
+  async function handleDeleteRun(run: Run) {
+    if (!window.confirm(`Delete run “${run.goal}”?`)) {
+      return
+    }
+
+    setActionPending(true)
+
+    try {
+      await deleteRun(run.id)
+      if (editingRunId === run.id) {
+        setEditingRunId(null)
+      }
+      await refreshSwarmData()
+    } catch (error) {
+      setErrorText(error instanceof Error ? error.message : 'Unable to delete run')
+    } finally {
+      setActionPending(false)
+    }
+  }
+
+  function handleSidebarResizeStart(event: ReactPointerEvent<HTMLDivElement>) {
+    event.preventDefault()
+
+    const startX = event.clientX
+    const startWidth = sidebarWidth
+
+    function handlePointerMove(moveEvent: PointerEvent) {
+      const nextWidth = startWidth + (moveEvent.clientX - startX)
+      setSidebarWidth(Math.min(SIDEBAR_MAX_WIDTH, Math.max(SIDEBAR_MIN_WIDTH, nextWidth)))
+    }
+
+    function handlePointerUp() {
+      window.removeEventListener('pointermove', handlePointerMove)
+      window.removeEventListener('pointerup', handlePointerUp)
+    }
+
+    window.addEventListener('pointermove', handlePointerMove)
+    window.addEventListener('pointerup', handlePointerUp)
+  }
+
   return (
     <div className="app-shell">
       <div className="backdrop-grid" aria-hidden="true" />
@@ -2180,8 +2339,19 @@ function App() {
         ))}
       </div>
 
-      <main className={`board-layout ${selectedRun ? '' : 'is-empty'}`}>
-        <aside className="panel panel-runs">
+      <main
+        className={`board-layout ${selectedRun ? '' : 'is-empty'}`}
+        style={
+          selectedRun
+            ? {
+                gridTemplateColumns: `${sidebarWidth}px minmax(0, 1fr) minmax(260px, 340px)`,
+              }
+            : {
+                gridTemplateColumns: `${sidebarWidth}px`,
+              }
+        }
+      >
+        <aside className="panel panel-runs" style={{ width: sidebarWidth }}>
           <div className="panel-header">
             <div>
               <p className="panel-kicker">Active runs</p>
@@ -2194,8 +2364,8 @@ function App() {
             <section className={`control-card ${showRepoControls ? 'is-open' : 'is-collapsed'}`}>
               <div className="control-card-header">
                 <div className="control-card-heading">
-                  <strong>Register repository</strong>
-                  <span>Real API</span>
+                  <strong>{editingRepositoryId ? 'Edit repository' : 'Register repository'}</strong>
+                  <span>{editingRepositoryId ? 'Update existing record' : 'Real API'}</span>
                 </div>
                 <button
                   type="button"
@@ -2232,9 +2402,27 @@ function App() {
                       <input value={repoDraftUrl} onChange={(event) => setRepoDraftUrl(event.target.value)} />
                     </label>
                   )}
-                  <button type="button" className="action-button" onClick={handleCreateRepository} disabled={actionPending}>
-                    Register repository
-                  </button>
+                  <div className="action-row">
+                    {editingRepositoryId ? (
+                      <button
+                        type="button"
+                        className="action-button action-button-secondary"
+                        onClick={() => {
+                          setEditingRepositoryId(null)
+                          setRepoDraftName('codex-swarm')
+                          setRepoDraftUrl('https://github.com/beisel-it/codex-swarm.git')
+                          setRepoDraftLocalPath('/home/florian/codex-swarm')
+                          setRepoDraftProvider('github')
+                        }}
+                        disabled={actionPending}
+                      >
+                        Cancel
+                      </button>
+                    ) : null}
+                    <button type="button" className="action-button" onClick={handleCreateRepository} disabled={actionPending}>
+                      {editingRepositoryId ? 'Save repository' : 'Register repository'}
+                    </button>
+                  </div>
                 </>
               ) : null}
             </section>
@@ -2242,8 +2430,8 @@ function App() {
             <section className={`control-card ${showRunControls ? 'is-open' : 'is-collapsed'}`}>
               <div className="control-card-header">
                 <div className="control-card-heading">
-                  <strong>Create and start run</strong>
-                  <span>Live orchestration</span>
+                  <strong>{editingRunId ? 'Edit run' : 'Create and start run'}</strong>
+                  <span>{editingRunId ? 'Update selected run' : 'Live orchestration'}</span>
                 </div>
                 <button
                   type="button"
@@ -2276,15 +2464,62 @@ function App() {
                     <input value={runDraftBranchName} onChange={(event) => setRunDraftBranchName(event.target.value)} />
                   </label>
                   <div className="action-row">
+                    {editingRunId ? (
+                      <button
+                        type="button"
+                        className="action-button action-button-secondary"
+                        onClick={() => {
+                          setEditingRunId(null)
+                          setRunDraftGoal('Ship the next iteration through codex-swarm.')
+                          setRunDraftBranchName('main')
+                        }}
+                        disabled={actionPending}
+                      >
+                        Cancel
+                      </button>
+                    ) : null}
                     <button type="button" className="action-button action-button-secondary" onClick={() => handleCreateRun(false)} disabled={actionPending}>
-                      Create only
+                      {editingRunId ? 'Save only' : 'Create only'}
                     </button>
-                    <button type="button" className="action-button" onClick={() => handleCreateRun(true)} disabled={actionPending}>
-                      Create and start
-                    </button>
+                    {!editingRunId ? (
+                      <button type="button" className="action-button" onClick={() => handleCreateRun(true)} disabled={actionPending}>
+                        Create and start
+                      </button>
+                    ) : null}
                   </div>
                 </>
               ) : null}
+            </section>
+
+            <section className="control-card is-open">
+              <div className="control-card-header">
+                <div className="control-card-heading">
+                  <strong>Repositories</strong>
+                  <span>{data.repositories.length} tracked</span>
+                </div>
+              </div>
+              <div className="inventory-list">
+                {data.repositories.map((repository) => (
+                  <article key={repository.id} className="inventory-item">
+                    <div>
+                      <strong>{repository.name}</strong>
+                      <p>{repository.provider === 'local' ? repository.localPath ?? repository.url : repository.url}</p>
+                    </div>
+                    <div className="inventory-actions">
+                      <button type="button" className="table-action" onClick={() => setRunDraftRepositoryId(repository.id)}>
+                        Use
+                      </button>
+                      <button type="button" className="table-action" onClick={() => handleEditRepository(repository)}>
+                        Edit
+                      </button>
+                      <button type="button" className="table-action table-action-danger" onClick={() => void handleDeleteRepository(repository)}>
+                        Delete
+                      </button>
+                    </div>
+                  </article>
+                ))}
+                {data.repositories.length === 0 ? <p className="inventory-empty">No repositories registered yet.</p> : null}
+              </div>
             </section>
           </div>
 
@@ -2333,9 +2568,17 @@ function App() {
                   </div>
                 </button>
                 {run.id === selectedRun?.id ? (
-                  <button type="button" className="action-button run-start-button" onClick={handleStartSelectedRun} disabled={actionPending || !selectedRun}>
-                    Start selected run
-                  </button>
+                  <div className="run-card-actions">
+                    <button type="button" className="action-button run-start-button" onClick={handleStartSelectedRun} disabled={actionPending || !selectedRun}>
+                      Start selected run
+                    </button>
+                    <button type="button" className="table-action" onClick={() => handleEditRun(run)}>
+                      Edit
+                    </button>
+                    <button type="button" className="table-action table-action-danger" onClick={() => void handleDeleteRun(run)}>
+                      Delete
+                    </button>
+                  </div>
                 ) : null}
               </div>
             ))}
@@ -2352,6 +2595,14 @@ function App() {
             <MiniStat label="Placement issues" value={String(runSessions.filter((session) => session.state === 'stale' || session.state === 'failed').length)} />
             <MiniStat label="Fleet alerts" value={String(runWorkerNodes.filter((node) => node.status !== 'online' || node.drainState !== 'active').length)} />
           </div>
+
+          <div
+            className="sidebar-resize-handle"
+            role="separator"
+            aria-label="Resize active runs sidebar"
+            aria-orientation="vertical"
+            onPointerDown={handleSidebarResizeStart}
+          />
         </aside>
 
         {selectedRun ? (

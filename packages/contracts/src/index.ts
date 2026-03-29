@@ -80,6 +80,18 @@ export const repositoryCreateSchema = z.object({
   approvalProfile: z.string().min(1).optional()
 });
 
+export const repositoryUpdateSchema = z.object({
+  name: z.string().min(1).optional(),
+  url: z.string().url().optional(),
+  provider: z.enum(repositoryProviders).optional(),
+  defaultBranch: z.string().min(1).optional(),
+  localPath: z.string().min(1).nullable().optional(),
+  trustLevel: z.enum(repositoryTrustLevels).optional(),
+  approvalProfile: z.string().min(1).optional()
+}).refine((value) => Object.keys(value).length > 0, {
+  message: "at least one repository field must be updated"
+});
+
 export const repositoryProviderSyncSchema = z.object({
   connectivityStatus: z.enum(["validated", "failed", "skipped"]),
   validatedAt: z.date().nullable().default(null),
@@ -132,6 +144,18 @@ export const runCreateSchema = z.object({
   concurrencyCap: z.number().int().positive().default(1),
   policyProfile: z.string().min(1).optional(),
   metadata: z.record(z.string(), z.unknown()).default({})
+});
+
+export const runUpdateSchema = z.object({
+  goal: z.string().min(1).optional(),
+  branchName: z.string().min(1).nullable().optional(),
+  budgetTokens: z.number().int().positive().nullable().optional(),
+  budgetCostUsd: z.number().positive().nullable().optional(),
+  concurrencyCap: z.number().int().positive().optional(),
+  policyProfile: z.string().min(1).nullable().optional(),
+  metadata: z.record(z.string(), z.unknown()).optional()
+}).refine((value) => Object.keys(value).length > 0, {
+  message: "at least one run field must be updated"
 });
 
 export const runStatusUpdateSchema = z.object({
@@ -1033,7 +1057,9 @@ export const tuiRunDrilldownSchema = z.object({
 });
 
 export type RepositoryCreateInput = z.infer<typeof repositoryCreateSchema>;
+export type RepositoryUpdateInput = z.infer<typeof repositoryUpdateSchema>;
 export type RunCreateInput = z.infer<typeof runCreateSchema>;
+export type RunUpdateInput = z.infer<typeof runUpdateSchema>;
 export type RunStatusUpdateInput = z.infer<typeof runStatusUpdateSchema>;
 export type RunBudgetCheckpointInput = z.infer<typeof runBudgetCheckpointSchema>;
 export type TaskCreateInput = z.infer<typeof taskCreateSchema>;

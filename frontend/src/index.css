@@ -281,6 +281,8 @@ code {
   flex-direction: column;
   max-height: calc(100vh - 32px);
   min-height: 0;
+  min-width: 0;
+  overflow: visible;
 }
 
 .panel-overview,
@@ -351,6 +353,13 @@ code {
 
 .run-entry.is-selected {
   padding-bottom: 22px;
+}
+
+.run-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
 }
 
 .run-card,
@@ -479,6 +488,54 @@ code {
   white-space: nowrap;
 }
 
+.inventory-list {
+  display: grid;
+  gap: 10px;
+}
+
+.inventory-item {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+  padding: 10px 12px;
+  border: 1px solid rgba(18, 23, 35, 0.08);
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.58);
+}
+
+.inventory-item strong {
+  display: block;
+}
+
+.inventory-item p,
+.inventory-empty {
+  margin: 4px 0 0;
+  color: var(--muted);
+  line-height: 1.4;
+}
+
+.inventory-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.table-action {
+  min-height: 28px;
+  padding: 0 9px;
+  border: 1px solid rgba(18, 23, 35, 0.12);
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.8);
+  color: var(--text-strong);
+}
+
+.table-action-danger {
+  color: var(--danger);
+  border-color: rgba(158, 47, 47, 0.22);
+}
+
 .data-pill,
 .role-chip,
 .priority-chip {
@@ -518,6 +575,33 @@ code {
 .admin-grid {
   display: grid;
   gap: 14px;
+}
+
+.sidebar-resize-handle {
+  position: absolute;
+  top: 0;
+  right: -10px;
+  width: 20px;
+  height: 100%;
+  cursor: ew-resize;
+  z-index: 5;
+}
+
+.sidebar-resize-handle::before {
+  content: '';
+  position: absolute;
+  top: 12px;
+  bottom: 12px;
+  left: 9px;
+  width: 2px;
+  border-radius: 3px;
+  background: rgba(40, 49, 64, 0.14);
+  transition: background-color 160ms ease;
+}
+
+.sidebar-resize-handle:hover::before,
+.sidebar-resize-handle:active::before {
+  background: rgba(191, 79, 47, 0.45);
 }
 
 .run-summary-grid {

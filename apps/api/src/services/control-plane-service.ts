@@ -20,10 +20,12 @@ import {
   type ApprovalResolveInput,
   type Repository,
   type RepositoryCreateInput,
+  type RepositoryUpdateInput,
   type RetentionPolicy,
   type RetentionReconcileReport,
   type RetentionWindowSummary,
   type RunCreateInput,
+  type RunUpdateInput,
   type TuiAlert,
   type TuiOverview,
   type TuiOverviewRun,
@@ -86,7 +88,9 @@ import type {
 import { z } from "zod";
 
 type RepositoryCreate = RepositoryCreateInput;
+type RepositoryUpdate = RepositoryUpdateInput;
 type RunCreate = RunCreateInput;
+type RunUpdate = RunUpdateInput;
 type RunStatusUpdate = RunStatusUpdateInput;
 type RunBudgetCheckpoint = RunBudgetCheckpointInput;
 type TaskCreate = TaskCreateInput;
@@ -734,6 +738,54 @@ export class ControlPlaneService {
     return this.mapRepository(expectPersistedRecord(repository, "repository"));
   }
 
+  async updateRepository(repositoryId: string, input: RepositoryUpdate, access?: AccessBoundary) {
+    const existingRepository = await this.assertRepositoryExists(repositoryId, access);
+    const now = this.clock.now();
+    const provider = (input.provider ?? existingRepository.provider) as Repository["provider"];
+    const url = input.url ?? existingRepository.url;
+    const localPath = input.localPath === undefined ? existingRepository.localPath : input.localPath;
+    const providerInspection = await inspectRepositoryProvider({
+      provider,
+      url,
+      localPath: localPath ?? null
+    });
+    const defaultBranch = input.defaultBranch
+      ?? providerInspection.defaultBranch
+      ?? existingRepository.defaultBranch;
+
+    const [repository] = await this.db.update(repositories).set({
+      name: input.name ?? existingRepository.name,
+      url,
+      provider,
+      defaultBranch,
+      localPath,
+      trustLevel: input.trustLevel ?? existingRepository.trustLevel,
+      approvalProfile: input.approvalProfile ?? existingRepository.approvalProfile,
+      providerSync: {
+        connectivityStatus: providerInspection.connectivityStatus,
+        validatedAt: providerInspection.validatedAt?.toISOString() ?? null,
+        defaultBranch: providerInspection.defaultBranch ?? defaultBranch,
+        branches: providerInspection.branches,
+        providerRepoUrl: providerInspection.providerRepoUrl,
+        lastError: providerInspection.lastError
+      },
+      updatedAt: now
+    }).where(eq(repositories.id, repositoryId)).returning();
+
+    return this.mapRepository(expectPersistedRecord(repository, "repository"));
+  }
+
+  async deleteRepository(repositoryId: string, access?: AccessBoundary) {
+    await this.assertRepositoryExists(repositoryId, access);
+    const relatedRuns = await this.db.select({ id: runs.id }).from(runs).where(eq(runs.repositoryId, repositoryId));
+
+    if (relatedRuns.length > 0) {
+      throw new HttpError(409, "repository cannot be deleted while runs still reference it");
+    }
+
+    await this.db.delete(repositories).where(eq(repositories.id, repositoryId));
+  }
+
   async listRuns(repositoryId?: string, access?: AccessBoundary) {
     const boundary = requireAccessBoundary(access);
     if (repositoryId) {
@@ -869,6 +921,50 @@ export class ControlPlaneService {
     }).where(eq(runs.id, runId)).returning();
 
     return this.mapRun(expectPersistedRecord(run, "run"));
+  }
+
+  async updateRun(runId: string, input: RunUpdate, access?: AccessBoundary) {
+    const existingRun = await this.assertRunExists(runId, access);
+    const now = this.clock.now();
+
+    const [run] = await this.db.update(runs).set({
+      goal: input.goal ?? existingRun.goal,
+      branchName: input.branchName === undefined ? existingRun.branchName : input.branchName,
+      budgetTokens: input.budgetTokens === undefined ? existingRun.budgetTokens : input.budgetTokens,
+      budgetCostUsd: input.budgetCostUsd === undefined
+        ? existingRun.budgetCostUsd
+        : input.budgetCostUsd === null
+          ? null
+          : dollarsToCents(input.budgetCostUsd),
+      concurrencyCap: input.concurrencyCap ?? existingRun.concurrencyCap,
+      policyProfile: input.policyProfile === undefined ? existingRun.policyProfile : input.policyProfile,
+      metadata: input.metadata === undefined ? existingRun.metadata : input.metadata,
+      updatedAt: now
+    }).where(eq(runs.id, runId)).returning();
+
+    return this.mapRun(expectPersistedRecord(run, "run"));
+  }
+
+  async deleteRun(runId: string, access?: AccessBoundary) {
+    await this.assertRunExists(runId, access);
+
+    await this.db.transaction(async (tx) => {
+      await tx.delete(controlPlaneEvents).where(eq(controlPlaneEvents.runId, runId));
+      await tx.delete(artifacts).where(eq(artifacts.runId, runId));
+      await tx.delete(validations).where(eq(validations.runId, runId));
+      await tx.delete(approvals).where(eq(approvals.runId, runId));
+      await tx.delete(messages).where(eq(messages.runId, runId));
+      await tx.delete(workerDispatchAssignments).where(eq(workerDispatchAssignments.runId, runId));
+      await tx.delete(tasks).where(eq(tasks.runId, runId));
+
+      const runAgents = await tx.select({ id: agents.id }).from(agents).where(eq(agents.runId, runId));
+      const agentIds = runAgents.map((agent) => agent.id);
+      if (agentIds.length > 0) {
+        await tx.delete(sessions).where(inArray(sessions.agentId, agentIds));
+      }
+      await tx.delete(agents).where(eq(agents.runId, runId));
+      await tx.delete(runs).where(eq(runs.id, runId));
+    });
   }
 
   async recordRunBudgetCheckpoint(runId: string, input: RunBudgetCheckpoint, access?: AccessBoundary): Promise<RunBudgetState> {
