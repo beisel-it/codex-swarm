@@ -26,36 +26,112 @@ jobs:
         with:
           fail-on-severity: high
 
-  validate:
+  lint:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - name: Check out repository
-        uses: actions/checkout@v5
+      - name: Set up workspace
+        uses: ./.github/actions/setup-workspace
 
-      - name: Set up pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: 10.28.0
-          run_install: false
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version-file: .nvmrc
-          cache: pnpm
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Lint
+      - name: Run lint gate
         run: pnpm ci:lint
 
-      - name: Typecheck
+      - name: Record local reproduction
+        if: always()
+        run: echo '`corepack pnpm ci:lint`' >> "$GITHUB_STEP_SUMMARY"
+
+  typecheck:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Set up workspace
+        uses: ./.github/actions/setup-workspace
+
+      - name: Run typecheck gate
         run: pnpm ci:typecheck
 
-      - name: Test
+      - name: Record local reproduction
+        if: always()
+        run: echo '`corepack pnpm ci:typecheck`' >> "$GITHUB_STEP_SUMMARY"
+
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Set up workspace
+        uses: ./.github/actions/setup-workspace
+
+      - name: Run test gate
         run: pnpm ci:test
 
-      - name: Build
+      - name: Record local reproduction
+        if: always()
+        run: echo '`corepack pnpm ci:test`' >> "$GITHUB_STEP_SUMMARY"
+
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Set up workspace
+        uses: ./.github/actions/setup-workspace
+
+      - name: Run build gate
         run: pnpm ci:build
+
+      - name: Record local reproduction
+        if: always()
+        run: echo '`corepack pnpm ci:build`' >> "$GITHUB_STEP_SUMMARY"
+
+  gate-summary:
+    if: always()
+    runs-on: ubuntu-latest
+    needs:
+      - dependency-review
+      - lint
+      - typecheck
+      - test
+      - build
+    steps:
+      - name: Summarize CI gate
+        env:
+          DEPENDENCY_REVIEW_RESULT: ${{ needs.dependency-review.result }}
+          LINT_RESULT: ${{ needs.lint.result }}
+          TYPECHECK_RESULT: ${{ needs.typecheck.result }}
+          TEST_RESULT: ${{ needs.test.result }}
+          BUILD_RESULT: ${{ needs.build.result }}
+        run: |
+          {
+            echo "## CI gate summary"
+            echo
+            echo "| Check | Result | Local reproduction |"
+            echo "| --- | --- | --- |"
+            echo "| dependency-review | ${DEPENDENCY_REVIEW_RESULT} | PR-only GitHub check |"
+            echo "| lint | ${LINT_RESULT} | \`corepack pnpm ci:lint\` |"
+            echo "| typecheck | ${TYPECHECK_RESULT} | \`corepack pnpm ci:typecheck\` |"
+            echo "| test | ${TEST_RESULT} | \`corepack pnpm ci:test\` |"
+            echo "| build | ${BUILD_RESULT} | \`corepack pnpm ci:build\` |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Fail if any required gate failed
+        env:
+          DEPENDENCY_REVIEW_RESULT: ${{ needs.dependency-review.result }}
+          LINT_RESULT: ${{ needs.lint.result }}
+          TYPECHECK_RESULT: ${{ needs.typecheck.result }}
+          TEST_RESULT: ${{ needs.test.result }}
+          BUILD_RESULT: ${{ needs.build.result }}
+        run: |
+          set -euo pipefail
+
+          if [[ "${DEPENDENCY_REVIEW_RESULT}" != "success" && "${DEPENDENCY_REVIEW_RESULT}" != "skipped" ]]; then
+            echo "dependency-review result: ${DEPENDENCY_REVIEW_RESULT}"
+            exit 1
+          fi
+
+          for gate in LINT TYPECHECK TEST BUILD; do
+            result_var="${gate}_RESULT"
+            result="${!result_var}"
+            if [[ "${result}" != "success" ]]; then
+              echo "${gate,,} result: ${result}"
+              exit 1
+            fi
+          done

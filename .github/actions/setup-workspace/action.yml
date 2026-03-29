@@ -1,0 +1,31 @@
+name: Setup workspace
+description: Check out the repo, install pnpm, set up Node.js, and install workspace dependencies.
+
+inputs:
+  ref:
+    description: Git ref or SHA to check out
+    required: false
+
+runs:
+  using: composite
+  steps:
+    - name: Check out repository
+      uses: actions/checkout@v5
+      with:
+        ref: ${{ inputs.ref || github.sha }}
+
+    - name: Set up pnpm
+      uses: pnpm/action-setup@v4
+      with:
+        version: 10.28.0
+        run_install: false
+
+    - name: Set up Node.js
+      uses: actions/setup-node@v6
+      with:
+        node-version-file: .nvmrc
+        cache: pnpm
+
+    - name: Install dependencies
+      shell: bash
+      run: pnpm install --frozen-lockfile

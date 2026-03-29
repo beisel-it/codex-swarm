@@ -1,15 +1,25 @@
 name: Deploy Vercel
 
 on:
-  pull_request:
+  workflow_run:
+    workflows:
+      - CI
     types:
-      - opened
-      - synchronize
-      - reopened
-  push:
-    branches:
-      - main
+      - completed
   workflow_dispatch:
+    inputs:
+      ref:
+        description: Git ref or SHA to deploy manually
+        required: false
+        type: string
+      target:
+        description: Deployment target for manual runs
+        required: false
+        default: preview
+        type: choice
+        options:
+          - preview
+          - production
 
 permissions:
   contents: read
@@ -19,57 +29,48 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  deploy:
+  plan:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    outputs:
+      ready: ${{ steps.detect.outputs.ready }}
+      reason: ${{ steps.detect.outputs.reason }}
+      deploy_path: ${{ steps.detect.outputs.deploy_path }}
+      deploy_target: ${{ steps.detect.outputs.deploy_target }}
+      checkout_ref: ${{ steps.detect.outputs.checkout_ref }}
     env:
       VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
       VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
       VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
     steps:
-      - name: Check out repository
-        uses: actions/checkout@v5
-
-      - name: Set up pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: 10.28.0
-          run_install: false
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version-file: .nvmrc
-          cache: pnpm
-
       - name: Detect deployment readiness
         id: detect
         shell: bash
         run: |
           set -euo pipefail
 
-          candidates=(
-            "apps/web"
-            "frontend"
-          )
-
-          deploy_path=""
-
-          for candidate in "${candidates[@]}"; do
-            if [[ -f "${candidate}/package.json" ]]; then
-              deploy_path="${candidate}"
-              break
+          if [[ "${GITHUB_EVENT_NAME}" == "workflow_run" ]]; then
+            if [[ "${{ github.event.workflow_run.conclusion }}" != "success" ]]; then
+              echo "ready=false" >> "${GITHUB_OUTPUT}"
+              echo "reason=CI workflow did not succeed." >> "${GITHUB_OUTPUT}"
+              exit 0
             fi
-          done
 
-          if [[ -z "${deploy_path}" && -f "vercel.json" ]]; then
-            deploy_path="."
-          fi
+            if [[ "${{ github.event.workflow_run.head_repository.full_name }}" != "${GITHUB_REPOSITORY}" ]]; then
+              echo "ready=false" >> "${GITHUB_OUTPUT}"
+              echo "reason=Skipping Vercel deployment for forked workflow_run." >> "${GITHUB_OUTPUT}"
+              exit 0
+            fi
 
-          if [[ -z "${deploy_path}" ]]; then
-            echo "ready=false" >> "${GITHUB_OUTPUT}"
-            echo "reason=No deployable Vercel app path found yet." >> "${GITHUB_OUTPUT}"
-            exit 0
+            echo "checkout_ref=${{ github.event.workflow_run.head_sha }}" >> "${GITHUB_OUTPUT}"
+
+            if [[ "${{ github.event.workflow_run.event }}" == "push" && "${{ github.event.workflow_run.head_branch }}" == "main" ]]; then
+              echo "deploy_target=production" >> "${GITHUB_OUTPUT}"
+            else
+              echo "deploy_target=preview" >> "${GITHUB_OUTPUT}"
+            fi
+          else
+            echo "checkout_ref=${{ inputs.ref || github.sha }}" >> "${GITHUB_OUTPUT}"
+            echo "deploy_target=${{ inputs.target || 'preview' }}" >> "${GITHUB_OUTPUT}"
           fi
 
           if [[ -z "${VERCEL_TOKEN}" || -z "${VERCEL_ORG_ID}" || -z "${VERCEL_PROJECT_ID}" ]]; then
@@ -79,37 +80,69 @@ jobs:
           fi
 
           echo "ready=true" >> "${GITHUB_OUTPUT}"
-          echo "deploy_path=${deploy_path}" >> "${GITHUB_OUTPUT}"
+          echo "deploy_path=frontend" >> "${GITHUB_OUTPUT}"
 
-      - name: Skip deployment
-        if: steps.detect.outputs.ready != 'true'
-        run: echo "${{ steps.detect.outputs.reason }}"
+      - name: Summarize deployment plan
+        run: |
+          {
+            echo "## Vercel deployment plan"
+            echo
+            echo "- ready: ${{ steps.detect.outputs.ready }}"
+            echo "- reason: ${{ steps.detect.outputs.reason || 'ready to deploy' }}"
+            echo "- checkout_ref: ${{ steps.detect.outputs.checkout_ref }}"
+            echo "- deploy_target: ${{ steps.detect.outputs.deploy_target }}"
+            echo "- deploy_path: ${{ steps.detect.outputs.deploy_path || 'n/a' }}"
+          } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Install dependencies
-        if: steps.detect.outputs.ready == 'true'
-        run: pnpm install --frozen-lockfile
+  deploy:
+    needs:
+      - plan
+    if: needs.plan.outputs.ready == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+    steps:
+      - name: Set up workspace
+        uses: ./.github/actions/setup-workspace
+        with:
+          ref: ${{ needs.plan.outputs.checkout_ref }}
 
       - name: Pull Vercel environment configuration
-        if: steps.detect.outputs.ready == 'true'
-        working-directory: ${{ steps.detect.outputs.deploy_path }}
+        working-directory: ${{ needs.plan.outputs.deploy_path }}
         run: |
-          if [[ "${GITHUB_EVENT_NAME}" == "push" && "${GITHUB_REF_NAME}" == "main" ]]; then
+          if [[ "${{ needs.plan.outputs.deploy_target }}" == "production" ]]; then
             pnpm dlx vercel@latest pull --yes --environment=production --token="${VERCEL_TOKEN}"
           else
             pnpm dlx vercel@latest pull --yes --environment=preview --token="${VERCEL_TOKEN}"
           fi
 
+      - name: Reproduce frontend build gate locally in CI
+        run: pnpm ci:build
+
       - name: Build with Vercel
-        if: steps.detect.outputs.ready == 'true'
-        working-directory: ${{ steps.detect.outputs.deploy_path }}
+        working-directory: ${{ needs.plan.outputs.deploy_path }}
         run: pnpm dlx vercel@latest build --token="${VERCEL_TOKEN}"
 
       - name: Deploy preview
-        if: steps.detect.outputs.ready == 'true' && github.event_name != 'push'
-        working-directory: ${{ steps.detect.outputs.deploy_path }}
+        if: needs.plan.outputs.deploy_target != 'production'
+        working-directory: ${{ needs.plan.outputs.deploy_path }}
         run: pnpm dlx vercel@latest deploy --prebuilt --token="${VERCEL_TOKEN}"
 
       - name: Deploy production
-        if: steps.detect.outputs.ready == 'true' && github.event_name == 'push' && github.ref_name == 'main'
-        working-directory: ${{ steps.detect.outputs.deploy_path }}
+        if: needs.plan.outputs.deploy_target == 'production'
+        working-directory: ${{ needs.plan.outputs.deploy_path }}
         run: pnpm dlx vercel@latest deploy --prebuilt --prod --token="${VERCEL_TOKEN}"
+
+      - name: Summarize deployment reproduction
+        if: always()
+        run: |
+          {
+            echo "## Local reproduction"
+            echo
+            echo "- Validate gate locally: \`corepack pnpm ci:lint && corepack pnpm ci:typecheck && corepack pnpm ci:test && corepack pnpm ci:build\`"
+            echo "- Preview deploy manually: \`vercel pull --yes --environment=preview && vercel build && vercel deploy --prebuilt\` from \`${{ needs.plan.outputs.deploy_path }}\`"
+            echo "- Production deploy manually: \`vercel pull --yes --environment=production && vercel build && vercel deploy --prebuilt --prod\` from \`${{ needs.plan.outputs.deploy_path }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -223,6 +223,7 @@ This repo ships codex-swarm-specific operator assets, not just generic role prom
 
 - [docs/operations/security.md](./docs/operations/security.md)
 - [docs/operations/slo-support.md](./docs/operations/slo-support.md)
+- [docs/operations/cicd.md](./docs/operations/cicd.md)
 - [docs/operations/backup-restore-dr.md](./docs/operations/backup-restore-dr.md)
 - [docs/operations/m9-readiness.md](./docs/operations/m9-readiness.md)
 - [docs/operations/tui-launch-and-capture.md](./docs/operations/tui-launch-and-capture.md)
