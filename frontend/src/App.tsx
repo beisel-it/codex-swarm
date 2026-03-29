@@ -1317,7 +1317,23 @@ async function loadSwarmData(): Promise<SwarmData> {
     const identity = await loadIdentity().catch(() => mockIdentity)
 
     if (repositories.length === 0 || runs.length === 0) {
-      return mockData
+      return {
+        ...mockData,
+        repositories,
+        runs,
+        tasks: [],
+        agents: [],
+        sessions: [],
+        workerNodes,
+        approvals: [],
+        validations: [],
+        artifacts: [],
+        messages: [],
+        identity,
+        secretAccessPlan: null,
+        auditExport: null,
+        source: 'api',
+      }
     }
 
     const details = await Promise.all(
