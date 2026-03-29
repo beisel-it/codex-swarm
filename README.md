@@ -1,5 +1,9 @@
 # Codex Swarm
 
+<p align="center">
+  <img src="./docs/assets/images/codex-swarm-logo.webp" alt="Codex Swarm logo" width="180">
+</p>
+
 Codex Swarm is a multi-agent software delivery control plane. It combines a workflow-oriented API, a worker runtime that supervises Codex sessions in isolated worktrees, and operator interfaces for planning, execution, review, approvals, governance, and publish handoff.
 
 <p align="center">
@@ -14,6 +18,10 @@ Codex Swarm is a multi-agent software delivery control plane. It combines a work
   <img src="https://img.shields.io/badge/api-Fastify-000000?logo=fastify&logoColor=white" alt="Fastify">
   <img src="https://img.shields.io/badge/frontend-React_%2B_Vite-646CFF?logo=vite&logoColor=white" alt="React and Vite">
   <img src="https://img.shields.io/badge/database-Postgres-4169E1?logo=postgresql&logoColor=white" alt="Postgres">
+</p>
+
+<p align="center">
+  <img src="./docs/assets/images/codex-swarm-hero.webp" alt="Codex Swarm hero artwork showing a multi-agent control surface" width="92%">
 </p>
 
 Codex Swarm is built for a concrete operator loop:
