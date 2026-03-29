@@ -1909,19 +1909,18 @@ function App() {
 
       <header className="hero-panel">
         <div className="hero-copy">
-          <p className="eyebrow">Codex Swarm M5 Board</p>
-          <h1>Governance, provenance, and admin controls in the same command surface.</h1>
+          <p className="eyebrow">Codex Swarm operator console</p>
+          <h1>Live runs, approvals, worker nodes, and audits in one surface.</h1>
           <p className="lede">
-            Phase 5 adds governance visibility on top of the execution board: actor identity,
-            approval provenance, policy profiles, secret access boundaries, retention posture,
-            and run-scoped audit views without leaving the browser.
+            Monitor execution, review governance state, and inspect worker activity without
+            leaving the browser.
           </p>
         </div>
 
         <div className="hero-metrics">
-          <MetricCard label="Active runs" value={String(data.runs.filter((run) => run.status === 'in_progress' || run.status === 'awaiting_approval').length)} hint="Runs needing operator attention" />
-          <MetricCard label="Governed approvals" value={String(data.governance.approvals.total)} hint="Approval history with actor provenance" />
-          <MetricCard label="Sensitive repos" value={String(data.governance.policies.sensitiveRepositories.length)} hint="Repositories under tighter policy controls" />
+          <MetricCard label="Runs in motion" value={String(data.runs.filter((run) => run.status === 'in_progress' || run.status === 'awaiting_approval').length)} hint="Active or waiting on review" />
+          <MetricCard label="Approval queue" value={String(data.governance.approvals.total)} hint="Governed decisions and provenance" />
+          <MetricCard label="Restricted repos" value={String(data.governance.policies.sensitiveRepositories.length)} hint="Repositories under tighter policy" />
         </div>
       </header>
 
