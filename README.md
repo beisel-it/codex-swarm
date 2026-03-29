@@ -133,6 +133,8 @@ corepack pnpm --dir packages/orchestration typecheck
 ### Operator and scenario helpers
 
 ```bash
+corepack pnpm tui
+corepack pnpm tui:capture
 corepack pnpm ops:smoke
 corepack pnpm ops:m9:prepare
 corepack pnpm ops:perf
@@ -140,6 +142,8 @@ corepack pnpm ops:backup
 corepack pnpm ops:restore
 corepack pnpm ops:drill
 ```
+
+The TUI launch path is documented in [docs/operations/tui-launch-and-capture.md](./docs/operations/tui-launch-and-capture.md). Set `CODEX_SWARM_API_BASE_URL` and `CODEX_SWARM_API_TOKEN` for live API mode; otherwise the TUI starts with its built-in mock fallback so packaging and rendering can still be verified offline.
 
 ---
 
@@ -221,6 +225,7 @@ This repo ships codex-swarm-specific operator assets, not just generic role prom
 - [docs/operations/slo-support.md](./docs/operations/slo-support.md)
 - [docs/operations/backup-restore-dr.md](./docs/operations/backup-restore-dr.md)
 - [docs/operations/m9-readiness.md](./docs/operations/m9-readiness.md)
+- [docs/operations/tui-launch-and-capture.md](./docs/operations/tui-launch-and-capture.md)
 - [docs/operations/upgrade-path.md](./docs/operations/upgrade-path.md)
 - [docs/operations/cost-usage-performance.md](./docs/operations/cost-usage-performance.md)
 

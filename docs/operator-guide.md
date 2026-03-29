@@ -226,6 +226,25 @@ This exposes:
 - budgeted cost summaries
 - persisted performance summaries
 
+### TUI launch and capture
+
+Use:
+
+- `corepack pnpm tui`
+- `corepack pnpm tui:capture`
+
+Live mode assumptions:
+
+- `CODEX_SWARM_API_BASE_URL` points at the control-plane base URL
+- `CODEX_SWARM_API_TOKEN` provides the bearer token used for `/api/v1/*`
+
+If `CODEX_SWARM_API_BASE_URL` is unset, the TUI intentionally starts in mock
+fallback mode so operators can still validate packaging, layout, and basic
+navigation without a live API.
+
+Follow the detailed launch and capture workflow in
+[TUI Launch and Capture](./operations/tui-launch-and-capture.md).
+
 ### Backup, restore, and DR
 
 Use:
