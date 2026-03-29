@@ -4,7 +4,8 @@ import {
   idParamSchema,
   workerDispatchCompleteSchema,
   workerDispatchCreateSchema,
-  workerDispatchListQuerySchema
+  workerDispatchListQuerySchema,
+  workerDispatchSessionAttachSchema
 } from "../http/schemas.js";
 import { controlPlaneEvents, timelineEvent } from "../lib/control-plane-events.js";
 import { requireValue } from "../lib/require-value.js";
@@ -56,5 +57,27 @@ export const workerDispatchAssignmentRoutes: FastifyPluginAsync = async (app) =>
 
       return assignment;
     }, { route: "worker-dispatch-assignments.complete" });
+  });
+
+  app.post("/worker-dispatch-assignments/:id/session", async (request) => {
+    return app.observability.withTrace("api.worker-dispatch-assignments.attach-session", async () => {
+      const { id } = idParamSchema.parse(request.params);
+      const input = workerDispatchSessionAttachSchema.parse(request.body);
+      const assignment = requireValue(
+        await app.controlPlane.attachSessionToWorkerDispatchAssignment(id, input.sessionId),
+        "control plane returned no worker dispatch assignment"
+      );
+
+      await app.observability.recordTimelineEvent(timelineEvent(controlPlaneEvents.workerDispatchAssignmentUpdated, {
+        runId: assignment.runId,
+        taskId: assignment.taskId,
+        agentId: assignment.agentId,
+        entityId: assignment.id,
+        status: assignment.state,
+        summary: `Worker dispatch assignment ${assignment.id} attached to session ${input.sessionId}`
+      }));
+
+      return assignment;
+    }, { route: "worker-dispatch-assignments.attach-session" });
   });
 };

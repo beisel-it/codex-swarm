@@ -99,6 +99,19 @@ export const approvalCreateSchema = contractApprovalCreateSchema.superRefine((va
 export const approvalResolveSchema = contractApprovalResolveSchema;
 export const validationCreateSchema = contractValidationCreateSchema;
 export const artifactCreateSchema = contractArtifactCreateSchema;
+export const agentSessionCreateSchema = z.object({
+  threadId: z.string().min(1),
+  cwd: z.string().min(1),
+  sandbox: z.string().min(1),
+  approvalPolicy: z.string().min(1),
+  includePlanTool: z.boolean().default(false),
+  workerNodeId: z.uuid().optional(),
+  placementConstraintLabels: z.array(z.string().min(1)).default([]),
+  metadata: z.record(z.string(), z.unknown()).default({})
+});
+export const workerDispatchSessionAttachSchema = z.object({
+  sessionId: z.uuid()
+});
 export {
   agentCreateSchema,
   approvalsListQuerySchema,

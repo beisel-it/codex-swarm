@@ -394,9 +394,13 @@ type SwarmData = {
 
 type LoadState = 'idle' | 'loading' | 'ready' | 'error'
 
-const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? '').replace(/\/$/, '')
+const API_BASE_URL = (
+  import.meta.env.VITE_API_BASE_URL
+  ?? `${window.location.protocol}//${window.location.hostname}:4300`
+).replace(/\/$/, '')
 const API_TOKEN = import.meta.env.VITE_API_TOKEN ?? 'codex-swarm-dev-token'
 const APPROVAL_RESOLVER = import.meta.env.VITE_APPROVAL_RESOLVER ?? 'frontend-dev'
+const MOCK_FALLBACK_ENABLED = import.meta.env.VITE_ENABLE_MOCK_FALLBACK === 'true'
 const REFRESH_MS = 15_000
 const UUID_PATTERN =
   /^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$/
@@ -1240,7 +1244,7 @@ const workerSessionTone: Record<WorkerSessionState, ActivityItem['tone']> = {
 }
 
 function buildApiUrl(path: string) {
-  return API_BASE_URL ? `${API_BASE_URL}${path}` : path
+  return `${API_BASE_URL}${path}`
 }
 
 function isUuid(value: string | null | undefined) {
@@ -1280,6 +1284,52 @@ async function updateApprovalDecision(
             feedback: notes.trim(),
           }
         : {},
+    }),
+  })
+}
+
+async function createRepository(input: {
+  name: string
+  url: string
+  provider?: RepositoryProvider
+}): Promise<Repository> {
+  return requestJson<Repository>('/api/v1/repositories', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  })
+}
+
+async function createRun(input: {
+  repositoryId: string
+  goal: string
+  branchName?: string
+}): Promise<Run> {
+  return requestJson<Run>('/api/v1/runs', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  })
+}
+
+async function startRun(runId: string): Promise<RunDetail> {
+  return requestJson<RunDetail>(`/api/v1/runs/${encodeURIComponent(runId)}/start`, {
+    method: 'POST',
+    body: JSON.stringify({}),
+  })
+}
+
+async function createTask(input: {
+  runId: string
+  title: string
+  description: string
+  role: string
+}): Promise<Task> {
+  return requestJson<Task>('/api/v1/tasks', {
+    method: 'POST',
+    body: JSON.stringify({
+      ...input,
+      acceptanceCriteria: [],
+      dependencyIds: [],
+      validationTemplates: [],
     }),
   })
 }
@@ -1404,7 +1454,24 @@ async function loadSwarmData(): Promise<SwarmData> {
       source: 'api',
     }
   } catch {
-    return mockData
+    if (MOCK_FALLBACK_ENABLED) {
+      return mockData
+    }
+
+    return {
+      ...mockData,
+      repositories: [],
+      runs: [],
+      tasks: [],
+      agents: [],
+      sessions: [],
+      workerNodes: [],
+      approvals: [],
+      validations: [],
+      artifacts: [],
+      messages: [],
+      source: 'api',
+    }
   }
 }
 
@@ -1642,6 +1709,15 @@ function App() {
   const [artifactDetailState, setArtifactDetailState] = useState<LoadState>('idle')
   const [artifactDetailError, setArtifactDetailError] = useState('')
   const [actionPending, setActionPending] = useState(false)
+  const [repoDraftName, setRepoDraftName] = useState('codex-swarm')
+  const [repoDraftUrl, setRepoDraftUrl] = useState('https://github.com/beisel-it/codex-swarm.git')
+  const [repoDraftProvider, setRepoDraftProvider] = useState<RepositoryProvider>('github')
+  const [runDraftRepositoryId, setRunDraftRepositoryId] = useState('')
+  const [runDraftGoal, setRunDraftGoal] = useState('Ship the next iteration through codex-swarm.')
+  const [runDraftBranchName, setRunDraftBranchName] = useState('main')
+  const [taskDraftTitle, setTaskDraftTitle] = useState('')
+  const [taskDraftDescription, setTaskDraftDescription] = useState('')
+  const [taskDraftRole, setTaskDraftRole] = useState('developer')
 
   const deferredTaskQuery = useDeferredValue(taskQuery)
 
@@ -1699,6 +1775,15 @@ function App() {
   ) ?? null
   const selectedRunStableId = selectedRun?.id ?? null
   const selectedRepositoryStableId = selectedRepository?.id ?? null
+
+  useEffect(() => {
+    if (runDraftRepositoryId && data.repositories.some((repository) => repository.id === runDraftRepositoryId)) {
+      return
+    }
+
+    const nextRepositoryId = selectedRepositoryStableId ?? data.repositories[0]?.id ?? ''
+    setRunDraftRepositoryId(nextRepositoryId)
+  }, [data.repositories, runDraftRepositoryId, selectedRepositoryStableId])
 
   const runTasks = data.tasks.filter((task) => task.runId === selectedRun?.id)
   const visibleTasks = runTasks.filter((task) => {
@@ -1903,6 +1988,116 @@ function App() {
     }
   }
 
+  async function refreshSwarmData(nextSelectedRunId?: string) {
+    const nextData = await loadSwarmData()
+    setData(nextData)
+    setSelectedRunId(() => {
+      if (nextSelectedRunId && nextData.runs.some((run) => run.id === nextSelectedRunId)) {
+        return nextSelectedRunId
+      }
+
+      if (selectedRunId && nextData.runs.some((run) => run.id === selectedRunId)) {
+        return selectedRunId
+      }
+
+      return nextData.runs[0]?.id ?? ''
+    })
+    setErrorText('')
+  }
+
+  async function handleCreateRepository() {
+    if (!repoDraftName.trim() || !repoDraftUrl.trim()) {
+      setErrorText('Repository name and URL are required.')
+      return
+    }
+
+    setActionPending(true)
+
+    try {
+      const repository = await createRepository({
+        name: repoDraftName.trim(),
+        url: repoDraftUrl.trim(),
+        provider: repoDraftProvider,
+      })
+      setRunDraftRepositoryId(repository.id)
+      await refreshSwarmData()
+    } catch (error) {
+      setErrorText(error instanceof Error ? error.message : 'Unable to register repository')
+    } finally {
+      setActionPending(false)
+    }
+  }
+
+  async function handleCreateRun(autoStart: boolean) {
+    if (!runDraftRepositoryId || !runDraftGoal.trim()) {
+      setErrorText('Repository and run goal are required.')
+      return
+    }
+
+    setActionPending(true)
+
+    try {
+      const run = await createRun({
+        repositoryId: runDraftRepositoryId,
+        goal: runDraftGoal.trim(),
+        branchName: runDraftBranchName.trim() || undefined,
+      })
+
+      if (autoStart) {
+        await startRun(run.id)
+      }
+
+      await refreshSwarmData(run.id)
+    } catch (error) {
+      setErrorText(error instanceof Error ? error.message : 'Unable to create run')
+    } finally {
+      setActionPending(false)
+    }
+  }
+
+  async function handleStartSelectedRun() {
+    if (!selectedRun) {
+      setErrorText('Select a run first.')
+      return
+    }
+
+    setActionPending(true)
+
+    try {
+      await startRun(selectedRun.id)
+      await refreshSwarmData(selectedRun.id)
+    } catch (error) {
+      setErrorText(error instanceof Error ? error.message : 'Unable to start run')
+    } finally {
+      setActionPending(false)
+    }
+  }
+
+  async function handleCreateTask() {
+    if (!selectedRun || !taskDraftTitle.trim() || !taskDraftDescription.trim() || !taskDraftRole.trim()) {
+      setErrorText('Run, title, description, and role are required for backlog items.')
+      return
+    }
+
+    setActionPending(true)
+
+    try {
+      await createTask({
+        runId: selectedRun.id,
+        title: taskDraftTitle.trim(),
+        description: taskDraftDescription.trim(),
+        role: taskDraftRole.trim(),
+      })
+      setTaskDraftTitle('')
+      setTaskDraftDescription('')
+      await refreshSwarmData(selectedRun.id)
+    } catch (error) {
+      setErrorText(error instanceof Error ? error.message : 'Unable to create backlog item')
+    } finally {
+      setActionPending(false)
+    }
+  }
+
   return (
     <div className="app-shell">
       <div className="backdrop-grid" aria-hidden="true" />
@@ -1941,7 +2136,77 @@ function App() {
               <p className="panel-kicker">Active runs</p>
               <h2>Execution tracks</h2>
             </div>
-            <span className="data-pill">{data.source === 'api' ? 'Live API' : 'Mock fallback'}</span>
+            <span className="data-pill">{errorText ? 'API issue' : 'Live API'}</span>
+          </div>
+
+          <div className="control-stack">
+            <section className="control-card">
+              <div className="control-card-header">
+                <strong>Register repository</strong>
+                <span>Real API</span>
+              </div>
+              <label className="control-field">
+                <span>Name</span>
+                <input value={repoDraftName} onChange={(event) => setRepoDraftName(event.target.value)} />
+              </label>
+              <label className="control-field">
+                <span>Remote URL</span>
+                <input value={repoDraftUrl} onChange={(event) => setRepoDraftUrl(event.target.value)} />
+              </label>
+              <label className="control-field">
+                <span>Provider</span>
+                <select value={repoDraftProvider} onChange={(event) => setRepoDraftProvider(event.target.value as RepositoryProvider)}>
+                  <option value="github">GitHub</option>
+                  <option value="gitlab">GitLab</option>
+                  <option value="local">Local</option>
+                  <option value="other">Other</option>
+                </select>
+              </label>
+              <button type="button" className="action-button" onClick={handleCreateRepository} disabled={actionPending}>
+                Register repository
+              </button>
+            </section>
+
+            <section className="control-card">
+              <div className="control-card-header">
+                <strong>Create and start run</strong>
+                <span>Live orchestration</span>
+              </div>
+              <label className="control-field">
+                <span>Repository</span>
+                <select value={runDraftRepositoryId} onChange={(event) => setRunDraftRepositoryId(event.target.value)}>
+                  <option value="">Select repository</option>
+                  {data.repositories.map((repository) => (
+                    <option key={repository.id} value={repository.id}>
+                      {repository.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="control-field">
+                <span>Goal</span>
+                <textarea value={runDraftGoal} onChange={(event) => setRunDraftGoal(event.target.value)} rows={4} />
+              </label>
+              <label className="control-field">
+                <span>Branch</span>
+                <input value={runDraftBranchName} onChange={(event) => setRunDraftBranchName(event.target.value)} />
+              </label>
+              <div className="action-row">
+                <button type="button" className="action-button action-button-secondary" onClick={() => handleCreateRun(false)} disabled={actionPending}>
+                  Create only
+                </button>
+                <button type="button" className="action-button" onClick={() => handleCreateRun(true)} disabled={actionPending}>
+                  Create and start
+                </button>
+              </div>
+            </section>
+          </div>
+
+          <div className="action-row action-row-inline">
+            <button type="button" className="action-button" onClick={handleStartSelectedRun} disabled={actionPending || !selectedRun}>
+              Start selected run
+            </button>
+            {errorText ? <p className="control-error">{errorText}</p> : null}
           </div>
 
           <div className="run-stack">
@@ -2185,15 +2450,37 @@ function App() {
                       <h2>Status lanes and blockers</h2>
                     </div>
 
-                    <label className="search-field">
-                      <span className="visually-hidden">Filter tasks</span>
-                      <input
-                        type="search"
-                        value={taskQuery}
-                        onChange={(event) => setTaskQuery(event.target.value)}
-                        placeholder="Filter tasks, roles, or milestones"
-                      />
-                    </label>
+                    <div className="panel-actions">
+                      <label className="search-field">
+                        <span className="visually-hidden">Filter tasks</span>
+                        <input
+                          type="search"
+                          value={taskQuery}
+                          onChange={(event) => setTaskQuery(event.target.value)}
+                          placeholder="Filter tasks, roles, or milestones"
+                        />
+                      </label>
+                      <div className="inline-form">
+                        <input
+                          value={taskDraftTitle}
+                          onChange={(event) => setTaskDraftTitle(event.target.value)}
+                          placeholder="Backlog item title"
+                        />
+                        <input
+                          value={taskDraftRole}
+                          onChange={(event) => setTaskDraftRole(event.target.value)}
+                          placeholder="Role"
+                        />
+                        <input
+                          value={taskDraftDescription}
+                          onChange={(event) => setTaskDraftDescription(event.target.value)}
+                          placeholder="Implementation brief"
+                        />
+                        <button type="button" className="action-button" onClick={handleCreateTask} disabled={actionPending || !selectedRun}>
+                          Add backlog item
+                        </button>
+                      </div>
+                    </div>
                   </div>
 
                   <div className="task-columns">

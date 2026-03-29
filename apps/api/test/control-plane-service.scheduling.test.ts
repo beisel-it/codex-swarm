@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { agents, sessions, workerDispatchAssignments, workerNodes } from "../src/db/schema.js";
+import { agents, sessions, tasks, workerDispatchAssignments, workerNodes } from "../src/db/schema.js";
 import { ControlPlaneService } from "../src/services/control-plane-service.js";
 
 function extractTargetId(condition: { queryChunks: Array<{ value?: string[] } | { value?: string }> }) {
@@ -118,6 +118,10 @@ class FakeSchedulingDb {
 
             Object.assign(record, values);
             return Promise.resolve([record]);
+          }
+
+          if (table === tasks) {
+            return Promise.resolve([]);
           }
 
           throw new Error("unexpected update table");
@@ -238,6 +242,7 @@ describe("ControlPlaneService distributed scheduling", () => {
     const service = new ControlPlaneService(db as never, {
       now: () => now
     });
+    (service as any).reconcileRunExecutionState = async () => undefined;
 
     const overloadedClaim = await service.claimNextWorkerDispatch("node-a");
 

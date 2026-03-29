@@ -50,7 +50,7 @@ import {
   type WorkerNodeRegisterInput
 } from "@codex-swarm/contracts";
 import { resolveInitialTaskStatus } from "@codex-swarm/orchestration";
-import { buildSessionRecoveryPlan, cleanupWorktreePaths } from "@codex-swarm/worker";
+import { buildSessionRecoveryPlan, cleanupWorktreePaths, createWorktreePath } from "@codex-swarm/worker";
 
 import type { AppDb } from "../db/client.js";
 import {
@@ -73,10 +73,12 @@ import type { Clock } from "../lib/clock.js";
 import { HttpError } from "../lib/http-error.js";
 import { inspectRepositoryProvider } from "../lib/repository-provider.js";
 import type {
+  agentSessionCreateSchema,
   approvalCreateSchema,
   messageCreateSchema,
   runBranchPublishSchema,
   runPullRequestHandoffSchema,
+  workerDispatchSessionAttachSchema,
   validationsListQuerySchema
 } from "../http/schemas.js";
 import { z } from "zod";
@@ -88,6 +90,7 @@ type RunBudgetCheckpoint = RunBudgetCheckpointInput;
 type TaskCreate = TaskCreateInput;
 type TaskStatusUpdate = TaskStatusUpdateInput;
 type AgentCreate = AgentCreateInput;
+type AgentSessionCreate = z.infer<typeof agentSessionCreateSchema>;
 type MessageCreate = z.infer<typeof messageCreateSchema>;
 type ApprovalCreate = ApprovalCreateInput;
 type ApprovalResolve = ApprovalResolveInput;
@@ -101,6 +104,7 @@ type WorkerNodeHeartbeat = WorkerNodeHeartbeatInput;
 type WorkerNodeDrainUpdate = WorkerNodeDrainUpdateInput;
 type WorkerDispatchCreate = WorkerDispatchCreateInput;
 type WorkerDispatchComplete = WorkerDispatchCompleteInput;
+type WorkerDispatchSessionAttach = z.infer<typeof workerDispatchSessionAttachSchema>;
 type WorkerNodeReconcile = WorkerNodeReconcileInput;
 type AccessBoundary = Pick<ActorIdentity, "workspaceId" | "workspaceName" | "teamId" | "teamName"> & {
   policyProfile?: ActorIdentity["policyProfile"];
@@ -793,12 +797,14 @@ export class ControlPlaneService {
   }
 
   async updateRunStatus(runId: string, input: RunStatusUpdate, access?: AccessBoundary) {
-    await this.assertRunExists(runId, access);
+    const existingRun = await this.assertRunExists(runId, access);
     const now = this.clock.now();
 
     const [run] = await this.db.update(runs).set({
       status: input.status,
-      planArtifactPath: input.planArtifactPath ?? null,
+      planArtifactPath: input.planArtifactPath === undefined
+        ? existingRun.planArtifactPath
+        : input.planArtifactPath,
       completedAt: input.status === "completed" ? now : null,
       updatedAt: now
     }).where(eq(runs.id, runId)).returning();
@@ -1044,7 +1050,7 @@ export class ControlPlaneService {
   }
 
   async createTask(input: TaskCreate, access?: AccessBoundary) {
-    await this.assertRunExists(input.runId, access);
+    const run = await this.assertRunExists(input.runId, access);
 
     if (input.ownerAgentId) {
       await this.assertAgentExists(input.ownerAgentId, access);
@@ -1077,7 +1083,13 @@ export class ControlPlaneService {
       updatedAt: now
     }).returning();
 
-    return expectPersistedRecord(task, "task");
+    const persistedTask = expectPersistedRecord(task, "task");
+
+    if (run.status === "in_progress") {
+      await this.enqueueRunnableWorkerDispatches(input.runId, access);
+    }
+
+    return persistedTask;
   }
 
   async updateTaskStatus(taskId: string, input: TaskStatusUpdate, access?: AccessBoundary) {
@@ -1103,6 +1115,13 @@ export class ControlPlaneService {
     }).where(eq(tasks.id, taskId)).returning();
 
     await this.maybeUnblockDependentTasks(task.runId, taskId, effectiveStatus);
+
+    const run = await this.assertRunExists(task.runId, access);
+
+    if (run.status === "in_progress") {
+      await this.enqueueRunnableWorkerDispatches(task.runId, access);
+      await this.reconcileRunExecutionState(task.runId, access);
+    }
 
     return expectPersistedRecord(updated, "task");
   }
@@ -1186,6 +1205,39 @@ export class ControlPlaneService {
     });
 
     return expectPersistedRecord(agent, "agent");
+  }
+
+  async createAgentSession(agentId: string, input: AgentSessionCreate, access?: AccessBoundary) {
+    const agent = await this.assertAgentExists(agentId, access);
+    const now = this.clock.now();
+
+    const [session] = await this.db.insert(sessions).values({
+      id: crypto.randomUUID(),
+      agentId: agent.id,
+      threadId: input.threadId,
+      cwd: input.cwd,
+      sandbox: input.sandbox,
+      approvalPolicy: input.approvalPolicy,
+      includePlanTool: input.includePlanTool,
+      workerNodeId: input.workerNodeId ?? null,
+      stickyNodeId: input.workerNodeId ?? null,
+      placementConstraintLabels: input.placementConstraintLabels,
+      lastHeartbeatAt: now,
+      state: "active",
+      staleReason: null,
+      metadata: input.metadata,
+      createdAt: now,
+      updatedAt: now
+    }).returning();
+
+    await this.db.update(agents).set({
+      status: "busy",
+      worktreePath: input.cwd,
+      lastHeartbeatAt: now,
+      updatedAt: now
+    }).where(eq(agents.id, agent.id));
+
+    return this.mapSession(expectPersistedRecord(session, "session"));
   }
 
   async listAgents(runId?: string, access?: AccessBoundary) {
@@ -1543,6 +1595,107 @@ export class ControlPlaneService {
     return this.mapWorkerDispatchAssignment(expectPersistedRecord(assignment, "worker dispatch assignment"));
   }
 
+  async attachSessionToWorkerDispatchAssignment(assignmentId: string, sessionId: string) {
+    const assignment = this.mapWorkerDispatchAssignment(await this.assertWorkerDispatchAssignmentExists(assignmentId));
+    const session = this.mapSession(await this.assertSessionExists(sessionId));
+
+    if (session.agentId !== assignment.agentId) {
+      throw new HttpError(409, `session ${sessionId} does not belong to agent ${assignment.agentId}`);
+    }
+
+    const [updatedAssignment] = await this.db.update(workerDispatchAssignments).set({
+      sessionId,
+      updatedAt: this.clock.now()
+    }).where(eq(workerDispatchAssignments.id, assignmentId)).returning();
+
+    return this.mapWorkerDispatchAssignment(expectPersistedRecord(updatedAssignment, "worker dispatch assignment"));
+  }
+
+  async enqueueRunnableWorkerDispatches(runId: string, access?: AccessBoundary) {
+    const runDetail = await this.getRun(runId, access);
+    const repository = this.mapRepository(await this.assertRepositoryExists(runDetail.repositoryId, access));
+
+    if (["awaiting_approval", "completed", "failed", "cancelled"].includes(runDetail.status)) {
+      return [];
+    }
+
+    const assignmentRows = await this.db.select().from(workerDispatchAssignments)
+      .where(eq(workerDispatchAssignments.runId, runId))
+      .orderBy(asc(workerDispatchAssignments.createdAt));
+    const activeAssignmentTaskIds = new Set(
+      assignmentRows
+        .filter((assignment) => assignment.state === "queued" || assignment.state === "claimed" || assignment.state === "retrying")
+        .map((assignment) => assignment.taskId)
+    );
+    const now = this.clock.now();
+    const activeAgentCount = runDetail.agents.filter((agent) =>
+      agent.status === "provisioning"
+      || agent.status === "idle"
+      || agent.status === "busy"
+      || agent.status === "paused").length;
+    const availableSlots = Math.max(0, runDetail.concurrencyCap - activeAgentCount);
+    const tasksToQueue = runDetail.tasks
+      .filter((task) => task.status === "pending" && !activeAssignmentTaskIds.has(task.id))
+      .sort((left, right) => {
+        if (left.priority !== right.priority) {
+          return left.priority - right.priority;
+        }
+
+        return left.createdAt.getTime() - right.createdAt.getTime();
+      })
+      .slice(0, availableSlots);
+    const queuedAssignments: WorkerDispatchAssignment[] = [];
+
+    for (const task of tasksToQueue) {
+      const agent = await this.createAgent({
+        runId,
+        name: `${task.role}-${task.title}`.slice(0, 72),
+        role: task.role,
+        status: "idle",
+        branchName: runDetail.branchName ?? repository.defaultBranch,
+        currentTaskId: task.id
+      }, access);
+      const worktreePath = createWorktreePath({
+        rootDir: this.getWorkspaceRoot(),
+        repositorySlug: repository.name,
+        runId,
+        agentId: agent.id,
+        taskId: task.id
+      });
+
+      const [updatedAgent] = await this.db.update(agents).set({
+        worktreePath,
+        updatedAt: now
+      }).where(eq(agents.id, agent.id)).returning();
+
+      const assignment = await this.createWorkerDispatchAssignment({
+        runId,
+        taskId: task.id,
+        agentId: updatedAgent?.id ?? agent.id,
+        queue: "worker-dispatch",
+        stickyNodeId: null,
+        preferredNodeId: null,
+        repositoryId: repository.id,
+        repositoryName: repository.name,
+        worktreePath,
+        branchName: runDetail.branchName ?? repository.defaultBranch,
+        prompt: this.buildTaskExecutionPrompt(runDetail, repository, task),
+        profile: "default",
+        sandbox: "workspace-write",
+        approvalPolicy: "on-request",
+        includePlanTool: false,
+        requiredCapabilities: ["workspace-write"],
+        metadata: {},
+        maxAttempts: 3,
+        leaseTtlSeconds: 300
+      });
+
+      queuedAssignments.push(assignment);
+    }
+
+    return queuedAssignments;
+  }
+
   async claimNextWorkerDispatch(nodeId: string) {
     const workerNode = this.mapWorkerNode(await this.assertWorkerNodeExists(nodeId));
     const now = this.clock.now();
@@ -1618,6 +1771,14 @@ export class ControlPlaneService {
       lastHeartbeatAt: now,
       updatedAt: now
     }).where(eq(agents.id, nextAssignment.agentId));
+
+    await this.db.update(tasks).set({
+      status: "in_progress",
+      ownerAgentId: nextAssignment.agentId,
+      updatedAt: now
+    }).where(eq(tasks.id, nextAssignment.taskId));
+
+    await this.reconcileRunExecutionState(nextAssignment.runId);
 
     return this.mapWorkerDispatchAssignment(expectPersistedRecord(updatedAssignment, "worker dispatch assignment"));
   }
@@ -2694,6 +2855,63 @@ export class ControlPlaneService {
     };
   }
 
+  private getWorkspaceRoot() {
+    return process.env.CODEX_SWARM_WORKSPACE_ROOT?.trim() || ".swarm/worktrees";
+  }
+
+  private buildTaskExecutionPrompt(run: RunDetail, repository: Repository, task: Task) {
+    const acceptanceCriteria = task.acceptanceCriteria.length > 0
+      ? task.acceptanceCriteria.map((criterion) => `- ${criterion}`).join("\n")
+      : "- Complete the assigned task and leave clear implementation notes.";
+
+    return [
+      `Repository: ${repository.name}`,
+      `Run goal: ${run.goal}`,
+      `Task: ${task.title}`,
+      `Role: ${task.role}`,
+      "",
+      task.description,
+      "",
+      "Acceptance criteria:",
+      acceptanceCriteria
+    ].join("\n");
+  }
+
+  async reconcileRunExecutionState(runId: string, access?: AccessBoundary) {
+    const runDetail = await this.getRun(runId, access);
+
+    if (runDetail.status === "awaiting_approval" || runDetail.status === "cancelled") {
+      return runDetail;
+    }
+
+    const now = this.clock.now();
+    const assignmentRows = await this.db.select().from(workerDispatchAssignments)
+      .where(eq(workerDispatchAssignments.runId, runId))
+      .orderBy(asc(workerDispatchAssignments.createdAt));
+    const activeAssignments = assignmentRows.filter((assignment) =>
+      assignment.state === "queued" || assignment.state === "claimed" || assignment.state === "retrying");
+    const anyFailedTask = runDetail.tasks.some((task) => task.status === "failed");
+    const allTasksCompleted = runDetail.tasks.length > 0 && runDetail.tasks.every((task) => task.status === "completed");
+    const nextStatus: Run["status"] =
+      anyFailedTask ? "failed"
+        : allTasksCompleted ? "completed"
+          : runDetail.tasks.length > 0 && (activeAssignments.length > 0 || runDetail.tasks.some((task) => task.status === "in_progress" || task.status === "awaiting_review" || task.status === "pending"))
+            ? "in_progress"
+            : runDetail.status;
+
+    if (nextStatus === runDetail.status) {
+      return runDetail;
+    }
+
+    const [updatedRun] = await this.db.update(runs).set({
+      status: nextStatus,
+      completedAt: nextStatus === "completed" ? now : null,
+      updatedAt: now
+    }).where(eq(runs.id, runId)).returning();
+
+    return this.mapRun(expectPersistedRecord(updatedRun, "run"));
+  }
+
   private mapSession(session: typeof sessions.$inferSelect): Session {
     return {
       ...session,
@@ -2708,6 +2926,7 @@ export class ControlPlaneService {
     nodeId: string
   ) {
     const now = this.clock.now();
+    const sessionId = assignment.sessionId ?? null;
 
     if (status === "completed") {
       const [updatedAssignment] = await this.db.update(workerDispatchAssignments).set({
@@ -2719,9 +2938,29 @@ export class ControlPlaneService {
       }).where(eq(workerDispatchAssignments.id, assignment.id)).returning();
 
       await this.db.update(agents).set({
-        status: "idle",
+        status: "stopped",
         updatedAt: now
       }).where(eq(agents.id, assignment.agentId));
+
+      await this.db.update(tasks).set({
+        status: "completed",
+        ownerAgentId: assignment.agentId,
+        updatedAt: now
+      }).where(eq(tasks.id, assignment.taskId));
+
+      if (sessionId) {
+        await this.db.update(sessions).set({
+          workerNodeId: nodeId,
+          stickyNodeId: nodeId,
+          state: "stopped",
+          staleReason: null,
+          updatedAt: now
+        }).where(eq(sessions.id, sessionId));
+      }
+
+      await this.maybeUnblockDependentTasks(assignment.runId, assignment.taskId, "completed");
+      await this.enqueueRunnableWorkerDispatches(assignment.runId);
+      await this.reconcileRunExecutionState(assignment.runId);
 
       return this.mapWorkerDispatchAssignment(expectPersistedRecord(updatedAssignment, "worker dispatch assignment"));
     }
@@ -2740,20 +2979,32 @@ export class ControlPlaneService {
       updatedAt: now
     }).where(eq(workerDispatchAssignments.id, assignment.id)).returning();
 
-    if (assignment.sessionId) {
+    if (sessionId) {
       await this.db.update(sessions).set({
         workerNodeId: null,
         stickyNodeId: canRetry ? null : assignment.stickyNodeId,
         state: canRetry ? "pending" : "stale",
         staleReason: reason,
         updatedAt: now
-      }).where(eq(sessions.id, assignment.sessionId));
+      }).where(eq(sessions.id, sessionId));
     }
 
     await this.db.update(agents).set({
       status: canRetry ? "idle" : "failed",
       updatedAt: now
     }).where(eq(agents.id, assignment.agentId));
+
+    await this.db.update(tasks).set({
+      status: canRetry ? "pending" : "failed",
+      ownerAgentId: assignment.agentId,
+      updatedAt: now
+    }).where(eq(tasks.id, assignment.taskId));
+
+    if (canRetry) {
+      await this.enqueueRunnableWorkerDispatches(assignment.runId);
+    }
+
+    await this.reconcileRunExecutionState(assignment.runId);
 
     return this.mapWorkerDispatchAssignment(expectPersistedRecord(updatedAssignment, "worker dispatch assignment"));
   }

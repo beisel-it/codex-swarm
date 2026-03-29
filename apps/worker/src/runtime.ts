@@ -781,7 +781,8 @@ export function buildCodexSessionReplyRequest(input: CodexSessionReplyInput) {
     tool: "codex-reply",
     input: {
       threadId: input.threadId,
-      prompt: input.prompt
+      prompt: input.prompt,
+      cwd: input.config?.cwd
     }
   } as const;
 }
@@ -966,6 +967,7 @@ export function createLocalCodexCliExecutor(options: LocalCodexCliExecutorOption
         input.threadId,
         input.prompt
       ];
+      cwd = input.cwd ?? cwd;
     } else {
       const input = request.input;
 
@@ -980,7 +982,7 @@ export function createLocalCodexCliExecutor(options: LocalCodexCliExecutorOption
         "--full-auto",
         "-C",
         input.cwd,
-        ...(input.profile ? ["-p", input.profile] : []),
+        ...(input.profile && input.profile !== "default" ? ["-p", input.profile] : []),
         "-s",
         input.sandbox,
         input.prompt

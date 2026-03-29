@@ -5133,7 +5133,7 @@ describe("buildApp", () => {
       expect(failedAttempt).toMatchObject({
         status: "retrying",
         error: "worker_runtime_crash",
-        supervisorStatus: "stopped"
+        supervisorStatus: "failed"
       });
 
       const afterFailureRun = await app.inject({

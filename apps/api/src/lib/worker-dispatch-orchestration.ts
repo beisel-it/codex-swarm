@@ -110,37 +110,11 @@ export async function runManagedWorkerDispatch(
     };
   }
 
-  const session = runDetail.sessions.find((candidate) => candidate.id === assignment.sessionId);
-
-  if (!assignment.sessionId || !session?.threadId) {
-    const updated = await failAssignment(input.request, assignment, input.nodeId, "session_thread_missing");
-
-    return {
-      assignmentId: assignment.id,
-      runId: assignment.runId,
-      sessionId: assignment.sessionId ?? "missing-session",
-      workspacePath: assignment.worktreePath,
-      status: updated.state as WorkerDispatchOrchestrationResult["status"],
-      output: null,
-      error: "session_thread_missing",
-      supervisorStatus: "failed"
-    };
-  }
-
   const workspace = await materializeRepositoryWorkspace({
     repository,
     destinationPath: assignment.worktreePath,
     branch: assignment.branchName ?? repository.defaultBranch
   });
-
-  const registry = new SessionRegistry();
-  registry.hydrate([
-    {
-      ...toSessionRecord(session, workspace.path),
-      runId: assignment.runId
-    }
-  ]);
-
   const supervisor = new CodexServerSupervisor({
     config: {
       cwd: workspace.path,
@@ -152,20 +126,90 @@ export async function runManagedWorkerDispatch(
     ...(input.supervisorCommand ? { command: input.supervisorCommand } : {})
   });
 
-  const runtime = new CodexSessionRuntime({
-    registry,
-    supervisor,
-    executeTool: input.executeTool
-  });
-
   try {
-    const continued = await runtime.continueSession(session.id, assignment.prompt);
-    await checkpointRunBudget(
-      input.request,
-      assignment.runId,
-      "worker.dispatch",
-      continued.response
-    );
+    const existingSession = assignment.sessionId
+      ? runDetail.sessions.find((candidate) => candidate.id === assignment.sessionId)
+      : undefined;
+    const registry = new SessionRegistry();
+    let persistedSession = existingSession;
+    let responseOutput: string | null = null;
+    let sessionId = assignment.sessionId ?? crypto.randomUUID();
+    let supervisorStatus: WorkerDispatchOrchestrationResult["supervisorStatus"] = "stopped";
+
+    if (persistedSession?.threadId) {
+      registry.hydrate([
+        {
+          ...toSessionRecord(persistedSession, workspace.path),
+          runId: assignment.runId
+        }
+      ]);
+
+      const runtime = new CodexSessionRuntime({
+        registry,
+        supervisor,
+        executeTool: input.executeTool
+      });
+      const continued = await runtime.continueSession(persistedSession.id, assignment.prompt);
+      await checkpointRunBudget(
+        input.request,
+        assignment.runId,
+        "worker.dispatch",
+        continued.response
+      );
+      responseOutput = continued.response.output;
+      sessionId = persistedSession.id;
+      const stopped = await runtime.stopSession(persistedSession.id);
+      supervisorStatus = stopped.supervisor.status === "failed" ? "failed" : "stopped";
+    } else {
+      registry.seed({
+        sessionId,
+        runId: assignment.runId,
+        agentId: assignment.agentId,
+        worktreePath: workspace.path
+      });
+
+      const runtime = new CodexSessionRuntime({
+        registry,
+        supervisor,
+        executeTool: input.executeTool
+      });
+      const started = await runtime.startSession(sessionId, assignment.prompt);
+      await checkpointRunBudget(
+        input.request,
+        assignment.runId,
+        "worker.dispatch",
+        started.response
+      );
+      const createdSession = await input.request<Session>(
+        "POST",
+        `/api/v1/agents/${assignment.agentId}/session`,
+        {
+          threadId: started.response.threadId,
+          cwd: workspace.path,
+          sandbox: assignment.sandbox,
+          approvalPolicy: assignment.approvalPolicy,
+          includePlanTool: assignment.includePlanTool,
+          workerNodeId: input.nodeId,
+          placementConstraintLabels: assignment.requiredCapabilities,
+          metadata: {
+            source: "worker-dispatch-bootstrap",
+            assignmentId: assignment.id
+          }
+        }
+      );
+      await input.request(
+        "POST",
+        `/api/v1/worker-dispatch-assignments/${assignment.id}/session`,
+        {
+          sessionId: createdSession.id
+        }
+      );
+      persistedSession = createdSession;
+      sessionId = createdSession.id;
+      responseOutput = started.response.output;
+      const stopped = await runtime.stopSession(sessionId);
+      supervisorStatus = stopped.supervisor.status === "failed" ? "failed" : "stopped";
+    }
 
     if (assignment.taskId) {
       const task = runDetail.tasks.find((candidate) => candidate.id === assignment.taskId);
@@ -192,37 +236,31 @@ export async function runManagedWorkerDispatch(
         status: "completed"
       }
     );
-    const stopped = await runtime.stopSession(session.id);
 
     return {
       assignmentId: assignment.id,
       runId: assignment.runId,
-      sessionId: session.id,
+      sessionId,
       workspacePath: workspace.path,
       status: updated.state as WorkerDispatchOrchestrationResult["status"],
-      output: continued.response.output,
+      output: responseOutput,
       error: null,
-      supervisorStatus: stopped.supervisor.status === "failed" ? "failed" : "stopped"
+      supervisorStatus
     };
   } catch (error) {
     await cleanupWorktreePaths([workspace.path]);
     const reason = error instanceof Error ? error.message : String(error);
     const updated = await failAssignment(input.request, assignment, input.nodeId, reason);
-    const stopped = await runtime.stopSession(session.id).catch(() => ({
-      supervisor: {
-        status: "failed" as const
-      }
-    }));
 
     return {
       assignmentId: assignment.id,
       runId: assignment.runId,
-      sessionId: session.id,
+      sessionId: assignment.sessionId ?? "ephemeral-session",
       workspacePath: workspace.path,
       status: updated.state as WorkerDispatchOrchestrationResult["status"],
       output: null,
       error: reason,
-      supervisorStatus: stopped.supervisor.status === "failed" ? "failed" : "stopped"
+      supervisorStatus: "failed"
     };
   }
 }

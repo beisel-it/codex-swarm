@@ -797,8 +797,6 @@ describe("worker runtime helpers", () => {
       "--full-auto",
       "-C",
       "/tmp/run-001/backend-dev",
-      "-p",
-      "default",
       "-s",
       "workspace-write",
       "Start the worker"
