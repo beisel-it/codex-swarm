@@ -930,3 +930,95 @@ Evidence:
 Residual risks:
 
 - The release candidate is approved with explicit residual risks, not represented as a zero-risk or production-unbounded claim.
+
+## Task `4e254dea`
+
+Roadmap entry:
+
+- Phase 6 deliverable: `Admin/developer/operator docs`
+
+Verdict:
+
+- parity
+
+Evidence:
+
+- The release-facing docs index explicitly ships the admin, user/developer-facing, and operator tracks together in `docs/README.md`.
+- The user-facing product walkthroughs and screenshots are documented in `docs/user-guide.md`, covering repository-backed runs, board, run detail, review, and governance usage.
+- Governance, retention, provenance, and secret-boundary administration are documented in `docs/admin-guide.md`.
+- Runtime health, metrics, backup/restore, upgrade, and operating-loop guidance are documented in `docs/operator-guide.md`.
+- The final RC validation already re-checked this exact doc set and recorded it as sufficient release evidence in `docs/qa/m6-rc-signoff.md`.
+
+Residual risks:
+
+- There is no separate `developer-guide.md`; the delivered “developer” posture is represented through the user-facing workflow docs, README, and reference deployment material rather than a standalone developer manual.
+
+## Task `7c204594`
+
+Roadmap entry:
+
+- Phase 6 exit criterion: `The platform can run reliably under expected concurrency.`
+
+Verdict:
+
+- gap
+
+Evidence:
+
+- The roadmap still states the stronger exit criterion verbatim in `ROADMAP.md`.
+- The shipped performance evidence is intentionally bounded to a smoke-style concurrency envelope in `docs/operations/cost-usage-performance.md`, which records only a 10-concurrency, 20-iteration probe and explicitly says the probe is `a bounded smoke baseline, not a full load-generation platform`.
+- The same runbook says release-quality baselines `should still be captured against a live Codex Swarm API before GA signoff`, which means the repo does not yet contain the stronger acceptance evidence required by the roadmap wording.
+- The final RC signoff preserves this as an explicit residual risk, stating that the performance probe `is a bounded smoke baseline and not a substitute for sustained production load testing in a target deployment` in `docs/qa/m6-rc-signoff.md`.
+- The M6 delivery plan reframes this track as a `performance envelope` with `recorded evidence` in `docs/architecture/m6-delivery-plan.md`, but the stricter roadmap exit criterion was not narrowed in the canonical roadmap.
+
+Residual risks:
+
+- Operators can support bounded probe execution and documented limits, but not the stronger claim that the platform is proven reliable under the full expected concurrency envelope.
+
+Backlog follow-up:
+
+- Add sustained expected-concurrency verification with acceptance evidence, or intentionally narrow the roadmap exit criterion to the current documented performance envelope.
+
+## Task `83f9d4cf`
+
+Roadmap entry:
+
+- Phase 6 exit criterion: `recovery procedures are tested`
+
+Verdict:
+
+- parity
+
+Evidence:
+
+- The repo includes executable recovery tooling for backup, restore, and DR drill workflows in the documented commands referenced by `README.md` and the runbook in `docs/operations/backup-restore-dr.md`.
+- The recovery runbook records an executed 2026-03-28 drill with measured backup, restore, validation, and total duration plus zero-mismatch validation results in `docs/operations/backup-restore-dr.md`.
+- The operator workflow explicitly treats backup/restore/DR commands as a recurring operational path and requires operators to record drill or restore evidence in `docs/operator-guide.md`.
+- Support failure handling for unsuccessful restore or drill paths is documented in `docs/support-playbooks.md`.
+- QA’s final RC signoff independently revalidated the recovery runbooks and recorded drill evidence in `docs/qa/m6-rc-signoff.md`.
+
+Residual risks:
+
+- The tested recovery scope is the documented logical control-plane backup/restore path, not a broader infra-rebuild or regional failover exercise.
+
+## Task `734ff5a1`
+
+Roadmap entry:
+
+- Phase 6 exit criterion: `docs are sufficient for a fresh team to deploy and use the product`
+
+Verdict:
+
+- parity
+
+Evidence:
+
+- The docs index provides a coherent top-level navigation for user, admin, operator, support, and reference deployment material in `docs/README.md`.
+- `docs/reference-deployments.md` explicitly documents both the single-host onboarding topology and the multi-node reference topology, including deployment checklist items and evidence expectations.
+- `docs/user-guide.md`, `docs/admin-guide.md`, and `docs/operator-guide.md` together cover end-user workflows, governance/admin tasks, runtime health, recovery, and upgrade operations.
+- Additional operational boundaries and prerequisites are documented in `docs/operations/security.md`, `docs/operations/slo-support.md`, `docs/operations/upgrade-path.md`, and `docs/operations/cost-usage-performance.md`.
+- QA’s RC signoff already reviewed this full docs set and concluded that `the docs set is sufficient for a fresh team to install, configure, deploy, and operate the platform at the supported reference level` in `docs/qa/m6-rc-signoff.md`.
+
+Residual risks:
+
+- Fresh-team sufficiency depends on the documented reference topologies and still assumes operators can provide reachable Postgres and Redis instances, as already called out in the RC residual risks.
