@@ -166,6 +166,21 @@ class FakeVerticalSliceControlPlane {
       createdAt: new Date()
     }
   ];
+  private readonly validations: any[] = [
+    {
+      id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      runId: ids.run,
+      taskId: ids.taskA,
+      name: "typecheck",
+      status: "passed",
+      command: "pnpm typecheck",
+      summary: "Typecheck passed",
+      artifactPath: "artifacts/validations/typecheck.json",
+      artifactIds: ["cccccccc-cccc-4ccc-8ccc-cccccccccccc"],
+      createdAt: new Date(),
+      updatedAt: new Date()
+    }
+  ];
 
   private assertBoundary(entity: { workspaceId: string; teamId: string }, access?: any) {
     if (!access) {
@@ -799,35 +814,15 @@ class FakeVerticalSliceControlPlane {
   }
 
   async listValidations(_query?: any, _access?: any) {
-    return [
-      {
-        id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
-        runId: ids.run,
-        taskId: ids.taskA,
-        name: "typecheck",
-        status: "passed",
-        command: "pnpm typecheck",
-        summary: "Typecheck passed",
-        artifactPath: "artifacts/validations/typecheck.json",
-        artifactIds: ["cccccccc-cccc-4ccc-8ccc-cccccccccccc"],
-        artifacts: [
-          {
-            id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
-            runId: ids.run,
-            taskId: ids.taskA,
-            kind: "report",
-            path: "artifacts/validations/typecheck.json",
-            contentType: "application/json",
-            metadata: {
-              suite: "typecheck"
-            },
-            createdAt: new Date()
-          }
-        ],
-        createdAt: new Date(),
-        updatedAt: new Date()
-      }
-    ];
+    return this.validations
+      .filter((validation) => _query?.runId ? validation.runId === _query.runId : true)
+      .filter((validation) => _query?.taskId ? validation.taskId === _query.taskId : true)
+      .map((validation) => ({
+        ...validation,
+        artifacts: validation.artifactIds
+          .map((artifactId: string) => this.artifacts.find((artifact) => artifact.id === artifactId))
+          .filter(Boolean)
+      }));
   }
 
   async createValidation(input: any, access?: any) {
@@ -838,8 +833,8 @@ class FakeVerticalSliceControlPlane {
     const template = input.templateName
       ? task?.validationTemplates?.find((candidate: any) => candidate.name === input.templateName) ?? null
       : null;
-    return {
-      id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+    const validation = {
+      id: crypto.randomUUID(),
       runId: input.runId,
       taskId: input.taskId ?? null,
       name: input.name ?? template?.name,
@@ -861,6 +856,22 @@ class FakeVerticalSliceControlPlane {
       createdAt: new Date(),
       updatedAt: new Date()
     };
+
+    this.validations.push({
+      id: validation.id,
+      runId: validation.runId,
+      taskId: validation.taskId,
+      name: validation.name,
+      status: validation.status,
+      command: validation.command,
+      summary: validation.summary,
+      artifactPath: validation.artifactPath,
+      artifactIds: validation.artifactIds,
+      createdAt: validation.createdAt,
+      updatedAt: validation.updatedAt
+    });
+
+    return validation;
   }
 
   async listArtifacts(_runId?: string, _access?: any) {
@@ -4520,6 +4531,210 @@ describe("buildApp", () => {
         attempt: 1
       });
     } finally {
+      await rm(repoRoot, { recursive: true, force: true });
+      await app.close();
+    }
+  });
+
+  it("executes task validation templates and records artifact-backed validation results", async () => {
+    const verticalSlice = new FakeVerticalSliceControlPlane();
+    const app = await buildApp({
+      config: getConfig({
+        NODE_ENV: "test",
+        PORT: 3000,
+        HOST: "127.0.0.1",
+        DATABASE_URL: "postgres://unused/test",
+        DEV_AUTH_TOKEN: "test-token",
+        OPENAI_TRACING_DISABLED: true
+      }),
+      controlPlane: verticalSlice as unknown as ControlPlaneService
+    });
+
+    const headers = {
+      authorization: "Bearer test-token"
+    };
+    const repoRoot = await mkdtemp(join(tmpdir(), "codex-swarm-validation-dispatch-repo-"));
+    const worktreeRoot = await mkdtemp(join(tmpdir(), "codex-swarm-validation-dispatch-"));
+
+    try {
+      await writeFile(join(repoRoot, "README.md"), "validation worker dispatch\n", "utf8");
+      execFileSync("git", ["init", "--initial-branch=main"], { cwd: repoRoot, stdio: "pipe" });
+      execFileSync("git", ["config", "user.name", "Codex Swarm"], { cwd: repoRoot, stdio: "pipe" });
+      execFileSync("git", ["config", "user.email", "codex-swarm@example.com"], { cwd: repoRoot, stdio: "pipe" });
+      execFileSync("git", ["add", "README.md"], { cwd: repoRoot, stdio: "pipe" });
+      execFileSync("git", ["commit", "-m", "initial"], { cwd: repoRoot, stdio: "pipe" });
+      (verticalSlice as any).repositories[0].url = repoRoot;
+
+      const request: LeaderPlanningLoopRequest = async <T>(
+        method: string,
+        path: string,
+        payload?: Record<string, unknown>
+      ) => {
+        const response = await (app.inject as any)({
+          method,
+          url: path,
+          headers,
+          ...(payload ? { payload } : {})
+        }) as {
+          statusCode: number;
+          body: string;
+          json(): T;
+        };
+
+        if (response.statusCode >= 400) {
+          throw new Error(`${method} ${path} failed with ${response.statusCode}: ${response.body}`);
+        }
+
+        return response.json() as T;
+      };
+
+      const runResponse = await app.inject({
+        method: "POST",
+        url: "/api/v1/runs",
+        headers,
+        payload: {
+          repositoryId: ids.repository,
+          goal: "Execute validation templates through a worker",
+          concurrencyCap: 1,
+          metadata: {}
+        }
+      });
+
+      expect(runResponse.statusCode).toBe(201);
+
+      const agentResponse = await app.inject({
+        method: "POST",
+        url: "/api/v1/agents",
+        headers,
+        payload: {
+          runId: ids.run,
+          name: "worker-validation",
+          role: "backend-developer",
+          status: "idle",
+          session: {
+            threadId: "thread-worker-validation",
+            cwd: process.cwd(),
+            sandbox: "workspace-write",
+            approvalPolicy: "on-request",
+            includePlanTool: false,
+            metadata: {
+              source: "worker-validation-runner-test"
+            }
+          }
+        }
+      });
+
+      expect(agentResponse.statusCode).toBe(201);
+      const agentId = ids.agent;
+      const sessionId = ids.session;
+
+      const taskResponse = await app.inject({
+        method: "POST",
+        url: "/api/v1/tasks",
+        headers,
+        payload: {
+          runId: ids.run,
+          title: "Worker validation task",
+          description: "Execute task validation templates in the provisioned worktree",
+          role: "backend-developer",
+          priority: 1,
+          dependencyIds: [],
+          acceptanceCriteria: ["validation command is executed by the worker"],
+          validationTemplates: [
+            {
+              name: "unit",
+              command: `${JSON.stringify(process.execPath)} --input-type=module -e "console.log('validation ok')"`,
+              summary: "Run the worker validation command",
+              artifactPath: "artifacts/validations/unit.json"
+            }
+          ]
+        }
+      });
+
+      expect(taskResponse.statusCode).toBe(201);
+      const taskId = taskResponse.json().id as string;
+
+      const dispatchResponse = await app.inject({
+        method: "POST",
+        url: "/api/v1/worker-dispatch-assignments",
+        headers,
+        payload: {
+          runId: ids.run,
+          taskId,
+          agentId,
+          sessionId,
+          repositoryId: ids.repository,
+          repositoryName: "codex-swarm",
+          stickyNodeId: ids.workerNode,
+          requiredCapabilities: ["remote"],
+          worktreePath: join(worktreeRoot, "worker-validation"),
+          prompt: "Continue the worker session",
+          profile: "default",
+          sandbox: "workspace-write",
+          approvalPolicy: "on-request"
+        }
+      });
+
+      expect(dispatchResponse.statusCode).toBe(201);
+
+      const result = await runManagedWorkerDispatch({
+        request,
+        nodeId: ids.workerNode,
+        workspaceRoot: process.cwd(),
+        supervisorCommand: [
+          process.execPath,
+          "--input-type=module",
+          "-e",
+          "setInterval(() => {}, 1000);"
+        ],
+        executeTool: async () => ({
+          threadId: "thread-worker-validation",
+          output: "worker completed"
+        })
+      });
+
+      expect(result).toMatchObject({
+        status: "completed",
+        output: "worker completed"
+      });
+
+      const validationsResponse = await app.inject({
+        method: "GET",
+        url: `/api/v1/validations?runId=${ids.run}&taskId=${taskId}`,
+        headers
+      });
+
+      expect(validationsResponse.statusCode).toBe(200);
+      expect(validationsResponse.json()).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            name: "unit",
+            status: "passed",
+            artifactPath: "artifacts/validations/unit.json",
+            artifacts: expect.arrayContaining([
+              expect.objectContaining({
+                kind: "report",
+                path: "artifacts/validations/unit.json",
+                contentType: "application/json"
+              })
+            ])
+          })
+        ])
+      );
+
+      const createdValidation = validationsResponse.json().find((item: any) => item.name === "unit");
+      const artifactId = createdValidation.artifacts[0].id as string;
+      const artifactContentResponse = await app.inject({
+        method: "GET",
+        url: `/api/v1/artifacts/${artifactId}/content`,
+        headers
+      });
+
+      expect(artifactContentResponse.statusCode).toBe(200);
+      expect(artifactContentResponse.body).toContain("\"status\": \"passed\"");
+      expect(artifactContentResponse.body).toContain("\"stdout\": \"validation ok");
+    } finally {
+      await rm(worktreeRoot, { recursive: true, force: true });
       await rm(repoRoot, { recursive: true, force: true });
       await app.close();
     }

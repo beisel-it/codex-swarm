@@ -8,6 +8,7 @@ import {
   cleanupWorktreePaths,
   CodexServerSupervisor,
   CodexSessionRuntime,
+  executeTaskValidationTemplate,
   materializeRepositoryWorkspace,
   SessionRegistry
 } from "@codex-swarm/worker";
@@ -160,6 +161,24 @@ export async function runManagedWorkerDispatch(
 
   try {
     const continued = await runtime.continueSession(session.id, assignment.prompt);
+
+    if (assignment.taskId) {
+      const task = runDetail.tasks.find((candidate) => candidate.id === assignment.taskId);
+
+      if (task) {
+        for (const template of task.validationTemplates) {
+          await executeTaskValidationTemplate({
+            request: input.request,
+            runId: assignment.runId,
+            taskId: task.id,
+            templateName: template.name,
+            cwd: workspace.path,
+            runDetail
+          });
+        }
+      }
+    }
+
     const updated = await input.request<WorkerDispatchAssignment>(
       "PATCH",
       `/api/v1/worker-dispatch-assignments/${assignment.id}`,

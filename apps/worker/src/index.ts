@@ -27,6 +27,10 @@ import {
 } from "./dispatch.js";
 import { claimAndProvisionDispatchWorkspace } from "./control-plane.js";
 import { SessionRegistry } from "./session-registry.js";
+import {
+  executeTaskValidationTemplate,
+  executeValidationCommand
+} from "./validation-runner.js";
 
 export {
   buildCodexServerCommand,
@@ -53,7 +57,9 @@ export {
   SessionRegistry,
   serializeDispatchAssignment,
   serializeDispatchLease,
-  claimAndProvisionDispatchWorkspace
+  claimAndProvisionDispatchWorkspace,
+  executeTaskValidationTemplate,
+  executeValidationCommand
 };
 
 export type {
