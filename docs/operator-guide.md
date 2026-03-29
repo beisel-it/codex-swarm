@@ -43,6 +43,13 @@ Use:
 
 Follow the detailed runbook in [Upgrade Path](./operations/upgrade-path.md).
 
+### Repository materialization rules
+
+- Worker workspaces are prepared through `materializeRepositoryWorkspace(...)` in `apps/worker/src/runtime.ts`.
+- If a repository record includes `localPath`, the worker path is a mounted view of that operator-managed checkout. The platform treats the mounted source as pre-positioned and does not switch branches or clean the source tree.
+- If a repository record does not include `localPath`, the worker runtime clones `repository.url` into the assigned worktree path using the requested branch or the repository default branch.
+- Operators should use `localPath` only for trusted single-host flows where the source checkout lifecycle is already under explicit control.
+
 ## Reference Operating Loop
 
 1. Check `/health` and `db:status`.

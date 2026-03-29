@@ -53,6 +53,12 @@ Operational tooling:
 - `corepack pnpm ops:perf` runs a simple concurrent HTTP latency check against a live API base URL.
 - `corepack pnpm ops:smoke` drives a live single-host smoke flow against `SMOKE_BASE_URL`, covering repository/run creation, persisted plan artifact linkage, delegation messaging, and operator-visible verification output.
 
+Repository materialization:
+
+- Worker runtime now exposes `materializeRepositoryWorkspace(...)` in `@codex-swarm/worker`.
+- Repositories with `localPath` are mounted into the worker worktree path as an operator-prepared local checkout. The runtime does not change branches for mounted paths; operators own branch/cleanliness of that source tree.
+- Repositories without `localPath` are cloned into the worker worktree path from `repository.url` using the requested branch or the repository default branch.
+
 Operations docs:
 
 - [`docs/README.md`](./docs/README.md)

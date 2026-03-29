@@ -1,6 +1,6 @@
 import { once } from "node:events";
-import { mkdir, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { lstat, mkdir, readlink, symlink, writeFile } from "node:fs/promises";
+import { dirname, join, resolve } from "node:path";
 import { spawn, type ChildProcess, type SpawnOptions } from "node:child_process";
 
 import { SessionRegistry, type WorkerSessionRecord } from "./session-registry.js";
@@ -100,6 +100,31 @@ export interface PlanMaterializationInput {
   relativePath?: string;
 }
 
+export interface RepositoryMaterializationInput {
+  repository: {
+    name: string;
+    url: string;
+    defaultBranch: string;
+    localPath?: string | null;
+  };
+  destinationPath: string;
+  branch?: string;
+  cloneDepth?: number;
+  spawnImpl?: (
+    command: string,
+    args: readonly string[],
+    options: SpawnOptions
+  ) => ChildProcess;
+}
+
+export interface MaterializedRepositoryWorkspace {
+  path: string;
+  mode: "git_clone" | "local_path_mount";
+  branch: string | null;
+  repositoryUrl: string;
+  sourcePath: string | null;
+}
+
 export interface WorkerSessionRecoveryCandidate {
   sessionId: string;
   runId: string;
@@ -129,6 +154,50 @@ function sanitizePathSegment(value: string) {
     .replace(/[^a-z0-9-_]+/g, "-")
     .replace(/-+/g, "-")
     .replace(/^-|-$/g, "");
+}
+
+async function ensureDestinationMissing(destinationPath: string) {
+  try {
+    await lstat(destinationPath);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return;
+    }
+
+    throw error;
+  }
+
+  throw new Error(`repository destination already exists: ${destinationPath}`);
+}
+
+async function runCommand(
+  command: string,
+  args: readonly string[],
+  options: SpawnOptions,
+  spawnImpl: (
+    command: string,
+    args: readonly string[],
+    options: SpawnOptions
+  ) => ChildProcess = spawn
+) {
+  const child = spawnImpl(command, args, {
+    ...options,
+    stdio: ["ignore", "pipe", "pipe"]
+  });
+
+  let stderr = "";
+  child.stderr?.setEncoding("utf8");
+  child.stderr?.on("data", (chunk: string | Buffer) => {
+    stderr += String(chunk);
+  });
+
+  const [code, signal] = await once(child, "exit") as [number | null, NodeJS.Signals | null];
+
+  if (code !== 0) {
+    const renderedCommand = [command, ...args].join(" ");
+    const suffix = stderr.trim().length > 0 ? `: ${stderr.trim()}` : "";
+    throw new Error(`${renderedCommand} failed with code ${code ?? "null"}${signal ? ` signal ${signal}` : ""}${suffix}`);
+  }
 }
 
 export function buildPlanMarkdown(input: PlanDocumentInput) {
@@ -177,6 +246,65 @@ export async function materializePlanArtifact(input: PlanMaterializationInput) {
     path: outputPath,
     relativePath,
     markdown
+  };
+}
+
+export async function materializeRepositoryWorkspace(input: RepositoryMaterializationInput): Promise<MaterializedRepositoryWorkspace> {
+  await mkdir(dirname(input.destinationPath), { recursive: true });
+  await ensureDestinationMissing(input.destinationPath);
+
+  const sourcePath = input.repository.localPath ? resolve(input.repository.localPath) : null;
+
+  if (sourcePath) {
+    const sourceStats = await lstat(sourcePath);
+
+    if (!sourceStats.isDirectory() && !sourceStats.isSymbolicLink()) {
+      throw new Error(`repository local path must point to a directory-like target: ${sourcePath}`);
+    }
+
+    await symlink(sourcePath, input.destinationPath, "dir");
+
+    const linkedPath = await readlink(input.destinationPath);
+
+    if (resolve(dirname(input.destinationPath), linkedPath) !== sourcePath) {
+      throw new Error(`repository local-path mount target mismatch for ${input.destinationPath}`);
+    }
+
+    return {
+      path: input.destinationPath,
+      mode: "local_path_mount",
+      branch: null,
+      repositoryUrl: input.repository.url,
+      sourcePath
+    };
+  }
+
+  const branch = input.branch ?? input.repository.defaultBranch;
+  const cloneDepth = input.cloneDepth ?? 1;
+  await runCommand(
+    "git",
+    [
+      "clone",
+      "--branch",
+      branch,
+      "--single-branch",
+      "--depth",
+      String(cloneDepth),
+      input.repository.url,
+      input.destinationPath
+    ],
+    {
+      cwd: dirname(input.destinationPath)
+    },
+    input.spawnImpl
+  );
+
+  return {
+    path: input.destinationPath,
+    mode: "git_clone",
+    branch,
+    repositoryUrl: input.repository.url,
+    sourcePath: null
   };
 }
 

@@ -1,4 +1,5 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { execFileSync } from "node:child_process";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { describe, expect, it } from "vitest";
@@ -11,10 +12,18 @@ import {
   buildSessionRecoveryPlan,
   CodexSessionRuntime,
   CodexServerSupervisor,
+  materializeRepositoryWorkspace,
   materializePlanArtifact,
   createWorktreePath
 } from "../src/runtime.js";
 import { SessionRegistry } from "../src/session-registry.js";
+
+function git(args: string[], cwd: string) {
+  execFileSync("git", args, {
+    cwd,
+    stdio: "pipe"
+  });
+}
 
 describe("worker runtime helpers", () => {
   it("creates deterministic sanitized worktree paths", () => {
@@ -117,6 +126,73 @@ describe("worker runtime helpers", () => {
       expect(persisted).toBe(artifact.markdown);
     } finally {
       await rm(cwd, { recursive: true, force: true });
+    }
+  });
+
+  it("materializes a worker repository by cloning the configured branch", async () => {
+    const repoRoot = await mkdtemp(join(tmpdir(), "codex-swarm-repo-source-"));
+    const workspaceRoot = await mkdtemp(join(tmpdir(), "codex-swarm-repo-clone-"));
+    const clonePath = join(workspaceRoot, "worker-001");
+
+    try {
+      git(["init", "--initial-branch=main"], repoRoot);
+      git(["config", "user.name", "Codex Swarm"], repoRoot);
+      git(["config", "user.email", "codex-swarm@example.com"], repoRoot);
+      await writeFile(join(repoRoot, "README.md"), "hello from clone\n", "utf8");
+      git(["add", "README.md"], repoRoot);
+      git(["commit", "-m", "initial"], repoRoot);
+
+      const workspace = await materializeRepositoryWorkspace({
+        repository: {
+          name: "codex-swarm",
+          url: repoRoot,
+          defaultBranch: "main",
+          localPath: null
+        },
+        destinationPath: clonePath
+      });
+
+      expect(workspace).toMatchObject({
+        path: clonePath,
+        mode: "git_clone",
+        branch: "main",
+        sourcePath: null
+      });
+      expect(await readFile(join(clonePath, "README.md"), "utf8")).toBe("hello from clone\n");
+    } finally {
+      await rm(repoRoot, { recursive: true, force: true });
+      await rm(workspaceRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("materializes a worker repository by mounting a trusted local path", async () => {
+    const sourceRoot = await mkdtemp(join(tmpdir(), "codex-swarm-repo-mount-source-"));
+    const workspaceRoot = await mkdtemp(join(tmpdir(), "codex-swarm-repo-mount-"));
+    const mountPath = join(workspaceRoot, "worker-001");
+
+    try {
+      await writeFile(join(sourceRoot, "README.md"), "hello from mount\n", "utf8");
+
+      const workspace = await materializeRepositoryWorkspace({
+        repository: {
+          name: "codex-swarm",
+          url: "file:///tmp/codex-swarm",
+          defaultBranch: "main",
+          localPath: sourceRoot
+        },
+        destinationPath: mountPath
+      });
+
+      expect(workspace).toMatchObject({
+        path: mountPath,
+        mode: "local_path_mount",
+        branch: null,
+        sourcePath: sourceRoot
+      });
+      expect(await readFile(join(mountPath, "README.md"), "utf8")).toBe("hello from mount\n");
+    } finally {
+      await rm(sourceRoot, { recursive: true, force: true });
+      await rm(workspaceRoot, { recursive: true, force: true });
     }
   });
 

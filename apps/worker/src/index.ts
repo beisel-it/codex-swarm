@@ -6,6 +6,7 @@ import {
   buildCodexSessionReplyRequest,
   buildCodexSessionStartRequest,
   buildSessionRecoveryPlan,
+  materializeRepositoryWorkspace,
   materializePlanArtifact,
   createWorktreePath
 } from "./runtime.js";
@@ -41,6 +42,7 @@ export {
   deserializeDispatchAssignment,
   deserializeDispatchLease,
   evaluateWorkerRuntimeDependencies,
+  materializeRepositoryWorkspace,
   materializePlanArtifact,
   RedisDispatchQueue,
   SessionRegistry,
