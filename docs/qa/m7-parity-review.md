@@ -800,3 +800,28 @@ Residual risks:
 Backlog follow-up:
 
 - Add a provider-backed onboarding flow with acceptance evidence, or intentionally narrow the roadmap deliverable to the currently implemented repository registration path.
+
+## Task `974b5cb4`
+
+Roadmap entry:
+
+- Phase 3 deliverable: `Budget-aware run controls`
+
+Verdict:
+
+- gap
+
+Evidence:
+
+- Run creation does accept and persist `budgetTokens`, `budgetCostUsd`, `concurrencyCap`, and `policyProfile` on the run model in `apps/api/src/services/control-plane-service.ts` and `apps/api/src/db/schema.ts`.
+- Concurrency is enforced during active agent creation, and sensitive policy defaults can clamp concurrency, but that is separate from budget-aware control behavior in `apps/api/src/services/control-plane-service.ts` and `apps/api/test/control-plane-service.policy.test.ts`.
+- The remaining budget-related surfaces are reporting-oriented: `docs/operations/cost-usage-performance.md` describes `cost` as budgeted run posture, and `apps/api/src/lib/observability.ts` aggregates budget totals for metrics rather than enforcing runtime controls.
+- I found no API route, scheduler path, worker behavior, or UI action that changes run execution based on remaining or exceeded budget. The repo persists budget metadata, but it does not expose supportable budget-aware control logic.
+
+Residual risks:
+
+- Reviewers can support policy-aware concurrency and budget reporting, but not the stronger deliverable claim that runs have real budget-aware controls.
+
+Backlog follow-up:
+
+- Add actual budget-aware run control behavior with acceptance evidence, or intentionally narrow the deliverable to persisted budget metadata plus reporting.
