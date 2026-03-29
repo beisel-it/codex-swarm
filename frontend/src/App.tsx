@@ -6,6 +6,7 @@ import {
   type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
 } from 'react'
+import { buildAgentTranscriptTargets, chooseTranscriptSessionId } from './agent-observability'
 import { useTheme } from './theme'
 
 type ViewMode = 'board' | 'detail' | 'review' | 'admin'
@@ -36,6 +37,14 @@ type TaskStatus =
   | 'cancelled'
 
 type AgentStatus = 'provisioning' | 'idle' | 'busy' | 'paused' | 'stopped' | 'failed'
+type AgentObservabilityMode = 'session' | 'transcript_visibility' | 'unavailable'
+type AgentObservabilityLineageSource =
+  | 'active_session'
+  | 'session_rollover'
+  | 'task_reassignment'
+  | 'task_state_transition'
+  | 'terminal_session'
+  | 'not_started'
 type ApprovalStatus = 'pending' | 'approved' | 'rejected'
 type ValidationStatus = 'pending' | 'passed' | 'failed'
 type ArtifactKind = 'plan' | 'patch' | 'log' | 'report' | 'diff' | 'screenshot' | 'pr_link' | 'other'
@@ -313,6 +322,15 @@ type Agent = {
   worktreePath: string | null
   currentTaskId?: string | null
   lastHeartbeatAt?: string | null
+  observability?: {
+    mode: AgentObservabilityMode
+    currentSessionId: string | null
+    currentSessionState: WorkerSessionState | null
+    visibleTranscriptSessionId: string | null
+    visibleTranscriptSessionState: WorkerSessionState | null
+    visibleTranscriptUpdatedAt: string | null
+    lineageSource: AgentObservabilityLineageSource
+  }
   createdAt?: string
   updatedAt?: string
 }
@@ -1143,6 +1161,15 @@ const mockData: SwarmData = {
       worktreePath: '/worktrees/run-alpha/leader',
       currentTaskId: 'task-ui',
       lastHeartbeatAt: '2026-03-28T21:08:00.000Z',
+      observability: {
+        mode: 'session',
+        currentSessionId: 'session-leader',
+        currentSessionState: 'active',
+        visibleTranscriptSessionId: 'session-leader',
+        visibleTranscriptSessionState: 'active',
+        visibleTranscriptUpdatedAt: '2026-03-28T21:08:00.000Z',
+        lineageSource: 'active_session',
+      },
     },
     {
       id: 'agent-backend',
@@ -1154,6 +1181,15 @@ const mockData: SwarmData = {
       worktreePath: '/worktrees/run-alpha/backend',
       currentTaskId: 'task-runtime',
       lastHeartbeatAt: '2026-03-28T21:07:00.000Z',
+      observability: {
+        mode: 'session',
+        currentSessionId: 'session-backend',
+        currentSessionState: 'active',
+        visibleTranscriptSessionId: 'session-backend',
+        visibleTranscriptSessionState: 'active',
+        visibleTranscriptUpdatedAt: '2026-03-28T21:07:00.000Z',
+        lineageSource: 'active_session',
+      },
     },
     {
       id: 'agent-frontend',
@@ -1165,6 +1201,15 @@ const mockData: SwarmData = {
       worktreePath: '/worktrees/run-alpha/frontend',
       currentTaskId: 'task-ui',
       lastHeartbeatAt: '2026-03-28T21:09:00.000Z',
+      observability: {
+        mode: 'session',
+        currentSessionId: 'session-frontend',
+        currentSessionState: 'active',
+        visibleTranscriptSessionId: 'session-frontend',
+        visibleTranscriptSessionState: 'active',
+        visibleTranscriptUpdatedAt: '2026-03-28T21:09:00.000Z',
+        lineageSource: 'active_session',
+      },
     },
     {
       id: 'agent-reviewer',
@@ -1176,6 +1221,15 @@ const mockData: SwarmData = {
       worktreePath: '/worktrees/run-beta/reviewer',
       currentTaskId: 'task-review',
       lastHeartbeatAt: '2026-03-28T20:15:00.000Z',
+      observability: {
+        mode: 'transcript_visibility',
+        currentSessionId: null,
+        currentSessionState: null,
+        visibleTranscriptSessionId: 'session-reviewer',
+        visibleTranscriptSessionState: 'stale',
+        visibleTranscriptUpdatedAt: '2026-03-28T20:15:00.000Z',
+        lineageSource: 'session_rollover',
+      },
     },
   ],
   sessions: [
@@ -1490,15 +1544,6 @@ const validationStatusTone: Record<ValidationStatus, string> = {
   failed: 'danger',
 }
 
-const sessionStateTone: Record<WorkerSessionState, ActivityItem['tone']> = {
-  pending: 'warning',
-  active: 'active',
-  stopped: 'muted',
-  failed: 'danger',
-  stale: 'warning',
-  archived: 'muted',
-}
-
 const repositoryTrustTone: Record<RepositoryTrustLevel, ActivityItem['tone']> = {
   trusted: 'success',
   sandboxed: 'warning',
@@ -1540,6 +1585,12 @@ const workerSessionTone: Record<WorkerSessionState, ActivityItem['tone']> = {
   failed: 'danger',
   stale: 'warning',
   archived: 'muted',
+}
+
+const transcriptAccessTone: Record<'live_session' | 'fallback_transcript' | 'unavailable', ActivityItem['tone']> = {
+  live_session: 'success',
+  fallback_transcript: 'warning',
+  unavailable: 'muted',
 }
 
 function buildTaskDagGraph(tasks: Task[]): TaskDagGraph {
@@ -2921,6 +2972,10 @@ function App() {
   const runSessions = data.sessions.filter((session) =>
     runAgents.some((agent) => agent.id === session.agentId),
   )
+  const agentTranscriptTargets = buildAgentTranscriptTargets(runAgents, runSessions)
+  const agentTranscriptTargetByAgentId = new Map(
+    agentTranscriptTargets.map((target) => [target.agentId, target] as const),
+  )
   const runWorkerNodes = data.workerNodes.filter((workerNode) =>
     runSessions.some(
       (session) => session.workerNodeId === workerNode.id || session.stickyNodeId === workerNode.id,
@@ -2981,13 +3036,9 @@ function App() {
 
   useEffect(() => {
     setSelectedTranscriptSessionId((current) => {
-      if (runSessions.some((session) => session.id === current)) {
-        return current
-      }
-
-      return runSessions[0]?.id ?? ''
+      return chooseTranscriptSessionId(current, agentTranscriptTargets)
     })
-  }, [runSessions])
+  }, [agentTranscriptTargets])
 
   useEffect(() => {
     let active = true
@@ -4328,7 +4379,8 @@ function App() {
                   <div className="agent-lanes">
                     {runAgents.map((agent) => {
                       const agentTask = runTasks.find((task) => task.id === agent.currentTaskId)
-                      const session = runSessions.find((item) => item.agentId === agent.id)
+                      const transcriptTarget = agentTranscriptTargetByAgentId.get(agent.id)
+                      const session = transcriptTarget?.session ?? runSessions.find((item) => item.agentId === agent.id)
                       const workerNode = data.workerNodes.find((item) => item.id === session?.workerNodeId) ?? null
 
                       return (
@@ -4354,7 +4406,7 @@ function App() {
                             </div>
                             <div>
                               <dt>Session</dt>
-                              <dd>{session?.threadId ?? 'No Codex session recorded'}</dd>
+                              <dd>{session?.threadId ?? 'Session record reconciling'}</dd>
                             </div>
                             <div>
                               <dt>Placement</dt>
@@ -4368,18 +4420,40 @@ function App() {
                               <dt>Heartbeat</dt>
                               <dd>{formatRelativeHeartbeat(agent.lastHeartbeatAt)}</dd>
                             </div>
+                            <div>
+                              <dt>Transcript access</dt>
+                              <dd>{transcriptTarget?.summaryLabel ?? 'Transcript pending'}</dd>
+                            </div>
                           </dl>
-                          {session ? (
+                          {transcriptTarget ? (
                             <div className="inline-meta">
-                              <span className={`tone-chip tone-${workerSessionTone[session.state]}`}>
-                                {formatLabel(session.state)}
+                              <span className={`tone-chip tone-${transcriptAccessTone[transcriptTarget.mode]}`}>
+                                {transcriptTarget.badgeLabel}
                               </span>
+                              {session ? (
+                                <span className={`tone-chip tone-${workerSessionTone[session.state]}`}>
+                                  {formatLabel(session.state)}
+                                </span>
+                              ) : null}
                               {workerNode ? (
                                 <span className={`tone-chip tone-${workerNodeDrainTone[workerNode.drainState]}`}>
                                   {formatLabel(workerNode.drainState)}
                                 </span>
                               ) : null}
                             </div>
+                          ) : null}
+                          <p className="agent-transcript-copy">{transcriptTarget?.summaryDetail ?? 'Transcript visibility has not been attached to this agent yet.'}</p>
+                          {transcriptTarget?.sessionId ? (
+                            <button
+                              type="button"
+                              className="inline-link-button"
+                              onClick={() => {
+                                setSelectedTranscriptSessionId(transcriptTarget.sessionId ?? '')
+                                setSelectedView('detail')
+                              }}
+                            >
+                              Open transcript
+                            </button>
                           ) : null}
                         </article>
                       )
@@ -4613,24 +4687,45 @@ function App() {
                   </div>
 
                   <div className="review-list">
-                    {runSessions.map((session) => (
-                      <button
-                        key={session.id}
-                        type="button"
-                        className={`review-card ${session.id === selectedTranscriptSessionId ? 'is-selected' : ''}`}
-                        onClick={() => setSelectedTranscriptSessionId(session.id)}
-                      >
-                        <div className="approval-title">
-                          <strong>{session.threadId}</strong>
-                          <span className={`tone-chip tone-${sessionStateTone[session.state]}`}>
-                            {formatLabel(session.state)}
-                          </span>
-                        </div>
-                        <p>{session.cwd}</p>
-                      </button>
-                    ))}
-                    {runSessions.length === 0 ? (
-                      <div className="empty-state">No sessions recorded for this run.</div>
+                    {agentTranscriptTargets.map((target) => {
+                      const selected = target.sessionId !== null && target.sessionId === selectedTranscriptSessionId
+
+                      return (
+                        <button
+                          key={target.agentId}
+                          type="button"
+                          className={`review-card ${selected ? 'is-selected' : ''}`}
+                          onClick={() => {
+                            if (!target.sessionId) {
+                              return
+                            }
+
+                            setSelectedTranscriptSessionId(target.sessionId)
+                          }}
+                          disabled={!target.sessionId}
+                        >
+                          <div className="approval-title">
+                            <strong>{target.agentName}</strong>
+                            <span className={`tone-chip tone-${transcriptAccessTone[target.mode]}`}>
+                              {target.badgeLabel}
+                            </span>
+                          </div>
+                          <p>{target.summaryDetail}</p>
+                          <div className="detail-list">
+                            <span>Primary session: {target.session?.threadId ?? 'Awaiting session reconciliation'}</span>
+                            <span>
+                              Session state: {target.session ? formatLabel(target.session.state) : formatLabel(target.observability.visibleTranscriptSessionState ?? target.observability.currentSessionState ?? 'pending')}
+                            </span>
+                            <span>Lineage: {formatLabel(target.observability.lineageSource)}</span>
+                            <span>
+                              Updated: {target.observability.visibleTranscriptUpdatedAt ? formatDate(target.observability.visibleTranscriptUpdatedAt) : 'No transcript timestamp yet'}
+                            </span>
+                          </div>
+                        </button>
+                      )
+                    })}
+                    {agentTranscriptTargets.length === 0 ? (
+                      <div className="empty-state">No active agents recorded for this run.</div>
                     ) : null}
                   </div>
 
@@ -4649,6 +4744,9 @@ function App() {
                     ) : null}
                     {transcriptState === 'error' ? (
                       <div className="empty-state">{transcriptError || 'Transcript unavailable.'}</div>
+                    ) : null}
+                    {transcriptState !== 'loading' && transcriptState !== 'error' && !selectedTranscriptSessionId && agentTranscriptTargets.length > 0 ? (
+                      <div className="empty-state">Active agents are still reconciling transcript visibility. The latest fallback session will appear here as soon as it is published.</div>
                     ) : null}
                     {transcriptState !== 'loading' && transcriptState !== 'error' && selectedTranscriptSessionId && selectedTranscript.length === 0 ? (
                       <div className="empty-state">No transcript entries recorded for this session yet.</div>

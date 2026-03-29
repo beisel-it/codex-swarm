@@ -5,6 +5,7 @@ import {
   approvalCreateSchema,
   approvalResolveSchema,
   agentCreateSchema,
+  agentObservabilitySchema,
   artifactDetailSchema,
   artifactCreateSchema,
   artifactDiffSummarySchema,
@@ -170,8 +171,68 @@ describe("runDetailSchema", () => {
           updatedAt: now
         }
       ],
-      agents: [],
-      sessions: [],
+      agents: [
+        {
+          id: "550e8400-e29b-41d4-a716-446655440012",
+          runId: "550e8400-e29b-41d4-a716-446655440000",
+          name: "frontend-agent",
+          role: "frontend-developer",
+          status: "busy",
+          branchName: null,
+          worktreePath: null,
+          currentTaskId: "550e8400-e29b-41d4-a716-446655440011",
+          lastHeartbeatAt: now,
+          observability: {
+            mode: "session",
+            currentSessionId: "550e8400-e29b-41d4-a716-446655440030",
+            currentSessionState: "pending",
+            visibleTranscriptSessionId: "550e8400-e29b-41d4-a716-446655440031",
+            visibleTranscriptSessionState: "stopped",
+            visibleTranscriptUpdatedAt: now,
+            lineageSource: "session_rollover"
+          },
+          createdAt: now,
+          updatedAt: now
+        }
+      ],
+      sessions: [
+        {
+          id: "550e8400-e29b-41d4-a716-446655440031",
+          agentId: "550e8400-e29b-41d4-a716-446655440012",
+          threadId: "thread-previous",
+          cwd: "/tmp/run/agent",
+          sandbox: "workspace-write",
+          approvalPolicy: "never",
+          includePlanTool: false,
+          workerNodeId: null,
+          stickyNodeId: null,
+          placementConstraintLabels: [],
+          lastHeartbeatAt: now,
+          state: "stopped",
+          staleReason: null,
+          metadata: {},
+          createdAt: now,
+          updatedAt: now
+        },
+        {
+          id: "550e8400-e29b-41d4-a716-446655440030",
+          agentId: "550e8400-e29b-41d4-a716-446655440012",
+          threadId: "thread-current",
+          cwd: "/tmp/run/agent",
+          sandbox: "workspace-write",
+          approvalPolicy: "never",
+          includePlanTool: false,
+          workerNodeId: null,
+          stickyNodeId: null,
+          placementConstraintLabels: [],
+          lastHeartbeatAt: now,
+          state: "pending",
+          staleReason: null,
+          metadata: {},
+          createdAt: now,
+          updatedAt: now
+        }
+      ],
       taskDag: {
         nodes: [
           {
@@ -227,6 +288,7 @@ describe("runDetailSchema", () => {
 
     expect(runDetail.taskDag.rootTaskIds).toEqual(["550e8400-e29b-41d4-a716-446655440010"]);
     expect(runDetail.taskDag.blockedTaskIds).toEqual(["550e8400-e29b-41d4-a716-446655440011"]);
+    expect(runDetail.agents[0]?.observability.lineageSource).toBe("session_rollover");
   });
 });
 
@@ -250,6 +312,45 @@ describe("agentCreateSchema", () => {
       placementConstraintLabels: [],
       metadata: {}
     });
+  });
+});
+
+describe("agentObservabilitySchema", () => {
+  it("defaults to unavailable when no session or transcript lineage is exposed", () => {
+    const observability = agentObservabilitySchema.parse({});
+
+    expect(observability).toEqual({
+      mode: "unavailable",
+      currentSessionId: null,
+      currentSessionState: null,
+      visibleTranscriptSessionId: null,
+      visibleTranscriptSessionState: null,
+      visibleTranscriptUpdatedAt: null,
+      lineageSource: "not_started"
+    });
+  });
+
+  it("accepts direct current-session linkage while retaining the latest visible transcript", () => {
+    const observability = agentObservabilitySchema.parse({
+      mode: "session",
+      currentSessionId: "550e8400-e29b-41d4-a716-446655440020",
+      currentSessionState: "pending",
+      visibleTranscriptSessionId: "550e8400-e29b-41d4-a716-446655440021",
+      visibleTranscriptSessionState: "stopped",
+      visibleTranscriptUpdatedAt: new Date("2026-03-29T10:05:00.000Z"),
+      lineageSource: "session_rollover"
+    });
+
+    expect(observability.currentSessionId).toBe("550e8400-e29b-41d4-a716-446655440020");
+    expect(observability.visibleTranscriptSessionId).toBe("550e8400-e29b-41d4-a716-446655440021");
+    expect(observability.lineageSource).toBe("session_rollover");
+  });
+
+  it("requires a visible transcript when operating in transcript fallback mode", () => {
+    expect(() => agentObservabilitySchema.parse({
+      mode: "transcript_visibility",
+      lineageSource: "task_state_transition"
+    })).toThrow(/visibleTranscriptSessionId/);
   });
 });
 

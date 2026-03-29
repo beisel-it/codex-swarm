@@ -13,6 +13,8 @@ export const repositoryTrustLevels = ["trusted", "sandboxed", "restricted"] as c
 export const pullRequestStatuses = ["draft", "open", "merged", "closed"] as const;
 export const handoffStatuses = ["pending", "branch_published", "pr_open", "manual_handoff", "merged", "closed"] as const;
 export const workerSessionStates = ["pending", "active", "stopped", "failed", "stale", "archived"] as const;
+export const agentObservabilityModes = ["session", "transcript_visibility", "unavailable"] as const;
+export const agentObservabilityLineageSources = ["active_session", "session_rollover", "task_reassignment", "task_state_transition", "terminal_session", "not_started"] as const;
 export const workerNodeStates = ["active", "draining", "drained", "offline"] as const;
 export const workerDispatchStates = ["queued", "claimed", "completed", "retrying", "failed"] as const;
 export const workerNodeStatuses = ["online", "degraded", "offline"] as const;
@@ -346,12 +348,55 @@ export const taskDagGraphSchema = z.object({
   unblockPaths: z.array(taskDagUnblockPathSchema).default([])
 });
 
+export const agentObservabilitySchema = z.object({
+  mode: z.enum(agentObservabilityModes).default("unavailable"),
+  currentSessionId: z.uuid().nullable().default(null),
+  currentSessionState: z.enum(workerSessionStates).nullable().default(null),
+  visibleTranscriptSessionId: z.uuid().nullable().default(null),
+  visibleTranscriptSessionState: z.enum(workerSessionStates).nullable().default(null),
+  visibleTranscriptUpdatedAt: z.date().nullable().default(null),
+  lineageSource: z.enum(agentObservabilityLineageSources).default("not_started")
+}).superRefine((value, ctx) => {
+  if (value.mode === "session" && !value.currentSessionId) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["currentSessionId"],
+      message: "session mode requires currentSessionId"
+    });
+  }
+
+  if (value.mode === "transcript_visibility" && !value.visibleTranscriptSessionId) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["visibleTranscriptSessionId"],
+      message: "transcript_visibility mode requires visibleTranscriptSessionId"
+    });
+  }
+
+  if (value.mode === "unavailable" && (value.currentSessionId || value.visibleTranscriptSessionId)) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["mode"],
+      message: "unavailable mode cannot expose session or transcript linkage"
+    });
+  }
+});
+
 export const agentSchema = agentCreateSchema.omit({ session: true }).extend({
   id: z.uuid(),
   worktreePath: z.string().min(1).nullable(),
   branchName: z.string().min(1).nullable(),
   currentTaskId: z.uuid().nullable(),
   lastHeartbeatAt: z.date().nullable(),
+  observability: agentObservabilitySchema.default({
+    mode: "unavailable",
+    currentSessionId: null,
+    currentSessionState: null,
+    visibleTranscriptSessionId: null,
+    visibleTranscriptSessionState: null,
+    visibleTranscriptUpdatedAt: null,
+    lineageSource: "not_started"
+  }),
   createdAt: z.date(),
   updatedAt: z.date()
 });
@@ -1133,6 +1178,7 @@ export type TaskDagNode = z.infer<typeof taskDagNodeSchema>;
 export type TaskDagEdge = z.infer<typeof taskDagEdgeSchema>;
 export type TaskDagUnblockPath = z.infer<typeof taskDagUnblockPathSchema>;
 export type TaskDagGraph = z.infer<typeof taskDagGraphSchema>;
+export type AgentObservability = z.infer<typeof agentObservabilitySchema>;
 export type Agent = z.infer<typeof agentSchema>;
 export type Session = z.infer<typeof sessionSchema>;
 export type SessionTranscriptEntry = z.infer<typeof sessionTranscriptEntrySchema>;

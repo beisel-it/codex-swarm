@@ -125,6 +125,10 @@ type OwnershipBoundary = {
   policyProfile: string | null;
 };
 type TeamRecord = typeof teams.$inferSelect;
+type AgentRecord = typeof agents.$inferSelect;
+type SessionRecord = typeof sessions.$inferSelect;
+
+const activeAgentStatuses = new Set<Agent["status"]>(["provisioning", "idle", "busy", "paused"]);
 
 function readSessionTranscript(metadata: Record<string, unknown> | null | undefined) {
   const transcript = metadata?.transcript;
@@ -857,14 +861,13 @@ export class ControlPlaneService {
       status: task.status as Task["status"]
     }));
 
+    const mappedSessions = runSessions.map(({ session }): Session => this.mapSession(session));
+
     return {
       ...this.mapRun(run),
       tasks: mappedTasks,
-      agents: runAgents.map((agent): Agent => ({
-        ...agent,
-        status: agent.status as Agent["status"]
-      })),
-      sessions: runSessions.map(({ session }): Session => this.mapSession(session)),
+      agents: this.mapAgents(runAgents, runSessions.map(({ session }) => session)),
+      sessions: mappedSessions,
       taskDag: this.buildTaskDag(mappedTasks)
     };
   }
@@ -1367,7 +1370,10 @@ export class ControlPlaneService {
       return [createdAgent];
     });
 
-    return expectPersistedRecord(agent, "agent");
+    const persistedAgent = expectPersistedRecord(agent, "agent");
+    const persistedSessions = await this.db.select().from(sessions).where(eq(sessions.agentId, persistedAgent.id)).orderBy(asc(sessions.createdAt));
+
+    return this.mapAgent(persistedAgent, persistedSessions);
   }
 
   async createAgentSession(agentId: string, input: AgentSessionCreate, access?: AccessBoundary) {
@@ -1404,13 +1410,18 @@ export class ControlPlaneService {
   }
 
   async listAgents(runId?: string, access?: AccessBoundary) {
-    const boundary = requireAccessBoundary(access);
-    if (runId) {
+  const boundary = requireAccessBoundary(access);
+  if (runId) {
       await this.assertRunExists(runId, boundary);
-      return this.db.select().from(agents).where(eq(agents.runId, runId)).orderBy(asc(agents.createdAt));
+      const agentRows = await this.db.select().from(agents).where(eq(agents.runId, runId)).orderBy(asc(agents.createdAt));
+      const agentSessions = agentRows.length === 0
+        ? []
+        : await this.db.select().from(sessions).where(inArray(sessions.agentId, agentRows.map((agent) => agent.id))).orderBy(asc(sessions.createdAt));
+
+      return this.mapAgents(agentRows, agentSessions);
     }
 
-    return this.db.select({
+    const agentRows = await this.db.select({
       id: agents.id,
       runId: agents.runId,
       name: agents.name,
@@ -1427,6 +1438,12 @@ export class ControlPlaneService {
       .innerJoin(runs, eq(agents.runId, runs.id))
       .where(and(eq(runs.workspaceId, boundary.workspaceId), eq(runs.teamId, boundary.teamId)))
       .orderBy(asc(agents.createdAt));
+
+    const agentSessions = agentRows.length === 0
+      ? []
+      : await this.db.select().from(sessions).where(inArray(sessions.agentId, agentRows.map((agent) => agent.id))).orderBy(asc(sessions.createdAt));
+
+    return this.mapAgents(agentRows, agentSessions);
   }
 
   async createMessage(input: MessageCreate, access?: AccessBoundary) {
@@ -3362,6 +3379,97 @@ export class ControlPlaneService {
     return {
       ...session,
       state: session.state as Session["state"]
+    };
+  }
+
+  private mapAgents(agentRows: AgentRecord[], sessionRows: SessionRecord[]) {
+    const sessionsByAgentId = new Map<string, SessionRecord[]>();
+
+    for (const session of sessionRows) {
+      const existing = sessionsByAgentId.get(session.agentId) ?? [];
+      existing.push(session);
+      sessionsByAgentId.set(session.agentId, existing);
+    }
+
+    return agentRows.map((agent) => this.mapAgent(agent, sessionsByAgentId.get(agent.id) ?? []));
+  }
+
+  private mapAgent(agent: AgentRecord, agentSessions: SessionRecord[]): Agent {
+    return {
+      ...agent,
+      status: agent.status as Agent["status"],
+      observability: this.buildAgentObservability(agent, agentSessions)
+    };
+  }
+
+  private buildAgentObservability(agent: AgentRecord, agentSessions: SessionRecord[]): Agent["observability"] {
+    const orderedSessions = [...agentSessions].sort((left, right) => left.createdAt.getTime() - right.createdAt.getTime());
+    const currentSession = [...orderedSessions].reverse().find((session) => session.state === "active" || session.state === "pending") ?? null;
+
+    let visibleTranscriptSession: SessionRecord | null = null;
+    let visibleTranscriptUpdatedAt: Date | null = null;
+    let latestReachableSession: SessionRecord | null = null;
+
+    for (let index = orderedSessions.length - 1; index >= 0; index -= 1) {
+      const candidate = orderedSessions[index]!;
+
+      if (!latestReachableSession && candidate.state !== "archived") {
+        latestReachableSession = candidate;
+      }
+
+      const transcript = readSessionTranscript(candidate.metadata);
+
+      if (transcript.length === 0) {
+        continue;
+      }
+
+      visibleTranscriptSession = candidate;
+      visibleTranscriptUpdatedAt = transcript[transcript.length - 1]?.createdAt ?? null;
+      break;
+    }
+
+    const fallbackVisibleSession = visibleTranscriptSession ?? (
+      currentSession ? null : latestReachableSession
+    );
+
+    if (currentSession) {
+      return {
+        mode: "session",
+        currentSessionId: currentSession.id,
+        currentSessionState: currentSession.state as Agent["observability"]["currentSessionState"],
+        visibleTranscriptSessionId: visibleTranscriptSession?.id ?? null,
+        visibleTranscriptSessionState: (visibleTranscriptSession?.state ?? null) as Agent["observability"]["visibleTranscriptSessionState"],
+        visibleTranscriptUpdatedAt,
+        lineageSource: visibleTranscriptSession && visibleTranscriptSession.id !== currentSession.id
+          ? "session_rollover"
+          : "active_session"
+      };
+    }
+
+    if (fallbackVisibleSession) {
+      return {
+        mode: "transcript_visibility",
+        currentSessionId: null,
+        currentSessionState: null,
+        visibleTranscriptSessionId: fallbackVisibleSession.id,
+        visibleTranscriptSessionState: fallbackVisibleSession.state as Agent["observability"]["visibleTranscriptSessionState"],
+        visibleTranscriptUpdatedAt,
+        lineageSource: activeAgentStatuses.has(agent.status as Agent["status"])
+          ? "session_rollover"
+          : agent.currentTaskId
+            ? "task_state_transition"
+            : "terminal_session"
+      };
+    }
+
+    return {
+      mode: "unavailable",
+      currentSessionId: null,
+      currentSessionState: null,
+      visibleTranscriptSessionId: null,
+      visibleTranscriptSessionState: null,
+      visibleTranscriptUpdatedAt: null,
+      lineageSource: "not_started"
     };
   }
 

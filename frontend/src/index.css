@@ -872,6 +872,10 @@ code {
   color: var(--muted);
 }
 
+.agent-transcript-copy {
+  margin-top: 10px;
+}
+
 .run-entry:not(.is-selected) .run-card p {
   display: -webkit-box;
   -webkit-line-clamp: 2;
@@ -1932,6 +1936,25 @@ code {
   background: var(--theme-accent-fill);
   transform: translateY(-1px);
   outline: none;
+}
+
+.inline-link-button {
+  width: fit-content;
+  margin-top: 10px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--theme-accent-strong);
+  font: inherit;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 0.12em;
+}
+
+.inline-link-button:disabled {
+  color: var(--muted);
+  cursor: default;
+  text-decoration: none;
 }
 
 .contract-card pre {
