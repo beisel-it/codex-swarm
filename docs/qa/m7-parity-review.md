@@ -1044,3 +1044,25 @@ Evidence:
 Residual risks:
 
 - The repo still does not claim or prove sustained production load testing; future stronger performance claims would require new executable evidence rather than additional wording changes.
+
+## Task `81abafe3`
+
+Follow-up objective:
+
+- Narrow the restart-survival roadmap criterion to the delivered persisted-state and recovery-planning behavior when no executable orchestrator-restart proof exists.
+
+Outcome:
+
+- completed by documentation narrowing
+
+Evidence:
+
+- `ROADMAP.md` now narrows the Phase 2 deliverable from `Restart-safe active runs` to `Restart-aware active runs with persisted recovery state`.
+- `ROADMAP.md` now narrows the matching Phase 2 exit criterion from `A run survives orchestrator restart without losing task or approval state` to `A run retains task and approval state for restart-aware recovery planning`.
+- The narrowed wording matches the live implementation in `apps/api/src/services/control-plane-service.ts`, where cleanup-job execution builds a session recovery plan from persisted task/session state and applies resume, retry, stale, or archive transitions.
+- The narrowed wording also matches the existing worker-runtime recovery model in `apps/worker/src/runtime.ts`, where `buildSessionRecoveryPlan(...)` derives deterministic recovery actions from persisted `threadId`, session state, heartbeat age, and worktree presence.
+- Existing cleanup and worker-runtime tests already cover this persisted recovery-plan behavior in `apps/api/test/control-plane-service.cleanup.test.ts` and `apps/worker/test/runtime.test.ts`.
+
+Residual risks:
+
+- The repo still does not contain an executable control-plane restart acceptance path that proves tasks and approvals remain intact across an actual restart boundary; a future stronger claim would need real restart evidence.

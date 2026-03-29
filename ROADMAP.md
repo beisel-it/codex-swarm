@@ -188,11 +188,11 @@ Turn the orchestration core into a usable internal product.
 - Browser UI for active runs
 - Human approve/reject flow
 - Validation history
-- Restart-safe active runs
+- Restart-aware active runs with persisted recovery state
 
 ### Exit criteria
 - A reviewer can inspect a completed task and approve/reject it in the browser.
-- A run survives orchestrator restart without losing task or approval state.
+- A run retains task and approval state for restart-aware recovery planning.
 - Board latency remains near real time for control-plane events.
 
 ### Risks retired
