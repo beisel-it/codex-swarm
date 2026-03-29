@@ -825,3 +825,23 @@ Residual risks:
 Backlog follow-up:
 
 - Add actual budget-aware run control behavior with acceptance evidence, or intentionally narrow the deliverable to persisted budget metadata plus reporting.
+
+## Task `84255222`
+
+Roadmap entry:
+
+- Phase 4 exit criterion: `A run can place workers on at least 2 nodes and preserve task continuity.`
+
+Verdict:
+
+- parity
+
+Evidence:
+
+- The distributed regression `preserves distributed run visibility across two-node retry recovery` creates a run with two worker sessions initially placed on node-a and node-b in `apps/api/test/app.test.ts`.
+- That same test proves continuity after node loss: a claimed dispatch on node-a is reconciled, retried, and reclaimed on node-b while the run detail continues to expose the surviving and reassigned session state in `apps/api/test/app.test.ts`.
+- The control-plane dispatch and reconciliation logic updates session placement, assignment retry state, and agent status centrally in `apps/api/src/services/control-plane-service.ts`.
+
+Residual risks:
+
+- The verified flow covers the in-repo two-node continuity path; it does not constitute broader fleet-scale or chaos-style continuity testing beyond the roadmap’s stated acceptance bar.
