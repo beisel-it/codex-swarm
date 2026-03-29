@@ -1,4 +1,5 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { execFileSync } from "node:child_process";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -15,6 +16,7 @@ import { buildApp } from "../src/app.js";
 import { getConfig } from "../src/config.js";
 import type { LeaderPlanningLoopRequest } from "../src/lib/leader-planning-loop.js";
 import { runLeaderPlanningLoop } from "../src/lib/leader-planning-loop.js";
+import { runManagedWorkerDispatch } from "../src/lib/worker-dispatch-orchestration.js";
 import { HttpError } from "../src/lib/http-error.js";
 
 const ids = {
@@ -4308,5 +4310,218 @@ describe("buildApp", () => {
     });
 
     await app.close();
+  });
+
+  it("runs a managed worker dispatch and feeds failures back into retry orchestration", async () => {
+    const verticalSlice = new FakeVerticalSliceControlPlane();
+    const app = await buildApp({
+      config: getConfig({
+        NODE_ENV: "test",
+        PORT: 3000,
+        HOST: "127.0.0.1",
+        DATABASE_URL: "postgres://unused/test",
+        DEV_AUTH_TOKEN: "test-token",
+        OPENAI_TRACING_DISABLED: true
+      }),
+      controlPlane: verticalSlice as unknown as ControlPlaneService
+    });
+
+    const headers = {
+      authorization: "Bearer test-token"
+    };
+    const repoRoot = await mkdtemp(join(tmpdir(), "codex-swarm-managed-dispatch-repo-"));
+
+    try {
+      await writeFile(join(repoRoot, "README.md"), "managed worker dispatch\n", "utf8");
+      execFileSync("git", ["init", "--initial-branch=main"], { cwd: repoRoot, stdio: "pipe" });
+      execFileSync("git", ["config", "user.name", "Codex Swarm"], { cwd: repoRoot, stdio: "pipe" });
+      execFileSync("git", ["config", "user.email", "codex-swarm@example.com"], { cwd: repoRoot, stdio: "pipe" });
+      execFileSync("git", ["add", "README.md"], { cwd: repoRoot, stdio: "pipe" });
+      execFileSync("git", ["commit", "-m", "initial"], { cwd: repoRoot, stdio: "pipe" });
+      (verticalSlice as any).repositories[0].url = repoRoot;
+
+      const request: LeaderPlanningLoopRequest = async <T>(
+        method: string,
+        path: string,
+        payload?: Record<string, unknown>
+      ) => {
+        const response = await (app.inject as any)({
+          method,
+          url: path,
+          headers,
+          ...(payload ? { payload } : {})
+        }) as {
+          statusCode: number;
+          body: string;
+          json(): T;
+        };
+
+        if (response.statusCode >= 400) {
+          throw new Error(`${method} ${path} failed with ${response.statusCode}: ${response.body}`);
+        }
+
+        return response.json() as T;
+      };
+
+      const runResponse = await app.inject({
+        method: "POST",
+        url: "/api/v1/runs",
+        headers,
+        payload: {
+          repositoryId: ids.repository,
+          goal: "Exercise managed worker dispatch orchestration",
+          concurrencyCap: 1,
+          metadata: {}
+        }
+      });
+
+      expect(runResponse.statusCode).toBe(201);
+
+      const agentResponse = await app.inject({
+        method: "POST",
+        url: "/api/v1/agents",
+        headers,
+        payload: {
+          runId: ids.run,
+          name: "worker-managed",
+          role: "backend-developer",
+          status: "idle",
+          session: {
+            threadId: "thread-worker-managed",
+            cwd: process.cwd(),
+            sandbox: "workspace-write",
+            approvalPolicy: "on-request",
+            includePlanTool: false,
+            metadata: {
+              source: "managed-worker-dispatch-test"
+            }
+          }
+        }
+      });
+
+      expect(agentResponse.statusCode).toBe(201);
+      const agentId = ids.agent;
+      const sessionId = ids.session;
+
+      const taskResponse = await app.inject({
+        method: "POST",
+        url: "/api/v1/tasks",
+        headers,
+        payload: {
+          runId: ids.run,
+          title: "Managed worker dispatch task",
+          description: "Execute the worker orchestration helper",
+          role: "backend-developer",
+          priority: 1,
+          dependencyIds: [],
+          acceptanceCriteria: ["worker dispatch completes after a retry"]
+        }
+      });
+
+      expect(taskResponse.statusCode).toBe(201);
+      const taskId = taskResponse.json().id as string;
+
+      const worktreeRoot = await mkdtemp(join(tmpdir(), "codex-swarm-managed-dispatch-"));
+
+      const dispatchResponse = await app.inject({
+        method: "POST",
+        url: "/api/v1/worker-dispatch-assignments",
+        headers,
+        payload: {
+          runId: ids.run,
+          taskId,
+          agentId,
+          sessionId,
+          repositoryId: ids.repository,
+          repositoryName: "codex-swarm",
+          stickyNodeId: ids.workerNode,
+          requiredCapabilities: ["remote"],
+          worktreePath: join(worktreeRoot, "worker-managed"),
+          prompt: "Continue the managed worker session",
+          profile: "default",
+          sandbox: "workspace-write",
+          approvalPolicy: "on-request"
+        }
+      });
+
+      expect(dispatchResponse.statusCode).toBe(201);
+
+      const failedAttempt = await runManagedWorkerDispatch({
+        request,
+        nodeId: ids.workerNode,
+        workspaceRoot: process.cwd(),
+        supervisorCommand: [
+          process.execPath,
+          "--input-type=module",
+          "-e",
+          "setInterval(() => {}, 1000);"
+        ],
+        executeTool: async () => {
+          throw new Error("worker_runtime_crash");
+        }
+      });
+
+      expect(failedAttempt).toMatchObject({
+        status: "retrying",
+        error: "worker_runtime_crash",
+        supervisorStatus: "stopped"
+      });
+
+      const afterFailureRun = await app.inject({
+        method: "GET",
+        url: `/api/v1/runs/${ids.run}`,
+        headers
+      });
+
+      expect(afterFailureRun.statusCode).toBe(200);
+      expect(afterFailureRun.json()).toMatchObject({
+        sessions: [
+          {
+            id: sessionId,
+            state: "pending",
+            staleReason: "worker_runtime_crash"
+          }
+        ]
+      });
+
+      const successfulAttempt = await runManagedWorkerDispatch({
+        request,
+        nodeId: ids.workerNode,
+        workspaceRoot: process.cwd(),
+        supervisorCommand: [
+          process.execPath,
+          "--input-type=module",
+          "-e",
+          "setInterval(() => {}, 1000);"
+        ],
+        executeTool: async () => ({
+          threadId: "thread-worker-managed",
+          output: "worker completed"
+        })
+      });
+
+      expect(successfulAttempt).toMatchObject({
+        status: "completed",
+        output: "worker completed",
+        supervisorStatus: "stopped"
+      });
+
+      const completedAssignments = await app.inject({
+        method: "GET",
+        url: `/api/v1/worker-dispatch-assignments?runId=${ids.run}&state=completed`,
+        headers
+      });
+
+      expect(completedAssignments.statusCode).toBe(200);
+      expect(completedAssignments.json()).toHaveLength(1);
+      expect(completedAssignments.json()[0]).toMatchObject({
+        id: dispatchResponse.json().id,
+        state: "completed",
+        attempt: 1
+      });
+    } finally {
+      await rm(repoRoot, { recursive: true, force: true });
+      await app.close();
+    }
   });
 });
