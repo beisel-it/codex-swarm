@@ -12,6 +12,7 @@ export const repositories = pgTable("repositories", {
   id: text("id").primaryKey(),
   workspaceId: text("workspace_id").notNull(),
   teamId: text("team_id").notNull(),
+  projectId: text("project_id"),
   name: text("name").notNull(),
   url: text("url").notNull(),
   provider: text("provider").notNull().default("other"),
@@ -38,9 +39,20 @@ export const repositories = pgTable("repositories", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
 });
 
+export const projects = pgTable("projects", {
+  id: text("id").primaryKey(),
+  workspaceId: text("workspace_id").notNull(),
+  teamId: text("team_id").notNull(),
+  name: text("name").notNull(),
+  description: text("description"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
+});
+
 export const runs = pgTable("runs", {
   id: text("id").primaryKey(),
   repositoryId: text("repository_id").notNull().references(() => repositories.id),
+  projectId: text("project_id"),
   workspaceId: text("workspace_id").notNull(),
   teamId: text("team_id").notNull(),
   goal: text("goal").notNull(),

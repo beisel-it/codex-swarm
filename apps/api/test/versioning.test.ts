@@ -40,17 +40,17 @@ class FakePool {
 describe("validateControlPlaneMetadata", () => {
   it("accepts matching schema and config versions", () => {
     const metadata = validateControlPlaneMetadata({
-      schemaVersion: "2026-03-29",
+      schemaVersion: "2026-03-29-project-job-scope",
       configVersion: "1",
       upgradedAt: new Date("2026-03-29T00:00:00.000Z"),
       notes: "upgrade complete"
-    }, "2026-03-29", "1");
+    }, "2026-03-29-project-job-scope", "1");
 
-    expect(metadata.schemaVersion).toBe("2026-03-29");
+    expect(metadata.schemaVersion).toBe("2026-03-29-project-job-scope");
   });
 
   it("rejects missing metadata with an upgrade hint", () => {
-    expect(() => validateControlPlaneMetadata(null, "2026-03-29", "1"))
+    expect(() => validateControlPlaneMetadata(null, "2026-03-29-project-job-scope", "1"))
       .toThrow(/db:migrate/);
   });
 
@@ -60,14 +60,14 @@ describe("validateControlPlaneMetadata", () => {
       configVersion: "1",
       upgradedAt: new Date("2026-03-29T00:00:00.000Z"),
       notes: null
-    }, "2026-03-29", "1")).toThrow(/schema version mismatch/);
+    }, "2026-03-29-project-job-scope", "1")).toThrow(/schema version mismatch/);
 
     expect(() => validateControlPlaneMetadata({
-      schemaVersion: "2026-03-29",
+      schemaVersion: "2026-03-29-project-job-scope",
       configVersion: "0",
       upgradedAt: new Date("2026-03-29T00:00:00.000Z"),
       notes: null
-    }, "2026-03-29", "1")).toThrow(/config version mismatch/);
+    }, "2026-03-29-project-job-scope", "1")).toThrow(/config version mismatch/);
   });
 });
 
@@ -75,12 +75,12 @@ describe("ensureControlPlaneCompatibility", () => {
   it("reads metadata from the database compatibility row", async () => {
     const metadata = await ensureControlPlaneCompatibility(
       new FakePool(true, {
-        schemaVersion: "2026-03-29",
+        schemaVersion: "2026-03-29-project-job-scope",
         configVersion: "1",
         upgradedAt: new Date("2026-03-29T01:00:00.000Z"),
         notes: "upgrade complete"
       }) as never,
-      "2026-03-29",
+      "2026-03-29-project-job-scope",
       "1"
     );
 
@@ -90,7 +90,7 @@ describe("ensureControlPlaneCompatibility", () => {
   it("fails when the metadata table does not exist yet", async () => {
     await expect(ensureControlPlaneCompatibility(
       new FakePool(false, null) as never,
-      "2026-03-29",
+      "2026-03-29-project-job-scope",
       "1"
     )).rejects.toThrow(/db:migrate/);
   });

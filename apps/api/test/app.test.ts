@@ -20,6 +20,7 @@ import { runManagedWorkerDispatch } from "../src/lib/worker-dispatch-orchestrati
 import { HttpError } from "../src/lib/http-error.js";
 
 const ids = {
+  project: "10101010-1010-4010-8010-101010101010",
   repository: "11111111-1111-4111-8111-111111111111",
   run: "22222222-2222-4222-8222-222222222222",
   taskA: "33333333-3333-4333-8333-333333333333",
@@ -38,10 +39,28 @@ const defaultBoundary = {
   teamName: "Codex Swarm"
 } as const;
 
+const defaultRunContext = {
+  kind: "ad_hoc",
+  projectId: null,
+  projectSlug: null,
+  projectName: null,
+  projectDescription: null,
+  jobId: null,
+  jobName: null,
+  externalInput: null,
+  values: {}
+} as const;
+
 const controlPlane = {
+  listProjects: vi.fn(),
+  getProject: vi.fn(),
+  createProject: vi.fn(),
+  updateProject: vi.fn(),
+  deleteProject: vi.fn(),
   listRepositories: vi.fn(),
   createRepository: vi.fn(),
   listRuns: vi.fn(),
+  listRunsByJobScope: vi.fn(),
   getRun: vi.fn(),
   createRun: vi.fn(),
   updateRun: vi.fn(),
@@ -469,10 +488,30 @@ class FakeVerticalSliceControlPlane {
       pullRequestApprovalId: null,
       handoffStatus: "pending",
       completedAt: null,
-      metadata: input.metadata,
       context: input.context ?? {
+        kind: "ad_hoc",
+        projectId: null,
+        projectSlug: null,
+        projectName: null,
+        projectDescription: null,
+        jobId: null,
+        jobName: null,
         externalInput: null,
         values: {}
+      },
+      metadata: {
+        ...(input.metadata ?? {}),
+        runContext: input.context ?? {
+          kind: "ad_hoc",
+          projectId: null,
+          projectSlug: null,
+          projectName: null,
+          projectDescription: null,
+          jobId: null,
+          jobName: null,
+          externalInput: null,
+          values: {}
+        }
       },
       createdBy,
       createdAt: new Date("2026-03-28T00:00:00.000Z"),
@@ -501,8 +540,13 @@ class FakeVerticalSliceControlPlane {
     run.budgetCostUsd = input.budgetCostUsd === undefined ? run.budgetCostUsd : input.budgetCostUsd;
     run.concurrencyCap = input.concurrencyCap ?? run.concurrencyCap;
     run.policyProfile = input.policyProfile === undefined ? run.policyProfile : input.policyProfile;
-    run.metadata = input.metadata === undefined ? run.metadata : input.metadata;
     run.context = input.context === undefined ? run.context : input.context;
+    run.metadata = input.metadata === undefined
+      ? run.metadata
+      : {
+          ...input.metadata,
+          runContext: input.context ?? run.context
+        };
     run.updatedAt = new Date();
     return run;
   }
@@ -1743,6 +1787,81 @@ describe("buildApp", () => {
     await app.close();
   });
 
+  it("returns grouped project and ad-hoc runs when requested", async () => {
+    controlPlane.listRunsByJobScope.mockResolvedValueOnce({
+      projectJobs: [
+        {
+          id: "run-project-1",
+          goal: "Ship projects",
+          jobScope: {
+            kind: "project",
+            projectId: "550e8400-e29b-41d4-a716-446655440010",
+            repositoryProjectId: "550e8400-e29b-41d4-a716-446655440010",
+            reason: "run_assigned"
+          }
+        }
+      ],
+      adHocJobs: [
+        {
+          id: "run-ad-hoc-1",
+          goal: "Legacy job",
+          jobScope: {
+            kind: "ad_hoc",
+            projectId: null,
+            repositoryProjectId: null,
+            reason: "repository_unassigned"
+          }
+        }
+      ]
+    });
+
+    const app = await buildApp({
+      controlPlane: controlPlane as unknown as ControlPlaneService
+    });
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/api/v1/runs?view=job_scope",
+      headers: {
+        authorization: "Bearer codex-swarm-dev-token"
+      }
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({
+      projectJobs: [
+        {
+          id: "run-project-1",
+          goal: "Ship projects",
+          jobScope: {
+            kind: "project",
+            projectId: "550e8400-e29b-41d4-a716-446655440010",
+            repositoryProjectId: "550e8400-e29b-41d4-a716-446655440010",
+            reason: "run_assigned"
+          }
+        }
+      ],
+      adHocJobs: [
+        {
+          id: "run-ad-hoc-1",
+          goal: "Legacy job",
+          jobScope: {
+            kind: "ad_hoc",
+            projectId: null,
+            repositoryProjectId: null,
+            reason: "repository_unassigned"
+          }
+        }
+      ]
+    });
+    expect(controlPlane.listRunsByJobScope).toHaveBeenCalledWith(undefined, expect.objectContaining({
+      workspaceId: defaultBoundary.workspaceId,
+      teamId: defaultBoundary.teamId
+    }));
+
+    await app.close();
+  });
+
   it("exposes the authenticated identity entrypoint", async () => {
     const app = await buildApp({
       controlPlane: controlPlane as unknown as ControlPlaneService
@@ -1816,6 +1935,7 @@ describe("buildApp", () => {
 
     controlPlane.listRepositories.mockRejectedValueOnce(bootstrapError);
     controlPlane.listRuns.mockRejectedValueOnce(bootstrapError);
+    controlPlane.listRunsByJobScope.mockRejectedValueOnce(bootstrapError);
 
     const app = await buildApp({
       config: getConfig({
@@ -1844,6 +1964,11 @@ describe("buildApp", () => {
       url: "/api/v1/runs",
       headers
     });
+    const groupedRunResponse = await app.inject({
+      method: "GET",
+      url: "/api/v1/runs?view=job_scope",
+      headers
+    });
 
     expect(repositoryResponse.statusCode).toBe(200);
     expect(repositoryResponse.headers["x-codex-swarm-degraded"]).toBe("database-unavailable");
@@ -1851,6 +1976,11 @@ describe("buildApp", () => {
 
     expect(runResponse.statusCode).toBe(200);
     expect(runResponse.json()).toEqual([]);
+    expect(groupedRunResponse.statusCode).toBe(200);
+    expect(groupedRunResponse.json()).toEqual({
+      projectJobs: [],
+      adHocJobs: []
+    });
 
     await app.close();
   });
@@ -1909,6 +2039,133 @@ describe("buildApp", () => {
       provider: "github",
       trustLevel: "trusted"
     }, expect.objectContaining({
+      workspaceId: defaultBoundary.workspaceId,
+      teamId: defaultBoundary.teamId
+    }));
+
+    await app.close();
+  });
+
+  it("supports project CRUD routes", async () => {
+    controlPlane.listProjects.mockResolvedValueOnce([
+      {
+        id: ids.project,
+        workspaceId: defaultBoundary.workspaceId,
+        teamId: defaultBoundary.teamId,
+        name: "Platform Refresh",
+        description: "Main delivery stream",
+        repositoryCount: 1,
+        runCount: 2,
+        latestRunAt: "2026-03-28T12:00:00.000Z",
+        createdAt: "2026-03-28T10:00:00.000Z",
+        updatedAt: "2026-03-28T10:00:00.000Z"
+      }
+    ]);
+    controlPlane.createProject.mockResolvedValueOnce({
+      id: ids.project,
+      workspaceId: defaultBoundary.workspaceId,
+      teamId: defaultBoundary.teamId,
+      name: "Platform Refresh",
+      description: "Main delivery stream",
+      createdAt: "2026-03-28T10:00:00.000Z",
+      updatedAt: "2026-03-28T10:00:00.000Z"
+    });
+    controlPlane.getProject.mockResolvedValueOnce({
+      id: ids.project,
+      workspaceId: defaultBoundary.workspaceId,
+      teamId: defaultBoundary.teamId,
+      name: "Platform Refresh",
+      description: "Main delivery stream",
+      repositoryCount: 1,
+      runCount: 1,
+      latestRunAt: "2026-03-28T12:00:00.000Z",
+      repositoryAssignments: [],
+      runAssignments: [],
+      createdAt: "2026-03-28T10:00:00.000Z",
+      updatedAt: "2026-03-28T10:00:00.000Z"
+    });
+    controlPlane.updateProject.mockResolvedValueOnce({
+      id: ids.project,
+      workspaceId: defaultBoundary.workspaceId,
+      teamId: defaultBoundary.teamId,
+      name: "Platform Refresh",
+      description: "Updated scope",
+      createdAt: "2026-03-28T10:00:00.000Z",
+      updatedAt: "2026-03-28T11:00:00.000Z"
+    });
+    controlPlane.deleteProject.mockResolvedValueOnce(undefined);
+
+    const app = await buildApp({
+      controlPlane: controlPlane as unknown as ControlPlaneService
+    });
+
+    const headers = {
+      authorization: "Bearer codex-swarm-dev-token"
+    };
+
+    const listResponse = await app.inject({
+      method: "GET",
+      url: "/api/v1/projects",
+      headers
+    });
+    expect(listResponse.statusCode).toBe(200);
+    expect(controlPlane.listProjects).toHaveBeenCalledWith(expect.objectContaining({
+      workspaceId: defaultBoundary.workspaceId,
+      teamId: defaultBoundary.teamId
+    }));
+
+    const createResponse = await app.inject({
+      method: "POST",
+      url: "/api/v1/projects",
+      headers,
+      payload: {
+        name: "Platform Refresh",
+        description: "Main delivery stream"
+      }
+    });
+    expect(createResponse.statusCode).toBe(201);
+    expect(controlPlane.createProject).toHaveBeenCalledWith({
+      name: "Platform Refresh",
+      description: "Main delivery stream"
+    }, expect.objectContaining({
+      workspaceId: defaultBoundary.workspaceId,
+      teamId: defaultBoundary.teamId
+    }));
+
+    const detailResponse = await app.inject({
+      method: "GET",
+      url: `/api/v1/projects/${ids.project}`,
+      headers
+    });
+    expect(detailResponse.statusCode).toBe(200);
+    expect(controlPlane.getProject).toHaveBeenCalledWith(ids.project, expect.objectContaining({
+      workspaceId: defaultBoundary.workspaceId,
+      teamId: defaultBoundary.teamId
+    }));
+
+    const updateResponse = await app.inject({
+      method: "PATCH",
+      url: `/api/v1/projects/${ids.project}`,
+      headers,
+      payload: {
+        description: "Updated scope"
+      }
+    });
+    expect(updateResponse.statusCode).toBe(200);
+    expect(controlPlane.updateProject).toHaveBeenCalledWith(ids.project, {
+      description: "Updated scope"
+    }, expect.objectContaining({
+      workspaceId: defaultBoundary.workspaceId,
+      teamId: defaultBoundary.teamId
+    }));
+
+    const deleteResponse = await app.inject({
+      method: "DELETE",
+      url: `/api/v1/projects/${ids.project}`,
+      headers
+    });
+    expect(deleteResponse.statusCode).toBe(204);
+    expect(controlPlane.deleteProject).toHaveBeenCalledWith(ids.project, expect.objectContaining({
       workspaceId: defaultBoundary.workspaceId,
       teamId: defaultBoundary.teamId
     }));

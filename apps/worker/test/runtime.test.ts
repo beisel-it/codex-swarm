@@ -25,7 +25,8 @@ import {
   createStreamableHttpToolExecutor,
   materializeRepositoryWorkspace,
   materializePlanArtifact,
-  createWorktreePath
+  createWorktreePath,
+  resolveWorkspaceProvisioningMode
 } from "../src/runtime.js";
 import { claimAndProvisionDispatchWorkspace } from "../src/control-plane.js";
 import { SessionRegistry } from "../src/session-registry.js";
@@ -59,14 +60,32 @@ function createRuntime(workspaceRoot: string): WorkerNodeRuntime {
 }
 
 describe("worker runtime helpers", () => {
-  it("creates deterministic sanitized worktree paths", () => {
+  it("creates deterministic shared workspace paths by default", () => {
     expect(createWorktreePath({
       rootDir: ".swarm/worktrees",
       repositorySlug: "Codex Swarm",
       runId: "Run 001",
       agentId: "Backend Dev",
       taskId: "Task / A"
+    })).toBe(".swarm/worktrees/codex-swarm/run-001/shared");
+  });
+
+  it("creates deterministic isolated worktree paths when explicitly enabled", () => {
+    expect(createWorktreePath({
+      rootDir: ".swarm/worktrees",
+      repositorySlug: "Codex Swarm",
+      runId: "Run 001",
+      agentId: "Backend Dev",
+      taskId: "Task / A",
+      mode: "isolated"
     })).toBe(".swarm/worktrees/codex-swarm/run-001/backend-dev/task-a");
+  });
+
+  it("defaults workspace provisioning mode to shared and gates isolation behind an env flag", () => {
+    expect(resolveWorkspaceProvisioningMode({} as NodeJS.ProcessEnv)).toBe("shared");
+    expect(resolveWorkspaceProvisioningMode({
+      CODEX_SWARM_ENABLE_WORKSPACE_ISOLATION: "true"
+    } as NodeJS.ProcessEnv)).toBe("isolated");
   });
 
   it("builds the codex mcp-server command", () => {
@@ -526,6 +545,66 @@ describe("worker runtime helpers", () => {
           });
         });
       }
+    } finally {
+      await rm(repoRoot, { recursive: true, force: true });
+      await rm(workspaceRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("reuses an existing shared workspace when reuseExisting is enabled", async () => {
+    const repoRoot = await mkdtemp(join(tmpdir(), "codex-swarm-shared-source-"));
+    const workspaceRoot = await mkdtemp(join(tmpdir(), "codex-swarm-shared-workspaces-"));
+    const sharedWorkspacePath = join(workspaceRoot, "shared");
+
+    try {
+      git(["init", "--initial-branch=main"], repoRoot);
+      git(["config", "user.name", "Codex Swarm"], repoRoot);
+      git(["config", "user.email", "codex-swarm@example.com"], repoRoot);
+      await writeFile(join(repoRoot, "README.md"), "hello from source\n", "utf8");
+      git(["add", "README.md"], repoRoot);
+      git(["commit", "-m", "initial"], repoRoot);
+
+      const repository: Repository = {
+        id: "55555555-5555-4555-8555-555555555555",
+        workspaceId: "default-workspace",
+        teamId: "default-team",
+        name: "codex-swarm",
+        url: repoRoot,
+        provider: "github",
+        defaultBranch: "main",
+        localPath: null,
+        trustLevel: "trusted",
+        approvalProfile: "standard",
+        providerSync: {
+          connectivityStatus: "validated",
+          validatedAt: null,
+          defaultBranch: "main",
+          branches: ["main"],
+          providerRepoUrl: repoRoot,
+          lastError: null
+        },
+        createdAt: new Date("2026-03-29T00:00:00.000Z"),
+        updatedAt: new Date("2026-03-29T00:00:00.000Z")
+      };
+
+      const first = await materializeRepositoryWorkspace({
+        repository,
+        destinationPath: sharedWorkspacePath,
+        branch: "main",
+        reuseExisting: true
+      });
+
+      await writeFile(join(first.path, "README.md"), "shared workspace change\n", "utf8");
+
+      const second = await materializeRepositoryWorkspace({
+        repository,
+        destinationPath: sharedWorkspacePath,
+        branch: "main",
+        reuseExisting: true
+      });
+
+      expect(second.path).toBe(first.path);
+      expect(await readFile(join(second.path, "README.md"), "utf8")).toBe("shared workspace change\n");
     } finally {
       await rm(repoRoot, { recursive: true, force: true });
       await rm(workspaceRoot, { recursive: true, force: true });

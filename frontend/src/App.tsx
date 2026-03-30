@@ -15,9 +15,11 @@ import type {
 } from '../../packages/contracts/src/index.ts'
 import { buildAgentTranscriptTargets, chooseTranscriptSessionId } from './agent-observability'
 import { RepeatableRunsPanel } from './repeatable-runs-panel'
+import { buildSeedProjects, deriveAdHocWorkspace, deriveProjectSummaries, type ProjectRecord } from './projects'
+import { RepeatableRunsPanel } from './repeatable-runs-panel'
 import { useTheme } from './theme'
 
-type ViewMode = 'board' | 'detail' | 'review' | 'admin'
+type ViewMode = 'projects' | 'board' | 'detail' | 'review' | 'admin'
 type RepositoryProvider = 'github' | 'gitlab' | 'local' | 'other'
 type RepositoryTrustLevel = 'trusted' | 'sandboxed' | 'restricted'
 type PullRequestStatus = 'draft' | 'open' | 'merged' | 'closed'
@@ -84,6 +86,7 @@ type TeamTemplate = {
 }
 
 type PendingDeleteAction =
+  | { kind: 'project'; id: string; label: string }
   | { kind: 'repository'; id: string; label: string }
   | { kind: 'run'; id: string; label: string }
 
@@ -2061,6 +2064,7 @@ const capturePresets: Record<string, CapturePreset> = {
 }
 
 const SIDEBAR_WIDTH_STORAGE_KEY = 'codex-swarm.sidebar-width'
+const PROJECTS_STORAGE_KEY = 'codex-swarm.projects'
 const SIDEBAR_MIN_WIDTH = 280
 const SIDEBAR_MAX_WIDTH = 560
 
@@ -2069,9 +2073,9 @@ function buildApiUrl(path: string) {
 }
 
 function parseViewMode(value: string | null): ViewMode {
-  return value === 'board' || value === 'detail' || value === 'review' || value === 'admin'
+  return value === 'projects' || value === 'board' || value === 'detail' || value === 'review' || value === 'admin'
     ? value
-    : 'board'
+    : 'projects'
 }
 
 function parseBooleanParam(value: string | null) {
@@ -2096,7 +2100,7 @@ function readUrlState(): UrlState {
     return {
       demoMode: 'auto',
       captureId: null,
-      view: 'board',
+      view: 'projects',
       runId: '',
       approvalId: '',
       artifactId: '',
@@ -2124,6 +2128,24 @@ function readUrlState(): UrlState {
     sidebarWidth: parseSidebarWidth(params.get('sidebar')) ?? preset?.sidebarWidth ?? null,
     showDagSection: parseBooleanParam(params.get('dag')) ?? preset?.showDagSection ?? null,
     showAgentSection: parseBooleanParam(params.get('agents')) ?? preset?.showAgentSection ?? null,
+  }
+}
+
+function readStoredProjects(): ProjectRecord[] {
+  if (typeof window === 'undefined') {
+    return []
+  }
+
+  try {
+    const raw = window.localStorage.getItem(PROJECTS_STORAGE_KEY)
+    if (!raw) {
+      return []
+    }
+
+    const parsed = JSON.parse(raw) as ProjectRecord[]
+    return Array.isArray(parsed) ? parsed : []
+  } catch {
+    return []
   }
 }
 
@@ -2866,6 +2888,8 @@ function App() {
   const [teamTemplates, setTeamTemplates] = useState<TeamTemplate[]>(defaultTeamTemplates)
   const [selectedRunId, setSelectedRunId] = useState(initialUrlState.runId)
   const [selectedView, setSelectedView] = useState<ViewMode>(initialUrlState.view)
+  const [projects, setProjects] = useState<ProjectRecord[]>(() => readStoredProjects())
+  const [selectedProjectId, setSelectedProjectId] = useState('')
   const [selectedApprovalId, setSelectedApprovalId] = useState<string>(initialUrlState.approvalId)
   const [selectedReviewArtifactId, setSelectedReviewArtifactId] = useState<string>(initialUrlState.artifactId)
   const [selectedApprovalDetail, setSelectedApprovalDetail] = useState<Approval | null>(null)
@@ -2885,6 +2909,10 @@ function App() {
   const [adminSurfaceState, setAdminSurfaceState] = useState<LoadState>('idle')
   const [adminSurfaceError, setAdminSurfaceError] = useState('')
   const [actionPending, setActionPending] = useState(false)
+  const [projectDraftName, setProjectDraftName] = useState('')
+  const [projectDraftSummary, setProjectDraftSummary] = useState('')
+  const [projectDraftRepositoryIds, setProjectDraftRepositoryIds] = useState<string[]>([])
+  const [editingProjectId, setEditingProjectId] = useState<string | null>(null)
   const [repoDraftName, setRepoDraftName] = useState('codex-swarm')
   const [repoDraftUrl, setRepoDraftUrl] = useState('https://github.com/beisel-it/codex-swarm.git')
   const [repoDraftLocalPath, setRepoDraftLocalPath] = useState('/home/florian/codex-swarm')
@@ -2900,6 +2928,9 @@ function App() {
   const [taskDraftTitle, setTaskDraftTitle] = useState('')
   const [taskDraftDescription, setTaskDraftDescription] = useState('')
   const [taskDraftRole, setTaskDraftRole] = useState('developer')
+  const [showProjectControls, setShowProjectControls] = useState(true)
+  const [showProjectInventory, setShowProjectInventory] = useState(true)
+  const [showAdHocInventory, setShowAdHocInventory] = useState(true)
   const [showRepoControls, setShowRepoControls] = useState(false)
   const [showRunControls, setShowRunControls] = useState(false)
   const [showRepositoryInventory, setShowRepositoryInventory] = useState(true)
@@ -2941,6 +2972,10 @@ function App() {
   useEffect(() => {
     window.localStorage.setItem(SIDEBAR_WIDTH_STORAGE_KEY, String(sidebarWidth))
   }, [sidebarWidth])
+
+  useEffect(() => {
+    window.localStorage.setItem(PROJECTS_STORAGE_KEY, JSON.stringify(projects))
+  }, [projects])
 
   useEffect(() => {
     if (initialUrlState.theme && themes.some((theme) => theme.value === initialUrlState.theme)) {
@@ -3029,6 +3064,26 @@ function App() {
   }, [demoMode])
 
   useEffect(() => {
+    if (projects.length > 0 || data.repositories.length === 0 || data.source !== 'mock') {
+      return
+    }
+
+    const seededProjects = buildSeedProjects(
+      data.repositories.map((repository) => ({
+        id: repository.id,
+        name: repository.name,
+        provider: repository.provider,
+        url: repository.url,
+        localPath: repository.localPath,
+      })),
+    )
+    if (seededProjects.length > 0) {
+      setProjects(seededProjects)
+      setSelectedProjectId(seededProjects[0].id)
+    }
+  }, [data.repositories, data.source, projects.length])
+
+  useEffect(() => {
     let active = true
 
     async function hydrateTemplates() {
@@ -3081,6 +3136,46 @@ function App() {
   const selectedTeamTemplate = selectedTeamTemplateId
     ? teamTemplates.find((template) => template.id === selectedTeamTemplateId) ?? null
     : null
+  const projectSummaries = deriveProjectSummaries(
+    projects,
+    data.repositories.map((repository) => ({
+      id: repository.id,
+      name: repository.name,
+      provider: repository.provider,
+      url: repository.url,
+      localPath: repository.localPath,
+    })),
+    data.runs.map((run) => ({
+      id: run.id,
+      repositoryId: run.repositoryId,
+      goal: run.goal,
+      status: run.status,
+      createdAt: run.createdAt,
+      updatedAt: run.updatedAt,
+    })),
+  )
+  const adHocWorkspace = deriveAdHocWorkspace(
+    projects,
+    data.repositories.map((repository) => ({
+      id: repository.id,
+      name: repository.name,
+      provider: repository.provider,
+      url: repository.url,
+      localPath: repository.localPath,
+    })),
+    data.runs.map((run) => ({
+      id: run.id,
+      repositoryId: run.repositoryId,
+      goal: run.goal,
+      status: run.status,
+      createdAt: run.createdAt,
+      updatedAt: run.updatedAt,
+    })),
+  )
+  const selectedProjectSummary =
+    projectSummaries.find((summary) => summary.project.id === selectedProjectId)
+    ?? projectSummaries[0]
+    ?? null
 
   const selectedRepository = data.repositories.find(
     (repository) => repository.id === selectedRun?.repositoryId,
@@ -3089,13 +3184,41 @@ function App() {
   const selectedRepositoryStableId = selectedRepository?.id ?? null
 
   useEffect(() => {
-    if (runDraftRepositoryId && data.repositories.some((repository) => repository.id === runDraftRepositoryId)) {
+    const availableRepositories = selectedView === 'projects' && selectedProjectSummary
+      ? data.repositories.filter((repository) => selectedProjectSummary.project.repositoryIds.includes(repository.id))
+      : data.repositories
+
+    if (runDraftRepositoryId && availableRepositories.some((repository) => repository.id === runDraftRepositoryId)) {
       return
     }
 
-    const nextRepositoryId = selectedRepositoryStableId ?? data.repositories[0]?.id ?? ''
+    const nextRepositoryId = selectedRepositoryStableId ?? availableRepositories[0]?.id ?? ''
     setRunDraftRepositoryId(nextRepositoryId)
-  }, [data.repositories, runDraftRepositoryId, selectedRepositoryStableId])
+  }, [data.repositories, runDraftRepositoryId, selectedProjectSummary, selectedRepositoryStableId, selectedView])
+
+  useEffect(() => {
+    if (selectedProjectId && projectSummaries.some((summary) => summary.project.id === selectedProjectId)) {
+      return
+    }
+
+    setSelectedProjectId(projectSummaries[0]?.project.id ?? '')
+  }, [projectSummaries, selectedProjectId])
+
+  useEffect(() => {
+    if (!selectedProjectSummary?.runs.length) {
+      return
+    }
+
+    if (selectedView !== 'projects') {
+      return
+    }
+
+    if (selectedRunId && selectedProjectSummary.runs.some((run) => run.id === selectedRunId)) {
+      return
+    }
+
+    setSelectedRunId(selectedProjectSummary.runs[0]?.id ?? '')
+  }, [selectedProjectSummary, selectedRunId, selectedView])
 
   useEffect(() => {
     if (selectedConfigRepositoryId && data.repositories.some((repository) => repository.id === selectedConfigRepositoryId)) {
@@ -3152,6 +3275,9 @@ function App() {
   const selectedGovernance = data.governance
   const selectedSecretAccessPlan = data.secretAccessPlan
   const selectedAuditExport = data.auditExport
+  const projectScopedRepositories = selectedProjectSummary
+    ? data.repositories.filter((repository) => selectedProjectSummary.project.repositoryIds.includes(repository.id))
+    : data.repositories
   const governanceApprovalHistory = selectedGovernance?.approvals.history ?? []
   const governanceRepositoryProfiles = selectedGovernance?.policies.repositoryProfiles ?? []
   const reviewActionDisabled = !selectedApproval || actionPending || approvalDetailState !== 'ready'
@@ -3468,6 +3594,98 @@ function App() {
       return nextData.runs[0]?.id ?? ''
     })
     setErrorText('')
+  }
+
+  function resetProjectDraft() {
+    setEditingProjectId(null)
+    setProjectDraftName('')
+    setProjectDraftSummary('')
+    setProjectDraftRepositoryIds([])
+  }
+
+  function toggleProjectRepository(repositoryId: string) {
+    setProjectDraftRepositoryIds((current) =>
+      current.includes(repositoryId)
+        ? current.filter((id) => id !== repositoryId)
+        : [...current, repositoryId],
+    )
+  }
+
+  function handleEditProject(project: ProjectRecord) {
+    setEditingProjectId(project.id)
+    setProjectDraftName(project.name)
+    setProjectDraftSummary(project.summary)
+    setProjectDraftRepositoryIds(project.repositoryIds)
+    setShowProjectControls(true)
+    setSelectedProjectId(project.id)
+    setErrorText('')
+  }
+
+  function handleSelectProject(projectId: string, runId?: string) {
+    setSelectedProjectId(projectId)
+    if (runId) {
+      setSelectedRunId(runId)
+    }
+  }
+
+  function handleCreateProject() {
+    if (!projectDraftName.trim()) {
+      setErrorText('Project name is required.')
+      return
+    }
+
+    if (projectDraftRepositoryIds.length === 0) {
+      setErrorText('Assign at least one repository to the project.')
+      return
+    }
+
+    const timestamp = new Date().toISOString()
+    const nextProject: ProjectRecord = editingProjectId
+      ? {
+          id: editingProjectId,
+          name: projectDraftName.trim(),
+          summary: projectDraftSummary.trim(),
+          repositoryIds: projectDraftRepositoryIds,
+          createdAt: projects.find((project) => project.id === editingProjectId)?.createdAt ?? timestamp,
+          updatedAt: timestamp,
+        }
+      : {
+          id: `project-${Math.random().toString(36).slice(2, 10)}`,
+          name: projectDraftName.trim(),
+          summary: projectDraftSummary.trim(),
+          repositoryIds: projectDraftRepositoryIds,
+          createdAt: timestamp,
+          updatedAt: timestamp,
+        }
+
+    setProjects((current) => {
+      const remaining = current.filter((project) => project.id !== nextProject.id)
+      return [nextProject, ...remaining]
+    })
+    setSelectedProjectId(nextProject.id)
+    resetProjectDraft()
+    setShowProjectControls(false)
+    setErrorText('')
+  }
+
+  function handleDeleteProject(project: ProjectRecord, skipConfirmation = false) {
+    if (skipConfirmation) {
+      confirmDeleteProject(project.id)
+      return
+    }
+
+    setPendingDeleteAction({ kind: 'project', id: project.id, label: project.name })
+  }
+
+  function confirmDeleteProject(projectId: string) {
+    setProjects((current) => current.filter((project) => project.id !== projectId))
+    if (editingProjectId === projectId) {
+      resetProjectDraft()
+    }
+    if (selectedProjectId === projectId) {
+      setSelectedProjectId('')
+    }
+    setPendingDeleteAction(null)
   }
 
   async function handleCreateRepository() {
@@ -3829,6 +4047,11 @@ function App() {
       return
     }
 
+    if (pendingDeleteAction.kind === 'project') {
+      confirmDeleteProject(pendingDeleteAction.id)
+      return
+    }
+
     if (pendingDeleteAction.kind === 'repository') {
       await confirmDeleteRepository(pendingDeleteAction.id)
       return
@@ -3844,8 +4067,8 @@ function App() {
       <header className="hero-panel">
         <div className="hero-copy">
           <p className="eyebrow">Codex Swarm operator console</p>
-          <h1>Runs, reviews, and fleet state.</h1>
-          <p className="lede">Track live runs, inspect worker state, and step into review only when a run needs attention.</p>
+          <h1>Projects, ad-hoc jobs, and run context.</h1>
+          <p className="lede">Start from project portfolios, keep ad-hoc work clearly separate, and drop into board, review, or admin only when the selected job needs deeper inspection.</p>
         </div>
 
         <div className="hero-metrics">
@@ -3856,16 +4079,24 @@ function App() {
       </header>
 
       <div className="view-switcher">
-        {(['board', 'detail', 'review', 'admin'] as ViewMode[]).map((view) => (
+        {(['projects', 'board', 'detail', 'review', 'admin'] as ViewMode[]).map((view) => (
           <button
             key={view}
             type="button"
             className={`view-tab ${selectedView === view ? 'is-active' : ''}`}
             onClick={() => setSelectedView(view)}
-            disabled={!selectedRun && view !== 'board'}
-            title={!selectedRun && view !== 'board' ? 'Select or start a run first.' : undefined}
+            disabled={!selectedRun && view !== 'projects' && view !== 'board'}
+            title={!selectedRun && view !== 'projects' && view !== 'board' ? 'Select or start a run first.' : undefined}
           >
-            {view === 'board' ? 'Board' : view === 'detail' ? 'Run Detail' : view === 'review' ? 'Review' : 'Admin'}
+            {view === 'projects'
+              ? 'Projects'
+              : view === 'board'
+                ? 'Board'
+                : view === 'detail'
+                  ? 'Run Detail'
+                  : view === 'review'
+                    ? 'Review'
+                    : 'Admin'}
           </button>
         ))}
         <label className="theme-switcher">
@@ -3900,8 +4131,8 @@ function App() {
         <aside className="panel panel-runs" style={isCompactViewport ? undefined : { width: sidebarWidth }}>
           <div className="panel-header">
             <div>
-              <p className="panel-kicker">Active runs</p>
-              <h2>Execution tracks</h2>
+              <p className="panel-kicker">{selectedView === 'projects' ? 'Workspace entry' : 'Active runs'}</p>
+              <h2>{selectedView === 'projects' ? 'Projects and job setup' : 'Execution tracks'}</h2>
             </div>
             <span className="data-pill">
               {data.source === 'mock' ? 'Demo snapshot' : errorText ? 'API issue' : 'Live API'}
@@ -3909,6 +4140,152 @@ function App() {
           </div>
 
           <div className="control-stack">
+            <div className="control-group">
+            <section className={`control-card ${showProjectControls ? 'is-open' : 'is-collapsed'}`}>
+              <div className="control-card-header">
+                <div className="control-card-heading">
+                  <strong>{editingProjectId ? 'Edit project' : 'Create project'}</strong>
+                  <span>Project-centered entrypoint</span>
+                </div>
+                <button
+                  type="button"
+                  className="control-toggle"
+                  aria-expanded={showProjectControls}
+                  onClick={() => setShowProjectControls((current) => !current)}
+                >
+                  {showProjectControls ? 'Hide' : 'Show'}
+                </button>
+              </div>
+              {showProjectControls ? (
+                <>
+                  <label className="control-field">
+                    <span>Name</span>
+                    <input value={projectDraftName} onChange={(event) => setProjectDraftName(event.target.value)} />
+                  </label>
+                  <label className="control-field">
+                    <span>Summary</span>
+                    <textarea value={projectDraftSummary} onChange={(event) => setProjectDraftSummary(event.target.value)} rows={3} />
+                  </label>
+                  <div className="project-checkbox-list">
+                    {data.repositories.map((repository) => (
+                      <label key={repository.id} className="project-checkbox">
+                        <input
+                          type="checkbox"
+                          checked={projectDraftRepositoryIds.includes(repository.id)}
+                          onChange={() => toggleProjectRepository(repository.id)}
+                        />
+                        <span>
+                          <strong>{repository.name}</strong>
+                          <em>{repository.provider}</em>
+                        </span>
+                      </label>
+                    ))}
+                    {data.repositories.length === 0 ? <p className="inventory-empty">Register a repository before creating a project.</p> : null}
+                  </div>
+                  <div className="action-row">
+                    {editingProjectId ? (
+                      <button
+                        type="button"
+                        className="action-button action-button-secondary"
+                        onClick={() => resetProjectDraft()}
+                        disabled={actionPending}
+                      >
+                        Cancel
+                      </button>
+                    ) : null}
+                    <button type="button" className="action-button" onClick={handleCreateProject} disabled={actionPending}>
+                      {editingProjectId ? 'Save project' : 'Create project'}
+                    </button>
+                  </div>
+                </>
+              ) : null}
+            </section>
+
+            <section className={`control-card ${showProjectInventory ? 'is-open' : 'is-collapsed'}`}>
+              <div className="control-card-header">
+                <div className="control-card-heading">
+                  <strong>Projects</strong>
+                  <span>{projectSummaries.length} grouped workspaces</span>
+                </div>
+                <button type="button" className="control-toggle" aria-expanded={showProjectInventory} onClick={() => setShowProjectInventory((current) => !current)}>
+                  {showProjectInventory ? 'Hide' : 'Show'}
+                </button>
+              </div>
+              {showProjectInventory ? (
+                <div className="inventory-list project-inventory-list">
+                  {projectSummaries.map((summary) => (
+                    <article key={summary.project.id} className={`inventory-item project-inventory-item ${summary.project.id === selectedProjectSummary?.project.id ? 'is-selected' : ''}`}>
+                      <div>
+                        <strong>{summary.project.name}</strong>
+                        <p>{summary.project.summary || `${summary.repositories.length} repositories linked`}</p>
+                        <div className="inline-meta">
+                          <span className="role-chip">{summary.repositories.length} repos</span>
+                          <span className="role-chip">{summary.runs.length} runs</span>
+                        </div>
+                      </div>
+                      <div className="inventory-actions">
+                        <button type="button" className="table-action" onClick={() => handleSelectProject(summary.project.id, summary.lastRun?.id)}>
+                          Select
+                        </button>
+                        <button type="button" className="table-action" onClick={() => handleEditProject(summary.project)}>
+                          Edit
+                        </button>
+                        <button
+                          type="button"
+                          className="table-action table-action-danger"
+                          onClick={(event: ReactMouseEvent<HTMLButtonElement>) => handleDeleteProject(summary.project, event.shiftKey)}
+                        >
+                          Delete
+                        </button>
+                      </div>
+                    </article>
+                  ))}
+                  {projectSummaries.length === 0 ? <p className="inventory-empty">No projects yet. Create one to turn repos and runs into a project workspace.</p> : null}
+                </div>
+              ) : null}
+            </section>
+
+            <section className={`control-card ${showAdHocInventory ? 'is-open' : 'is-collapsed'}`}>
+              <div className="control-card-header">
+                <div className="control-card-heading">
+                  <strong>Ad-hoc jobs</strong>
+                  <span>{adHocWorkspace.runs.length} runs outside projects</span>
+                </div>
+                <button type="button" className="control-toggle" aria-expanded={showAdHocInventory} onClick={() => setShowAdHocInventory((current) => !current)}>
+                  {showAdHocInventory ? 'Hide' : 'Show'}
+                </button>
+              </div>
+              {showAdHocInventory ? (
+                <div className="inventory-list">
+                  {adHocWorkspace.runs.map((run) => {
+                    const repository = data.repositories.find((item) => item.id === run.repositoryId)
+                    return (
+                      <article key={run.id} className="inventory-item">
+                        <div>
+                          <strong>{run.goal}</strong>
+                          <p>{repository?.name ?? 'Unlinked repository'} · {formatLabel(run.status)}</p>
+                        </div>
+                        <div className="inventory-actions">
+                          <button
+                            type="button"
+                            className="table-action"
+                            onClick={() => {
+                              setSelectedRunId(run.id)
+                              setSelectedView('board')
+                            }}
+                          >
+                            Open
+                          </button>
+                        </div>
+                      </article>
+                    )
+                  })}
+                  {adHocWorkspace.runs.length === 0 ? <p className="inventory-empty">All current runs are assigned to projects.</p> : null}
+                </div>
+              ) : null}
+            </section>
+            </div>
+
             <div className="control-group">
             <section className={`control-card ${showRepoControls ? 'is-open' : 'is-collapsed'} ${highlightedPanel === 'repo' ? 'is-flash' : ''}`}>
               <div className="control-card-header">
@@ -4033,7 +4410,7 @@ function App() {
                     <span>Repository</span>
                     <select value={runDraftRepositoryId} onChange={(event) => setRunDraftRepositoryId(event.target.value)}>
                       <option value="">Select repository</option>
-                      {data.repositories.map((repository) => (
+                      {projectScopedRepositories.map((repository) => (
                         <option key={repository.id} value={repository.id}>
                           {repository.name}
                         </option>
@@ -4258,6 +4635,221 @@ function App() {
             />
           ) : null}
         </aside>
+
+        {selectedView === 'projects' ? (
+          <>
+            <section className="panel panel-overview">
+              <div className="panel-header">
+                <div>
+                  <p className="panel-kicker">Project overview</p>
+                  <h2>{selectedProjectSummary?.project.name ?? 'Projects are now the primary entrypoint'}</h2>
+                </div>
+                <span className="tone-chip tone-active">
+                  {selectedProjectSummary ? `${selectedProjectSummary.runs.length} linked runs` : `${adHocWorkspace.runs.length} ad-hoc runs`}
+                </span>
+              </div>
+
+              <div className="overview-grid">
+                <InfoCard label="Projects" value={String(projectSummaries.length)} />
+                <InfoCard label="Project repos" value={String(projectSummaries.reduce((count, summary) => count + summary.repositories.length, 0))} />
+                <InfoCard label="Ad-hoc repos" value={String(adHocWorkspace.repositories.length)} />
+                <InfoCard label="Ad-hoc runs" value={String(adHocWorkspace.runs.length)} />
+                <InfoCard label="Pending approvals" value={String(data.approvals.filter((approval) => approval.status === 'pending').length)} />
+                <InfoCard label="Online nodes" value={String(data.workerNodes.filter((node) => node.status === 'online').length)} />
+              </div>
+
+              <div className="signal-band">
+                <div>
+                  <p className="signal-label">Selected project</p>
+                  <strong>{selectedProjectSummary?.project.name ?? 'None selected'}</strong>
+                </div>
+                <div>
+                  <p className="signal-label">Project summary</p>
+                  <strong>{selectedProjectSummary?.project.summary || 'Group repos to create a durable project workspace.'}</strong>
+                </div>
+                <div>
+                  <p className="signal-label">Ad-hoc boundary</p>
+                  <strong>Jobs without project ownership stay isolated here.</strong>
+                </div>
+              </div>
+            </section>
+
+            <section className="panel panel-project-workspace">
+              <div className="panel-header">
+                <div>
+                  <p className="panel-kicker">Project workspace</p>
+                  <h2>Selected project context</h2>
+                </div>
+                <div className="panel-actions">
+                  <button
+                    type="button"
+                    className="action-button action-button-secondary"
+                    onClick={() => {
+                      if (!selectedProjectSummary?.lastRun) {
+                        return
+                      }
+
+                      setSelectedRunId(selectedProjectSummary.lastRun.id)
+                      setSelectedView('board')
+                    }}
+                    disabled={!selectedProjectSummary?.lastRun}
+                  >
+                    Open board
+                  </button>
+                  <button
+                    type="button"
+                    className="action-button action-button-secondary"
+                    onClick={() => {
+                      if (!selectedProjectSummary?.lastRun) {
+                        return
+                      }
+
+                      setSelectedRunId(selectedProjectSummary.lastRun.id)
+                      setSelectedView('detail')
+                    }}
+                    disabled={!selectedProjectSummary?.lastRun}
+                  >
+                    Run detail
+                  </button>
+                </div>
+              </div>
+
+              {selectedProjectSummary ? (
+                <div className="project-workspace-grid">
+                  <article className="detail-card">
+                    <p className="panel-kicker">Scope</p>
+                    <strong>{selectedProjectSummary.repositories.length} repositories mapped</strong>
+                    <p>{selectedProjectSummary.project.summary || 'This project is the durable home for linked repos and their run history.'}</p>
+                    <div className="detail-list">
+                      {selectedProjectSummary.repositories.map((repository) => (
+                        <span key={repository.id}>{repository.name} · {repository.provider}</span>
+                      ))}
+                    </div>
+                  </article>
+
+                  <article className="detail-card">
+                    <p className="panel-kicker">Run history</p>
+                    <strong>{selectedProjectSummary.runs.length} runs tracked</strong>
+                    <p>{selectedProjectSummary.activeRuns.length} active or awaiting approval, {selectedProjectSummary.completedRuns} completed.</p>
+                    <div className="detail-list">
+                      <span>Latest run: {selectedProjectSummary.lastRun?.goal ?? 'No runs linked yet'}</span>
+                      <span>Updated: {selectedProjectSummary.lastRun ? formatDate(selectedProjectSummary.lastRun.updatedAt) : 'n/a'}</span>
+                    </div>
+                  </article>
+
+                  <article className="detail-card">
+                    <p className="panel-kicker">Quick launch</p>
+                    <strong>{selectedProjectSummary.lastRun ? 'Existing run selected' : 'Project ready for its first run'}</strong>
+                      <p>Use the run draft in the left rail to create or start another job for one of this project’s repositories.</p>
+                      <div className="inline-meta">
+                        {selectedProjectSummary.repositories.map((repository) => {
+                          const repositoryRecord = data.repositories.find((item) => item.id === repository.id)
+
+                          return (
+                            <button
+                              key={repository.id}
+                              type="button"
+                              className="table-action"
+                              onClick={() => {
+                                if (!repositoryRecord) {
+                                  return
+                                }
+
+                                handleUseRepository(repositoryRecord)
+                              }}
+                              disabled={!repositoryRecord}
+                            >
+                              Use {repository.name}
+                            </button>
+                          )
+                        })}
+                      </div>
+                    </article>
+                </div>
+              ) : (
+                <div className="empty-state">Create or select a project to establish its repo and run context.</div>
+              )}
+            </section>
+
+            <section className="panel panel-project-runs">
+              <div className="panel-header">
+                <div>
+                  <p className="panel-kicker">Project runs</p>
+                  <h2>Historical and active jobs</h2>
+                </div>
+              </div>
+
+              <div className="project-run-grid">
+                {(selectedProjectSummary?.runs ?? []).map((run) => {
+                  const repository = data.repositories.find((item) => item.id === run.repositoryId)
+                  return (
+                    <article key={run.id} className="run-card project-run-card">
+                      <div className="run-card-topline">
+                        <span className="run-timestamp">{formatDate(run.updatedAt)}</span>
+                        <span className={`tone-chip tone-${runStatusTone[run.status as RunStatus]}`}>
+                          {formatLabel(run.status)}
+                        </span>
+                      </div>
+                      <h3>{run.goal}</h3>
+                      <p>{repository?.name ?? 'Unlinked repository'}</p>
+                      <div className="run-card-meta">
+                        <span className="role-chip">{repository?.provider ?? 'other'}</span>
+                        <span className="run-card-handoff">{formatLabel(data.runs.find((item) => item.id === run.id)?.handoffStatus ?? 'pending')}</span>
+                      </div>
+                      <div className="project-run-actions">
+                        <button type="button" className="table-action" onClick={() => { setSelectedRunId(run.id); setSelectedView('board') }}>
+                          Board
+                        </button>
+                        <button type="button" className="table-action" onClick={() => { setSelectedRunId(run.id); setSelectedView('review') }}>
+                          Review
+                        </button>
+                        <button type="button" className="table-action" onClick={() => { setSelectedRunId(run.id); setSelectedView('admin') }}>
+                          Admin
+                        </button>
+                      </div>
+                    </article>
+                  )
+                })}
+                {(selectedProjectSummary?.runs.length ?? 0) === 0 ? (
+                  <div className="empty-state">No runs are linked to the selected project yet.</div>
+                ) : null}
+              </div>
+            </section>
+
+            <section className="panel panel-ad-hoc">
+              <div className="panel-header">
+                <div>
+                  <p className="panel-kicker">Ad-hoc jobs</p>
+                  <h2>Runs outside projects</h2>
+                </div>
+              </div>
+
+              <div className="project-workspace-grid">
+                <article className="detail-card">
+                  <p className="panel-kicker">Ungrouped repositories</p>
+                  <strong>{adHocWorkspace.repositories.length} repositories</strong>
+                  <div className="detail-list">
+                    {adHocWorkspace.repositories.map((repository) => (
+                      <span key={repository.id}>{repository.name} · {repository.provider}</span>
+                    ))}
+                    {adHocWorkspace.repositories.length === 0 ? <span>No repositories are currently outside a project.</span> : null}
+                  </div>
+                </article>
+
+                <article className="detail-card">
+                  <p className="panel-kicker">Ad-hoc run queue</p>
+                  <strong>{adHocWorkspace.runs.length} runs</strong>
+                  <div className="detail-list">
+                    {adHocWorkspace.runs.map((run) => (
+                      <span key={run.id}>{run.goal}</span>
+                    ))}
+                    {adHocWorkspace.runs.length === 0 ? <span>No ad-hoc runs right now.</span> : null}
+                  </div>
+                </article>
+              </div>
+            </section>
+          </>
+        ) : null}
 
         {selectedRun ? (
           <>
@@ -5498,10 +6090,12 @@ function App() {
           >
             <p className="panel-kicker">Confirm delete</p>
             <h2 id="confirm-delete-title">
-              Delete {pendingDeleteAction.kind === 'repository' ? 'repository' : 'run'}?
+              Delete {pendingDeleteAction.kind === 'project' ? 'project' : pendingDeleteAction.kind === 'repository' ? 'repository' : 'run'}?
             </h2>
             <p>
-              {pendingDeleteAction.kind === 'repository'
+              {pendingDeleteAction.kind === 'project'
+                ? `This removes “${pendingDeleteAction.label}” from the project overview but keeps its repositories and runs as ad-hoc jobs.`
+                : pendingDeleteAction.kind === 'repository'
                 ? `This removes “${pendingDeleteAction.label}” from the workspace.`
                 : `This removes the run “${pendingDeleteAction.label}” and its run-owned records.`}
             </p>

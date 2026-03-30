@@ -1,7 +1,12 @@
 import { mkdir, rm } from "node:fs/promises";
 
 import type { FastifyPluginAsync } from "fastify";
-import { createLocalCodexCliExecutor, createWorktreePath, materializeRepositoryWorkspace } from "@codex-swarm/worker";
+import {
+  createLocalCodexCliExecutor,
+  createWorktreePath,
+  materializeRepositoryWorkspace,
+  resolveWorkspaceProvisioningMode
+} from "@codex-swarm/worker";
 import type {
   ActorIdentity,
   AgentCreateInput,
@@ -94,13 +99,25 @@ export const runRoutes: FastifyPluginAsync = async (app) => {
     const repositoryId = typeof request.query === "object" && request.query && "repositoryId" in request.query
       ? String(request.query.repositoryId)
       : undefined;
+    const view = typeof request.query === "object" && request.query && "view" in request.query
+      ? String(request.query.view)
+      : undefined;
 
     try {
-        return await app.controlPlane.listRuns(repositoryId, request.authContext);
+      if (view === "job_scope") {
+        return await app.controlPlane.listRunsByJobScope(repositoryId, request.authContext);
+      }
+
+      return await app.controlPlane.listRuns(repositoryId, request.authContext);
     } catch (error) {
       if (app.config.NODE_ENV !== "production" && isRecoverableDatabaseError(error)) {
         app.observability.recordRecoverableDatabaseFallback("runs.list", error);
-        return [];
+        return view === "job_scope"
+          ? {
+            projectJobs: [],
+            adHocJobs: []
+          }
+          : [];
       }
 
       throw error;
@@ -170,11 +187,13 @@ export const runRoutes: FastifyPluginAsync = async (app) => {
         }
 
         const workspaceRoot = getOptionalEnv("CODEX_SWARM_WORKSPACE_ROOT") ?? ".swarm/worktrees";
+        const workspaceProvisioningMode = resolveWorkspaceProvisioningMode();
         const leaderWorkspace = createWorktreePath({
           rootDir: workspaceRoot,
           repositorySlug: repository.name,
           runId: run.id,
-          agentId: "leader"
+          agentId: "leader",
+          mode: workspaceProvisioningMode
         });
         await rm(leaderWorkspace, {
           recursive: true,
@@ -183,7 +202,8 @@ export const runRoutes: FastifyPluginAsync = async (app) => {
         await materializeRepositoryWorkspace({
           repository,
           destinationPath: leaderWorkspace,
-          branch: run.branchName ?? repository.defaultBranch
+          branch: run.branchName ?? repository.defaultBranch,
+          reuseExisting: workspaceProvisioningMode === "shared"
         });
 
         await runLeaderPlanningLoop({
