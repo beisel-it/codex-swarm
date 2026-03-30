@@ -312,6 +312,31 @@ describe("repeatableRunDefinitionSchema", () => {
       preset: "issue-review"
     });
   });
+
+  it("accepts legacy stored repeatable run definitions without a project team id", () => {
+    const now = new Date("2026-03-30T09:00:00.000Z");
+    const definition = repeatableRunDefinitionSchema.parse({
+      id: "550e8400-e29b-41d4-a716-446655440100",
+      repositoryId: "550e8400-e29b-41d4-a716-446655440000",
+      projectTeamId: null,
+      projectTeamName: null,
+      workspaceId: "workspace-1",
+      teamId: "team-1",
+      name: "Legacy repeatable run",
+      description: null,
+      status: "active",
+      execution: {
+        goal: "Use legacy settings",
+        concurrencyCap: 1,
+        metadata: {}
+      },
+      createdAt: now,
+      updatedAt: now
+    });
+
+    expect(definition.projectTeamId).toBeNull();
+    expect(definition.projectTeamName).toBeNull();
+  });
 });
 
 describe("repeatableRunTriggerCreateSchema", () => {

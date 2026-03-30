@@ -1239,10 +1239,15 @@ export class ControlPlaneService {
     await this.assertProjectTeamExists(projectTeamId, access);
     const linkedDefinition = await this.db.select({ id: repeatableRunDefinitions.id, name: repeatableRunDefinitions.name })
       .from(repeatableRunDefinitions)
-      .where(eq(repeatableRunDefinitions.projectTeamId, projectTeamId))
-      .limit(1);
+      .where(eq(repeatableRunDefinitions.projectTeamId, projectTeamId));
     if (linkedDefinition[0]) {
       throw new HttpError(409, `project team is still referenced by repeatable run ${linkedDefinition[0].name}`);
+    }
+    const linkedRun = await this.db.select({ id: runs.id, goal: runs.goal })
+      .from(runs)
+      .where(eq(runs.projectTeamId, projectTeamId));
+    if (linkedRun[0]) {
+      throw new HttpError(409, `project team is still referenced by run ${linkedRun[0].goal}`);
     }
 
     await this.db.transaction(async (tx) => {
@@ -1460,19 +1465,27 @@ export class ControlPlaneService {
       : await this.assertRepositoryExists(existing.repositoryId, access);
     const projectTeam = input.projectTeamId
       ? await this.assertProjectTeamExists(input.projectTeamId, access)
-      : await this.assertProjectTeamExists(existing.projectTeamId, access);
+      : existing.projectTeamId
+        ? await this.assertProjectTeamExists(existing.projectTeamId, access)
+        : null;
+    const preservingLegacyTeamlessDefinition = !existing.projectTeamId
+      && input.projectTeamId === undefined
+      && input.repositoryId === undefined;
     if (!repository.projectId) {
       throw new HttpError(409, "repeatable runs require a repository assigned to a project");
     }
-    if (projectTeam.projectId !== repository.projectId) {
+    if (!projectTeam && !preservingLegacyTeamlessDefinition) {
+      throw new HttpError(400, "project repeatable runs require projectTeamId");
+    }
+    if (projectTeam && projectTeam.projectId !== repository.projectId) {
       throw new HttpError(409, `project team ${projectTeam.id} does not belong to repository project ${repository.projectId}`);
     }
     const now = this.clock.now();
 
     const [definition] = await this.db.update(repeatableRunDefinitions).set({
       repositoryId: repository.id,
-      projectTeamId: projectTeam.id,
-      projectTeamName: projectTeam.name,
+      projectTeamId: projectTeam?.id ?? existing.projectTeamId ?? undefined,
+      projectTeamName: projectTeam?.name ?? existing.projectTeamName ?? undefined,
       workspaceId: repository.workspaceId,
       teamId: repository.teamId,
       name: input.name ?? existing.name,
@@ -5438,6 +5451,7 @@ export class ControlPlaneService {
   private mapRepeatableRunDefinition(record: RepeatableRunDefinitionRecord): RepeatableRunDefinition {
     return repeatableRunDefinitionSchema.parse({
       ...record,
+      projectTeamId: record.projectTeamId ?? null,
       projectTeamName: record.projectTeamName ?? null
     });
   }

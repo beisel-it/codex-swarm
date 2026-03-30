@@ -520,7 +520,7 @@ export function RepeatableRunsPanel({
                         setEditingDefinitionId(definition.id)
                         setDefinitionName(definition.name)
                         setDefinitionDescription(definition.description ?? '')
-                        setDefinitionProjectTeamId(definition.projectTeamId)
+                        setDefinitionProjectTeamId(definition.projectTeamId ?? '')
                         setDefinitionStatus(definition.status)
                         setDefinitionGoal(definition.execution.goal)
                         setDefinitionBranchName(definition.execution.branchName ?? '')

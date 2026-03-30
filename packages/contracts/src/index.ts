@@ -500,6 +500,7 @@ export const repeatableRunDefinitionCreateSchema = z.object({
 });
 
 export const repeatableRunDefinitionSchema = repeatableRunDefinitionCreateSchema.extend({
+  projectTeamId: z.uuid().nullable().default(null),
   id: z.uuid(),
   workspaceId: z.string().min(1),
   teamId: z.string().min(1),

@@ -92,6 +92,10 @@ function resolveCodexExecutionProfile() {
   return getOptionalEnv("CODEX_SWARM_WORKER_PROFILE") ?? "default";
 }
 
+function resolveAssignmentExecutionProfile(profile: string | null | undefined) {
+  return profile?.trim() ? profile : resolveCodexExecutionProfile();
+}
+
 function toSessionRecord(session: Session, worktreePath: string) {
   return {
     sessionId: session.id,
@@ -407,7 +411,7 @@ export async function runManagedWorkerDispatch(
   const supervisor = new CodexServerSupervisor({
     config: {
       cwd: workspace.path,
-      profile: resolveCodexExecutionProfile(),
+      profile: resolveAssignmentExecutionProfile(assignment.profile),
       sandbox: assignment.sandbox,
       approvalPolicy: assignment.approvalPolicy,
       includePlanTool: assignment.includePlanTool

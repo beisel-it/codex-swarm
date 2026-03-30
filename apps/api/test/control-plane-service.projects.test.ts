@@ -112,6 +112,11 @@ class FakeProjectDb {
             return [values];
           }
 
+          if (table === repeatableRunDefinitions) {
+            this.repeatableRunDefinitionStore.push(values);
+            return [values];
+          }
+
           throw new Error("unexpected insert table");
         }
       })
@@ -153,6 +158,11 @@ class FakeProjectDb {
               return store.projectTeamStore;
             }
 
+            if (table === repeatableRunDefinitions) {
+              store.repeatableRunDefinitionStore = store.repeatableRunDefinitionStore.map((record) => ({ ...record, ...values }));
+              return store.repeatableRunDefinitionStore;
+            }
+
             throw new Error("unexpected update table");
           },
           then<TResult1 = unknown, TResult2 = never>(
@@ -176,6 +186,11 @@ class FakeProjectDb {
             if (table === projectTeams) {
               store.projectTeamStore = store.projectTeamStore.map((record) => ({ ...record, ...values }));
               return Promise.resolve(store.projectTeamStore).then(onfulfilled, onrejected);
+            }
+
+            if (table === repeatableRunDefinitions) {
+              store.repeatableRunDefinitionStore = store.repeatableRunDefinitionStore.map((record) => ({ ...record, ...values }));
+              return Promise.resolve(store.repeatableRunDefinitionStore).then(onfulfilled, onrejected);
             }
 
             return Promise.resolve([]).then(onfulfilled, onrejected);
@@ -416,6 +431,139 @@ describe("ControlPlaneService projects", () => {
     });
 
     expect(adHocRun.projectId).toBeNull();
+  });
+
+  it("rejects deleting project teams that active runs still reference", async () => {
+    const now = new Date("2026-03-30T11:30:00.000Z");
+    const db = new FakeProjectDb();
+    db.projectTeamStore.push({
+      id: "project-team-1",
+      projectId: "project-1",
+      workspaceId: "workspace-1",
+      teamId: "team-1",
+      name: "Platform team",
+      description: null,
+      concurrencyCap: 2,
+      sourceTemplateId: null,
+      createdAt: now,
+      updatedAt: now
+    });
+    db.runStore.push({
+      id: "run-1",
+      repositoryId: "repo-1",
+      workspaceId: "workspace-1",
+      teamId: "team-1",
+      projectId: "project-1",
+      projectTeamId: "project-team-1",
+      projectTeamName: "Platform team",
+      goal: "Ship project milestones",
+      status: "pending",
+      branchName: null,
+      planArtifactPath: null,
+      budgetTokens: null,
+      budgetCostUsd: null,
+      concurrencyCap: 1,
+      policyProfile: null,
+      publishedBranch: null,
+      branchPublishedAt: null,
+      branchPublishApprovalId: null,
+      pullRequestUrl: null,
+      pullRequestNumber: null,
+      pullRequestStatus: null,
+      pullRequestApprovalId: null,
+      handoffStatus: "pending",
+      completedAt: null,
+      metadata: {},
+      createdBy: "leader",
+      createdAt: now,
+      updatedAt: now
+    });
+
+    const service = new ControlPlaneService(db as never, {
+      now: () => now
+    });
+
+    await expect(service.deleteProjectTeam("project-team-1", {
+      workspaceId: "workspace-1",
+      workspaceName: "Workspace 1",
+      teamId: "team-1",
+      teamName: "Team 1"
+    })).rejects.toThrow("project team is still referenced by run Ship project milestones");
+  });
+
+  it("keeps legacy repeatable runs readable and updatable before a project team is repaired", async () => {
+    const now = new Date("2026-03-30T11:45:00.000Z");
+    const db = new FakeProjectDb();
+    db.repeatableRunDefinitionStore.push({
+      id: "550e8400-e29b-41d4-a716-446655440121",
+      repositoryId: "550e8400-e29b-41d4-a716-446655440122",
+      projectTeamId: null,
+      projectTeamName: null,
+      workspaceId: "workspace-1",
+      teamId: "team-1",
+      name: "Legacy repeatable run",
+      description: null,
+      status: "active",
+      execution: {
+        goal: "Keep the legacy run editable",
+        branchName: null,
+        planArtifactPath: null,
+        budgetTokens: null,
+        budgetCostUsd: null,
+        concurrencyCap: 1,
+        policyProfile: null,
+        handoff: {
+          mode: "manual",
+          provider: null,
+          baseBranch: null,
+          autoPublishBranch: false,
+          autoCreatePullRequest: false,
+          titleTemplate: null,
+          bodyTemplate: null
+        },
+        metadata: {}
+      },
+      createdAt: now,
+      updatedAt: now
+    });
+
+    const service = new ControlPlaneService(db as never, {
+      now: () => now
+    });
+    (service as any).assertRepositoryExists = async () => ({
+      id: "550e8400-e29b-41d4-a716-446655440122",
+      workspaceId: "workspace-1",
+      teamId: "team-1",
+      projectId: "project-1"
+    });
+
+    const listed = await service.listRepeatableRunDefinitions(undefined, {
+      workspaceId: "workspace-1",
+      workspaceName: "Workspace 1",
+      teamId: "team-1",
+      teamName: "Team 1"
+    });
+    expect(listed[0]).toMatchObject({
+      id: "550e8400-e29b-41d4-a716-446655440121",
+      projectTeamId: null,
+      projectTeamName: null
+    });
+
+    const updated = await service.updateRepeatableRunDefinition("550e8400-e29b-41d4-a716-446655440121", {
+      name: "Legacy repeatable run renamed"
+    }, {
+      workspaceId: "workspace-1",
+      workspaceName: "Workspace 1",
+      teamId: "team-1",
+      teamName: "Team 1"
+    });
+
+    expect(updated).toMatchObject({
+      id: "550e8400-e29b-41d4-a716-446655440121",
+      name: "Legacy repeatable run renamed",
+      projectTeamId: null,
+      projectTeamName: null
+    });
   });
 
   it("updates run project assignments explicitly", async () => {

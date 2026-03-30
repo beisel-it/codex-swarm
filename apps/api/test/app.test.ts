@@ -6229,6 +6229,176 @@ describe("buildApp", () => {
     }
   });
 
+  it("preserves the assignment profile during managed worker dispatch", async () => {
+    vi.stubEnv("CODEX_SWARM_WORKER_PROFILE", "fallback-profile");
+
+    const verticalSlice = new FakeVerticalSliceControlPlane();
+    const app = await buildApp({
+      config: getConfig({
+        NODE_ENV: "test",
+        PORT: 3000,
+        HOST: "127.0.0.1",
+        DATABASE_URL: "postgres://unused/test",
+        DEV_AUTH_TOKEN: "test-token",
+        OPENAI_TRACING_DISABLED: true
+      }),
+      controlPlane: verticalSlice as unknown as ControlPlaneService
+    });
+
+    const headers = {
+      authorization: "Bearer test-token"
+    };
+    const repoRoot = await mkdtemp(join(tmpdir(), "codex-swarm-managed-dispatch-profile-repo-"));
+
+    try {
+      await writeFile(join(repoRoot, "README.md"), "managed worker profile dispatch\n", "utf8");
+      execFileSync("git", ["init", "--initial-branch=main"], { cwd: repoRoot, stdio: "pipe" });
+      execFileSync("git", ["config", "user.name", "Codex Swarm"], { cwd: repoRoot, stdio: "pipe" });
+      execFileSync("git", ["config", "user.email", "codex-swarm@example.com"], { cwd: repoRoot, stdio: "pipe" });
+      execFileSync("git", ["add", "README.md"], { cwd: repoRoot, stdio: "pipe" });
+      execFileSync("git", ["commit", "-m", "initial"], { cwd: repoRoot, stdio: "pipe" });
+      (verticalSlice as any).repositories[0].url = repoRoot;
+
+      const request: LeaderPlanningLoopRequest = async <T>(
+        method: string,
+        path: string,
+        payload?: Record<string, unknown>
+      ) => {
+        const response = await (app.inject as any)({
+          method,
+          url: path,
+          headers,
+          ...(payload ? { payload } : {})
+        }) as {
+          statusCode: number;
+          body: string;
+          json(): T;
+        };
+
+        if (response.statusCode >= 400) {
+          throw new Error(`${method} ${path} failed with ${response.statusCode}: ${response.body}`);
+        }
+
+        return response.json() as T;
+      };
+
+      const runResponse = await app.inject({
+        method: "POST",
+        url: "/api/v1/runs",
+        headers,
+        payload: {
+          repositoryId: ids.repository,
+          goal: "Exercise assignment profile preservation",
+          concurrencyCap: 1,
+          metadata: {}
+        }
+      });
+
+      expect(runResponse.statusCode).toBe(201);
+
+      const agentResponse = await app.inject({
+        method: "POST",
+        url: "/api/v1/agents",
+        headers,
+        payload: {
+          runId: ids.run,
+          name: "worker-profile",
+          role: "design-engineer",
+          status: "idle",
+          session: {
+            threadId: "thread-worker-profile",
+            cwd: process.cwd(),
+            sandbox: "workspace-write",
+            approvalPolicy: "on-request",
+            includePlanTool: false,
+            metadata: {
+              source: "managed-worker-dispatch-profile-test"
+            }
+          }
+        }
+      });
+
+      expect(agentResponse.statusCode).toBe(201);
+
+      const taskResponse = await app.inject({
+        method: "POST",
+        url: "/api/v1/tasks",
+        headers,
+        payload: {
+          runId: ids.run,
+          title: "Managed worker dispatch profile task",
+          description: "Ensure the assignment profile survives dispatch orchestration",
+          role: "design-engineer",
+          priority: 1,
+          dependencyIds: [],
+          acceptanceCriteria: ["worker dispatch preserves the assignment profile"]
+        }
+      });
+
+      expect(taskResponse.statusCode).toBe(201);
+      const taskId = taskResponse.json().id as string;
+
+      const worktreeRoot = await mkdtemp(join(tmpdir(), "codex-swarm-managed-dispatch-profile-"));
+      const dispatchResponse = await app.inject({
+        method: "POST",
+        url: "/api/v1/worker-dispatch-assignments",
+        headers,
+        payload: {
+          runId: ids.run,
+          taskId,
+          agentId: ids.agent,
+          repositoryId: ids.repository,
+          repositoryName: "codex-swarm",
+          stickyNodeId: ids.workerNode,
+          requiredCapabilities: ["remote"],
+          worktreePath: join(worktreeRoot, "worker-profile"),
+          prompt: "Continue the managed worker session with the assigned role profile",
+          profile: "design-engineer",
+          sandbox: "workspace-write",
+          approvalPolicy: "on-request"
+        }
+      });
+
+      expect(dispatchResponse.statusCode).toBe(201);
+
+      let seenProfile: string | null = null;
+      const result = await runManagedWorkerDispatch({
+        request,
+        nodeId: ids.workerNode,
+        workspaceRoot: process.cwd(),
+        supervisorCommand: [
+          process.execPath,
+          "--input-type=module",
+          "-e",
+          "setInterval(() => {}, 1000);"
+        ],
+        executeTool: async (toolRequest) => {
+          seenProfile = "input" in toolRequest
+            ? (toolRequest as { input: { profile?: string } }).input.profile ?? null
+            : (toolRequest as { message: { params?: { profile?: string } } }).message.params?.profile ?? null;
+
+          return {
+            threadId: "thread-worker-profile",
+            output: JSON.stringify({
+              summary: "worker completed",
+              status: "completed",
+              messages: [],
+              blockingIssues: []
+            })
+          };
+        }
+      });
+
+      expect(result).toMatchObject({
+        status: "completed"
+      });
+      expect(seenProfile).toBe("design-engineer");
+    } finally {
+      await rm(repoRoot, { recursive: true, force: true });
+      await app.close();
+    }
+  });
+
   it("executes task validation templates and records artifact-backed validation results", async () => {
     const verticalSlice = new FakeVerticalSliceControlPlane();
     const app = await buildApp({
