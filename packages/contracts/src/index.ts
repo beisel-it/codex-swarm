@@ -21,6 +21,10 @@ export const workerNodeStatuses = ["online", "degraded", "offline"] as const;
 export const workerNodeDrainStates = ["active", "draining", "drained"] as const;
 export const governanceRoles = ["org_admin", "workspace_admin", "team_admin", "member", "reviewer", "operator", "service", "system"] as const;
 export const governedActions = ["run.create", "run.review", "run.retry", "run.stop", "approval.request", "approval.resolve", "admin.read", "admin.write"] as const;
+export const repeatableRunStatuses = ["active", "paused", "disabled"] as const;
+export const externalInputKinds = ["webhook"] as const;
+export const repeatableRunTriggerKinds = ["webhook"] as const;
+export const externalEventReceiptStatuses = ["received", "rejected", "run_created", "failed"] as const;
 export const controlPlaneEventTypes = [
   "admin.governance_report_generated",
   "admin.retention_reconciled",
@@ -136,6 +140,20 @@ export const teamSchema = z.object({
   updatedAt: z.date()
 });
 
+export type JsonPrimitive = string | number | boolean | null;
+export type JsonValue = JsonPrimitive | JsonValue[] | { [key: string]: JsonValue };
+
+export const jsonValueSchema: z.ZodType<JsonValue> = z.lazy(() => z.union([
+  z.string(),
+  z.number(),
+  z.boolean(),
+  z.null(),
+  z.array(jsonValueSchema),
+  z.record(z.string(), jsonValueSchema)
+]));
+
+export const jsonRecordSchema = z.record(z.string(), jsonValueSchema);
+
 export const identityContextSchema = z.object({
   principal: z.string().min(1),
   subject: z.string().min(1),
@@ -153,6 +171,154 @@ export const identityContextSchema = z.object({
   actorType: z.enum(["system", "user", "service"]).default("user")
 });
 
+export const webhookTriggerFilterSchema = z.object({
+  eventNames: z.array(z.string().min(1)).default([]),
+  actions: z.array(z.string().min(1)).default([]),
+  branches: z.array(z.string().min(1)).default([]),
+  path: z.string().min(1).nullable().default(null),
+  metadata: jsonRecordSchema.default({})
+});
+
+export const webhookTriggerConfigSchema = z.object({
+  endpointPath: z.string().min(1),
+  secretRef: z.string().min(1).nullable().default(null),
+  signatureHeader: z.string().min(1).nullable().default(null),
+  eventNameHeader: z.string().min(1).nullable().default(null),
+  deliveryIdHeader: z.string().min(1).nullable().default(null),
+  allowedMethods: z.array(z.enum(["POST", "PUT"])).min(1).default(["POST"]),
+  maxPayloadBytes: z.number().int().positive().default(1024 * 1024),
+  filters: webhookTriggerFilterSchema.default({
+    eventNames: [],
+    actions: [],
+    branches: [],
+    path: null,
+    metadata: {}
+  }),
+  metadata: jsonRecordSchema.default({})
+});
+
+export const repeatableRunExecutionSchema = z.object({
+  goal: z.string().min(1),
+  branchName: z.string().min(1).nullable().default(null),
+  planArtifactPath: z.string().min(1).nullable().default(null),
+  budgetTokens: z.number().int().positive().nullable().default(null),
+  budgetCostUsd: z.number().nonnegative().nullable().default(null),
+  concurrencyCap: z.number().int().positive().default(1),
+  policyProfile: z.string().min(1).nullable().default(null),
+  metadata: jsonRecordSchema.default({})
+});
+
+export const repeatableRunDefinitionCreateSchema = z.object({
+  repositoryId: z.uuid(),
+  name: z.string().min(1),
+  description: z.string().min(1).nullable().default(null),
+  status: z.enum(repeatableRunStatuses).default("active"),
+  execution: repeatableRunExecutionSchema
+});
+
+export const repeatableRunDefinitionSchema = repeatableRunDefinitionCreateSchema.extend({
+  id: z.uuid(),
+  workspaceId: z.string().min(1),
+  teamId: z.string().min(1),
+  createdAt: z.date(),
+  updatedAt: z.date()
+});
+
+export const repeatableRunTriggerCreateSchema = z.discriminatedUnion("kind", [
+  z.object({
+    repeatableRunId: z.uuid(),
+    name: z.string().min(1),
+    description: z.string().min(1).nullable().default(null),
+    enabled: z.boolean().default(true),
+    kind: z.literal("webhook"),
+    config: webhookTriggerConfigSchema
+  })
+]);
+
+export const repeatableRunTriggerSchema = z.discriminatedUnion("kind", [
+  z.object({
+    id: z.uuid(),
+    repeatableRunId: z.uuid(),
+    name: z.string().min(1),
+    description: z.string().min(1).nullable().default(null),
+    enabled: z.boolean().default(true),
+    kind: z.literal("webhook"),
+    config: webhookTriggerConfigSchema,
+    createdAt: z.date(),
+    updatedAt: z.date()
+  })
+]);
+
+export const webhookRequestMetadataSchema = z.object({
+  method: z.string().min(1),
+  path: z.string().min(1),
+  query: z.record(z.string(), z.union([z.string(), z.array(z.string())])).default({}),
+  headers: z.record(z.string(), z.string()).default({}),
+  contentType: z.string().min(1).nullable().default(null),
+  contentLengthBytes: z.number().int().nonnegative().nullable().default(null),
+  receivedAt: z.coerce.date(),
+  remoteAddress: z.string().min(1).nullable().default(null),
+  userAgent: z.string().min(1).nullable().default(null),
+  deliveryId: z.string().min(1).nullable().default(null),
+  signature: z.object({
+    header: z.string().min(1),
+    value: z.string().min(1),
+    algorithm: z.string().min(1).nullable().default(null),
+    valid: z.boolean().nullable().default(null)
+  }).nullable().default(null),
+  metadata: jsonRecordSchema.default({})
+});
+
+export const inboundWebhookEventEnvelopeSchema = z.object({
+  sourceType: z.literal("webhook"),
+  eventId: z.string().min(1),
+  eventName: z.string().min(1).nullable().default(null),
+  action: z.string().min(1).nullable().default(null),
+  source: z.string().min(1).default("webhook"),
+  payload: jsonValueSchema,
+  request: webhookRequestMetadataSchema,
+  metadata: jsonRecordSchema.default({})
+});
+
+export const inboundExternalEventEnvelopeSchema = z.discriminatedUnion("sourceType", [
+  inboundWebhookEventEnvelopeSchema
+]);
+
+export const externalEventReceiptSchema = z.object({
+  id: z.uuid(),
+  repeatableRunTriggerId: z.uuid(),
+  repeatableRunId: z.uuid(),
+  repositoryId: z.uuid(),
+  workspaceId: z.string().min(1),
+  teamId: z.string().min(1),
+  sourceType: z.enum(externalInputKinds),
+  status: z.enum(externalEventReceiptStatuses),
+  event: inboundExternalEventEnvelopeSchema,
+  rejectionReason: z.string().min(1).nullable().default(null),
+  createdRunId: z.uuid().nullable().default(null),
+  createdAt: z.date(),
+  updatedAt: z.date()
+});
+
+export const runExternalInputContextSchema = z.object({
+  kind: z.enum(externalInputKinds),
+  trigger: z.object({
+    id: z.uuid(),
+    repeatableRunId: z.uuid(),
+    name: z.string().min(1),
+    kind: z.enum(repeatableRunTriggerKinds),
+    metadata: jsonRecordSchema.default({})
+  }),
+  event: inboundExternalEventEnvelopeSchema,
+  receivedAt: z.coerce.date(),
+  metadata: jsonRecordSchema.default({})
+});
+
+export const runContextSchema = z.object({
+  externalInput: runExternalInputContextSchema.nullable().default(null),
+  values: jsonRecordSchema.default({})
+});
+
 export const runCreateSchema = z.object({
   repositoryId: z.uuid(),
   goal: z.string().min(1),
@@ -162,7 +328,11 @@ export const runCreateSchema = z.object({
   budgetCostUsd: z.number().nonnegative().optional(),
   concurrencyCap: z.number().int().positive().default(1),
   policyProfile: z.string().min(1).optional(),
-  metadata: z.record(z.string(), z.unknown()).default({})
+  metadata: z.record(z.string(), z.unknown()).default({}),
+  context: runContextSchema.default({
+    externalInput: null,
+    values: {}
+  })
 });
 
 export const runUpdateSchema = z.object({
@@ -172,7 +342,8 @@ export const runUpdateSchema = z.object({
   budgetCostUsd: z.number().positive().nullable().optional(),
   concurrencyCap: z.number().int().positive().optional(),
   policyProfile: z.string().min(1).nullable().optional(),
-  metadata: z.record(z.string(), z.unknown()).optional()
+  metadata: z.record(z.string(), z.unknown()).optional(),
+  context: runContextSchema.optional()
 }).refine((value) => Object.keys(value).length > 0, {
   message: "at least one run field must be updated"
 });
@@ -1158,8 +1329,20 @@ export const tuiRunDrilldownSchema = z.object({
 
 export type RepositoryCreateInput = z.infer<typeof repositoryCreateSchema>;
 export type RepositoryUpdateInput = z.infer<typeof repositoryUpdateSchema>;
-export type RunCreateInput = z.infer<typeof runCreateSchema>;
-export type RunUpdateInput = z.infer<typeof runUpdateSchema>;
+export type RepeatableRunDefinitionCreateInput = z.infer<typeof repeatableRunDefinitionCreateSchema>;
+export type RepeatableRunDefinition = z.infer<typeof repeatableRunDefinitionSchema>;
+export type RepeatableRunTriggerCreateInput = z.infer<typeof repeatableRunTriggerCreateSchema>;
+export type RepeatableRunTrigger = z.infer<typeof repeatableRunTriggerSchema>;
+export type ExternalEventReceipt = z.infer<typeof externalEventReceiptSchema>;
+export type WebhookTriggerFilter = z.infer<typeof webhookTriggerFilterSchema>;
+export type WebhookTriggerConfig = z.infer<typeof webhookTriggerConfigSchema>;
+export type WebhookRequestMetadata = z.infer<typeof webhookRequestMetadataSchema>;
+export type InboundWebhookEventEnvelope = z.infer<typeof inboundWebhookEventEnvelopeSchema>;
+export type InboundExternalEventEnvelope = z.infer<typeof inboundExternalEventEnvelopeSchema>;
+export type RunExternalInputContext = z.infer<typeof runExternalInputContextSchema>;
+export type RunContext = z.infer<typeof runContextSchema>;
+export type RunCreateInput = z.input<typeof runCreateSchema>;
+export type RunUpdateInput = z.input<typeof runUpdateSchema>;
 export type RunStatusUpdateInput = z.infer<typeof runStatusUpdateSchema>;
 export type RunBudgetCheckpointInput = z.infer<typeof runBudgetCheckpointSchema>;
 export type AgentTeamTemplateMember = z.infer<typeof agentTeamTemplateMemberSchema>;

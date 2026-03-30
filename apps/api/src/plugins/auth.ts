@@ -39,14 +39,14 @@ export const authPlugin = fp(async (app: FastifyInstance) => {
   app.addHook("onRequest", async (request: FastifyRequest) => {
     app.observability.clearActorContext();
 
-    if (request.url === "/health") {
+    if (request.url === "/health" || request.url.startsWith("/api/v1/webhooks/")) {
       request.authContext = {
-        principal: "system",
-        actorId: "system",
-        actorType: "system",
+        principal: request.url === "/health" ? "system" : "webhook-ingress",
+        actorId: request.url === "/health" ? "system" : "webhook-ingress",
+        actorType: request.url === "/health" ? "system" : "service",
         email: null,
-        role: "system",
-        roles: ["system"],
+        role: request.url === "/health" ? "system" : "service",
+        roles: request.url === "/health" ? ["system"] : ["service"],
         workspaceId: null,
         workspaceName: null,
         teamId: null,

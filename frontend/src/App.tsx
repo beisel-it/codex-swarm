@@ -6,7 +6,15 @@ import {
   type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
 } from 'react'
+import type {
+  ExternalEventReceipt as ContractExternalEventReceipt,
+  RepeatableRunDefinition as ContractRepeatableRunDefinition,
+  RepeatableRunDefinitionCreateInput,
+  RepeatableRunTrigger as ContractRepeatableRunTrigger,
+  RepeatableRunTriggerCreateInput,
+} from '../../packages/contracts/src/index.ts'
 import { buildAgentTranscriptTargets, chooseTranscriptSessionId } from './agent-observability'
+import { RepeatableRunsPanel } from './repeatable-runs-panel'
 import { useTheme } from './theme'
 
 type ViewMode = 'board' | 'detail' | 'review' | 'admin'
@@ -441,6 +449,10 @@ type ArtifactDetail = {
   diffSummary: ArtifactDiffSummary | null
 }
 
+type RepeatableRunDefinition = ContractRepeatableRunDefinition
+type RepeatableRunTrigger = ContractRepeatableRunTrigger
+type ExternalEventReceipt = ContractExternalEventReceipt
+
 type Message = {
   id: string
   runId: string
@@ -469,6 +481,9 @@ type ActivityItem = {
 
 type SwarmData = {
   repositories: Repository[]
+  repeatableRunDefinitions: RepeatableRunDefinition[]
+  repeatableRunTriggers: RepeatableRunTrigger[]
+  externalEventReceipts: ExternalEventReceipt[]
   runs: Run[]
   tasks: Task[]
   agents: Agent[]
@@ -1010,6 +1025,9 @@ const mockData: SwarmData = {
       updatedAt: '2026-03-28T18:20:00.000Z',
     },
   ],
+  repeatableRunDefinitions: [],
+  repeatableRunTriggers: [],
+  externalEventReceipts: [],
   runs: [
     {
       id: 'run-alpha',
@@ -1495,6 +1513,9 @@ const taskStatusOrder: TaskStatus[] = ['pending', 'blocked', 'in_progress', 'awa
 function createEmptySwarmData(): SwarmData {
   return {
     repositories: [],
+    repeatableRunDefinitions: [],
+    repeatableRunTriggers: [],
+    externalEventReceipts: [],
     runs: [],
     tasks: [],
     agents: [],
@@ -2225,6 +2246,55 @@ function buildRunTemplateMetadata(template: TeamTemplate | null) {
   }
 }
 
+async function buildRequestError(response: Response) {
+  let payload: unknown = null
+
+  try {
+    payload = await response.json()
+  } catch {
+    payload = null
+  }
+
+  if (payload && typeof payload === 'object') {
+    const record = payload as { error?: unknown; details?: unknown }
+    const baseMessage = typeof record.error === 'string' ? record.error : `Request failed: ${response.status}`
+
+    if (Array.isArray(record.details) && record.details.length > 0) {
+      const details = record.details
+        .map((detail) => {
+          if (!detail || typeof detail !== 'object') {
+            return null
+          }
+
+          const issue = detail as { path?: unknown; message?: unknown }
+          const path = Array.isArray(issue.path)
+            ? issue.path.map((segment) => String(segment)).join('.')
+            : ''
+          const message = typeof issue.message === 'string' ? issue.message : null
+
+          if (!message) {
+            return null
+          }
+
+          return path ? `${path}: ${message}` : message
+        })
+        .filter((value): value is string => Boolean(value))
+
+      if (details.length > 0) {
+        return new Error(`${baseMessage} (${details.join('; ')})`)
+      }
+    }
+
+    if (typeof record.details === 'string' && record.details.trim()) {
+      return new Error(`${baseMessage} (${record.details.trim()})`)
+    }
+
+    return new Error(baseMessage)
+  }
+
+  return new Error(`Request failed: ${response.status}`)
+}
+
 async function requestJson<T>(path: string, init?: RequestInit, allowRetry = true): Promise<T> {
   const headers = new Headers(init?.headers ?? {})
   if (init?.body !== undefined && !headers.has('Content-Type')) {
@@ -2245,7 +2315,7 @@ async function requestJson<T>(path: string, init?: RequestInit, allowRetry = tru
   }
 
   if (!response.ok) {
-    throw new Error(`Request failed: ${response.status}`)
+    throw await buildRequestError(response)
   }
 
   if (response.status === 204) {
@@ -2398,9 +2468,73 @@ async function loadSessionTranscript(sessionId: string): Promise<SessionTranscri
   return requestJson<SessionTranscriptEntry[]>(`/api/v1/sessions/${encodeURIComponent(sessionId)}/transcript`)
 }
 
+async function loadRepeatableRunDefinitions(repositoryId?: string): Promise<RepeatableRunDefinition[]> {
+  const suffix = repositoryId ? `?repositoryId=${encodeURIComponent(repositoryId)}` : ''
+  return requestJson<RepeatableRunDefinition[]>(`/api/v1/repeatable-runs${suffix}`)
+}
+
+async function createRepeatableRunDefinition(input: RepeatableRunDefinitionCreateInput): Promise<RepeatableRunDefinition> {
+  return requestJson<RepeatableRunDefinition>('/api/v1/repeatable-runs', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  })
+}
+
+async function updateRepeatableRunDefinition(
+  definitionId: string,
+  input: Partial<RepeatableRunDefinitionCreateInput>,
+): Promise<RepeatableRunDefinition> {
+  return requestJson<RepeatableRunDefinition>(`/api/v1/repeatable-runs/${encodeURIComponent(definitionId)}`, {
+    method: 'PATCH',
+    body: JSON.stringify(input),
+  })
+}
+
+async function deleteRepeatableRunDefinition(definitionId: string): Promise<void> {
+  await requestJson(`/api/v1/repeatable-runs/${encodeURIComponent(definitionId)}`, {
+    method: 'DELETE',
+  })
+}
+
+async function loadRepeatableRunTriggers(repositoryId?: string): Promise<RepeatableRunTrigger[]> {
+  const suffix = repositoryId ? `?repositoryId=${encodeURIComponent(repositoryId)}` : ''
+  return requestJson<RepeatableRunTrigger[]>(`/api/v1/repeatable-run-triggers${suffix}`)
+}
+
+async function createRepeatableRunTrigger(input: RepeatableRunTriggerCreateInput): Promise<RepeatableRunTrigger> {
+  return requestJson<RepeatableRunTrigger>('/api/v1/repeatable-run-triggers', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  })
+}
+
+async function updateRepeatableRunTrigger(
+  triggerId: string,
+  input: Partial<Omit<RepeatableRunTriggerCreateInput, 'kind'>>,
+): Promise<RepeatableRunTrigger> {
+  return requestJson<RepeatableRunTrigger>(`/api/v1/repeatable-run-triggers/${encodeURIComponent(triggerId)}`, {
+    method: 'PATCH',
+    body: JSON.stringify(input),
+  })
+}
+
+async function deleteRepeatableRunTrigger(triggerId: string): Promise<void> {
+  await requestJson(`/api/v1/repeatable-run-triggers/${encodeURIComponent(triggerId)}`, {
+    method: 'DELETE',
+  })
+}
+
+async function loadExternalEventReceipts(repositoryId?: string): Promise<ExternalEventReceipt[]> {
+  const suffix = repositoryId ? `?repositoryId=${encodeURIComponent(repositoryId)}` : ''
+  return requestJson<ExternalEventReceipt[]>(`/api/v1/external-event-receipts${suffix}`)
+}
+
 async function loadSwarmData(): Promise<SwarmData> {
   try {
     const repositories = await requestJson<Repository[]>('/api/v1/repositories')
+    const repeatableRunDefinitions = await loadRepeatableRunDefinitions().catch(() => [])
+    const repeatableRunTriggers = await loadRepeatableRunTriggers().catch(() => [])
+    const externalEventReceipts = await loadExternalEventReceipts().catch(() => [])
     const runs = await requestJson<Run[]>('/api/v1/runs')
     const workerNodes = await requestJson<WorkerNode[]>('/api/v1/worker-nodes').catch(() => [])
     const identity = await loadIdentity().catch(() => null)
@@ -2409,6 +2543,9 @@ async function loadSwarmData(): Promise<SwarmData> {
       return {
         ...createEmptySwarmData(),
         repositories,
+        repeatableRunDefinitions,
+        repeatableRunTriggers,
+        externalEventReceipts,
         runs,
         workerNodes,
         identity,
@@ -2468,6 +2605,9 @@ async function loadSwarmData(): Promise<SwarmData> {
 
     return {
       repositories,
+      repeatableRunDefinitions,
+      repeatableRunTriggers,
+      externalEventReceipts,
       runs,
       tasks: details.flatMap((detail) => detail.tasks),
       agents: details.flatMap((detail) => detail.agents),
@@ -2751,6 +2891,7 @@ function App() {
   const [repoDraftProvider, setRepoDraftProvider] = useState<RepositoryProvider>('github')
   const [editingRepositoryId, setEditingRepositoryId] = useState<string | null>(null)
   const [runDraftRepositoryId, setRunDraftRepositoryId] = useState('')
+  const [selectedConfigRepositoryId, setSelectedConfigRepositoryId] = useState('')
   const [selectedTeamTemplateId, setSelectedTeamTemplateId] = useState(defaultTeamTemplates[0]?.id ?? '')
   const [runDraftGoal, setRunDraftGoal] = useState(defaultTeamTemplates[0]?.suggestedGoal ?? 'Ship the next iteration through codex-swarm.')
   const [runDraftBranchName, setRunDraftBranchName] = useState('main')
@@ -2955,6 +3096,15 @@ function App() {
     const nextRepositoryId = selectedRepositoryStableId ?? data.repositories[0]?.id ?? ''
     setRunDraftRepositoryId(nextRepositoryId)
   }, [data.repositories, runDraftRepositoryId, selectedRepositoryStableId])
+
+  useEffect(() => {
+    if (selectedConfigRepositoryId && data.repositories.some((repository) => repository.id === selectedConfigRepositoryId)) {
+      return
+    }
+
+    const nextRepositoryId = selectedRepositoryStableId ?? data.repositories[0]?.id ?? ''
+    setSelectedConfigRepositoryId(nextRepositoryId)
+  }, [data.repositories, selectedConfigRepositoryId, selectedRepositoryStableId])
 
   const runTasks = data.tasks.filter((task) => task.runId === selectedRun?.id)
   const selectedTaskDag = selectedRun
@@ -3564,6 +3714,96 @@ function App() {
     }
   }
 
+  async function handleCreateRepeatableRunDefinition(input: RepeatableRunDefinitionCreateInput) {
+    setActionPending(true)
+
+    try {
+      await createRepeatableRunDefinition(input)
+      await refreshSwarmData(selectedRun?.id)
+      setErrorText('')
+    } catch (error) {
+      setErrorText(error instanceof Error ? error.message : 'Unable to create repeatable run')
+    } finally {
+      setActionPending(false)
+    }
+  }
+
+  async function handleUpdateRepeatableRunDefinition(
+    definitionId: string,
+    input: Partial<RepeatableRunDefinitionCreateInput>,
+  ) {
+    setActionPending(true)
+
+    try {
+      await updateRepeatableRunDefinition(definitionId, input)
+      await refreshSwarmData(selectedRun?.id)
+      setErrorText('')
+    } catch (error) {
+      setErrorText(error instanceof Error ? error.message : 'Unable to update repeatable run')
+    } finally {
+      setActionPending(false)
+    }
+  }
+
+  async function handleDeleteRepeatableRunDefinition(definition: RepeatableRunDefinition) {
+    setActionPending(true)
+
+    try {
+      await deleteRepeatableRunDefinition(definition.id)
+      await refreshSwarmData(selectedRun?.id)
+      setErrorText('')
+    } catch (error) {
+      setErrorText(error instanceof Error ? error.message : `Unable to delete ${definition.name}`)
+    } finally {
+      setActionPending(false)
+    }
+  }
+
+  async function handleCreateRepeatableRunTrigger(input: RepeatableRunTriggerCreateInput) {
+    setActionPending(true)
+
+    try {
+      await createRepeatableRunTrigger(input)
+      await refreshSwarmData(selectedRun?.id)
+      setErrorText('')
+    } catch (error) {
+      setErrorText(error instanceof Error ? error.message : 'Unable to create webhook trigger')
+    } finally {
+      setActionPending(false)
+    }
+  }
+
+  async function handleUpdateRepeatableRunTrigger(
+    triggerId: string,
+    input: Partial<Omit<RepeatableRunTriggerCreateInput, 'kind'>>,
+  ) {
+    setActionPending(true)
+
+    try {
+      await updateRepeatableRunTrigger(triggerId, input)
+      await refreshSwarmData(selectedRun?.id)
+      setErrorText('')
+    } catch (error) {
+      setErrorText(error instanceof Error ? error.message : 'Unable to update webhook trigger')
+    } finally {
+      setActionPending(false)
+    }
+  }
+
+  async function handleDeleteRepeatableRunTrigger(trigger: RepeatableRunTrigger) {
+    setActionPending(true)
+
+    try {
+      await deleteRepeatableRunTrigger(trigger.id)
+      await refreshSwarmData(selectedRun?.id)
+      setErrorText('')
+    } catch (error) {
+      setErrorText(error instanceof Error ? error.message : `Unable to delete ${trigger.name}`)
+    } finally {
+      setActionPending(false)
+    }
+  }
+
   function handleSidebarResizeStart(event: ReactPointerEvent<HTMLDivElement>) {
     event.preventDefault()
 
@@ -3982,6 +4222,23 @@ function App() {
             </section>
             </div>
           </div>
+
+          <RepeatableRunsPanel
+            repositories={data.repositories}
+            selectedRepositoryId={selectedConfigRepositoryId}
+            onSelectedRepositoryIdChange={setSelectedConfigRepositoryId}
+            definitions={data.repeatableRunDefinitions}
+            triggers={data.repeatableRunTriggers}
+            receipts={data.externalEventReceipts}
+            actionPending={actionPending}
+            errorText={errorText}
+            onCreateDefinition={handleCreateRepeatableRunDefinition}
+            onUpdateDefinition={handleUpdateRepeatableRunDefinition}
+            onDeleteDefinition={handleDeleteRepeatableRunDefinition}
+            onCreateTrigger={handleCreateRepeatableRunTrigger}
+            onUpdateTrigger={handleUpdateRepeatableRunTrigger}
+            onDeleteTrigger={handleDeleteRepeatableRunTrigger}
+          />
 
           {errorText ? <p className="control-error control-error-inline">{errorText}</p> : null}
 

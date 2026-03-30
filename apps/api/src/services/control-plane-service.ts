@@ -9,11 +9,14 @@ import {
   type CleanupJobReport,
   type CleanupJobRunInput,
   type ControlPlaneEvent,
+  type ExternalEventReceipt,
   type GovernanceAdminReport,
   type Run,
   type RunAuditExport,
   type RunBudgetCheckpointInput,
   type RunBudgetState,
+  type RepeatableRunDefinitionCreateInput,
+  type RepeatableRunTriggerCreateInput,
   type Agent,
   type AgentCreateInput,
   type ApprovalCreateInput,
@@ -25,7 +28,10 @@ import {
   type RetentionReconcileReport,
   type RetentionWindowSummary,
   type RunCreateInput,
+  type RepeatableRunDefinition,
+  type RepeatableRunTrigger,
   type RunUpdateInput,
+  type RunContext,
   type TuiAlert,
   type TuiOverview,
   type TuiOverviewRun,
@@ -52,9 +58,13 @@ import {
   type WorkerNode,
   type WorkerNodeDrainUpdateInput,
   type WorkerNodeHeartbeatInput,
-  type WorkerNodeRegisterInput
+  type WorkerNodeRegisterInput,
+  inboundWebhookEventEnvelopeSchema,
+  repeatableRunDefinitionSchema,
+  repeatableRunTriggerSchema,
+  runContextSchema
 } from "@codex-swarm/contracts";
-import { resolveInitialTaskStatus } from "@codex-swarm/orchestration";
+import { formatRunExecutionContext, resolveInitialTaskStatus } from "@codex-swarm/orchestration";
 import { buildSessionRecoveryPlan, cleanupWorktreePaths, createWorktreePath } from "@codex-swarm/worker";
 
 import type { AppDb } from "../db/client.js";
@@ -63,7 +73,10 @@ import {
   approvals,
   artifacts,
   controlPlaneEvents,
+  externalEventReceipts,
   messages,
+  repeatableRunDefinitions,
+  repeatableRunTriggers,
   repositories,
   runs,
   sessions,
@@ -81,6 +94,8 @@ import type {
   agentSessionCreateSchema,
   approvalCreateSchema,
   messageCreateSchema,
+  repeatableRunDefinitionUpdateSchema,
+  repeatableRunTriggerUpdateSchema,
   runBranchPublishSchema,
   runPullRequestHandoffSchema,
   workerDispatchSessionAttachSchema,
@@ -90,6 +105,10 @@ import { z } from "zod";
 
 type RepositoryCreate = RepositoryCreateInput;
 type RepositoryUpdate = RepositoryUpdateInput;
+type RepeatableRunDefinitionCreate = RepeatableRunDefinitionCreateInput;
+type RepeatableRunDefinitionUpdate = z.infer<typeof repeatableRunDefinitionUpdateSchema>;
+type RepeatableRunTriggerCreate = RepeatableRunTriggerCreateInput;
+type RepeatableRunTriggerUpdate = z.infer<typeof repeatableRunTriggerUpdateSchema>;
 type RunCreate = RunCreateInput;
 type RunUpdate = RunUpdateInput;
 type RunStatusUpdate = RunStatusUpdateInput;
@@ -114,6 +133,7 @@ type WorkerDispatchComplete = WorkerDispatchCompleteInput;
 type WorkerDispatchSessionAttach = z.infer<typeof workerDispatchSessionAttachSchema>;
 type SessionTranscriptEntryCreate = SessionTranscriptEntryCreateInput;
 type WorkerNodeReconcile = WorkerNodeReconcileInput;
+type WebhookEnvelope = z.infer<typeof inboundWebhookEventEnvelopeSchema>;
 type AccessBoundary = Pick<ActorIdentity, "workspaceId" | "workspaceName" | "teamId" | "teamName"> & {
   policyProfile?: ActorIdentity["policyProfile"];
 };
@@ -127,6 +147,25 @@ type OwnershipBoundary = {
 type TeamRecord = typeof teams.$inferSelect;
 type AgentRecord = typeof agents.$inferSelect;
 type SessionRecord = typeof sessions.$inferSelect;
+type RepeatableRunDefinitionRecord = typeof repeatableRunDefinitions.$inferSelect;
+type RepeatableRunTriggerRecord = typeof repeatableRunTriggers.$inferSelect;
+
+export interface IngestWebhookInput {
+  endpointPath: string;
+  method: string;
+  headers: Record<string, string>;
+  query: Record<string, string | string[]>;
+  body: unknown;
+  contentType?: string | null;
+  contentLengthBytes?: number | null;
+  remoteAddress?: string | null;
+  userAgent?: string | null;
+}
+
+export interface IngestWebhookResult {
+  receipt: ExternalEventReceipt;
+  run: Run | null;
+}
 
 const activeAgentStatuses = new Set<Agent["status"]>(["provisioning", "idle", "busy", "paused"]);
 
@@ -633,6 +672,61 @@ function requiresSensitiveDefaults(
   return repository.trustLevel !== "trusted" || policyProfile !== "standard";
 }
 
+function normalizeHeaderLookup(headers: Record<string, string>) {
+  const normalized = new Map<string, string>();
+
+  for (const [key, value] of Object.entries(headers)) {
+    normalized.set(key.toLowerCase(), value);
+  }
+
+  return (name: string | null | undefined) => {
+    if (!name) {
+      return null;
+    }
+
+    return normalized.get(name.toLowerCase()) ?? null;
+  };
+}
+
+function readWebhookAction(payload: unknown) {
+  if (!payload || typeof payload !== "object") {
+    return null;
+  }
+
+  const value = (payload as Record<string, unknown>).action;
+  return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+function readWebhookBranch(payload: unknown) {
+  if (!payload || typeof payload !== "object") {
+    return null;
+  }
+
+  const record = payload as Record<string, unknown>;
+  const ref = typeof record.ref === "string" && record.ref.length > 0
+    ? record.ref.replace(/^refs\/heads\//, "")
+    : null;
+
+  if (ref) {
+    return ref;
+  }
+
+  const pullRequest = record.pull_request;
+
+  if (!pullRequest || typeof pullRequest !== "object") {
+    return null;
+  }
+
+  const base = (pullRequest as Record<string, unknown>).base;
+
+  if (!base || typeof base !== "object") {
+    return null;
+  }
+
+  const branch = (base as Record<string, unknown>).ref;
+  return typeof branch === "string" && branch.length > 0 ? branch : null;
+}
+
 export class ControlPlaneService {
   constructor(
     private readonly db: AppDb,
@@ -791,6 +885,222 @@ export class ControlPlaneService {
     await this.db.delete(repositories).where(eq(repositories.id, repositoryId));
   }
 
+  async listRepeatableRunDefinitions(repositoryId?: string, access?: AccessBoundary) {
+    const boundary = requireAccessBoundary(access);
+
+    if (repositoryId) {
+      await this.assertRepositoryExists(repositoryId, boundary);
+    }
+
+    const conditions = [
+      eq(repeatableRunDefinitions.workspaceId, boundary.workspaceId),
+      eq(repeatableRunDefinitions.teamId, boundary.teamId)
+    ];
+
+    if (repositoryId) {
+      conditions.push(eq(repeatableRunDefinitions.repositoryId, repositoryId));
+    }
+
+    const rows = await this.db
+      .select()
+      .from(repeatableRunDefinitions)
+      .where(and(...conditions))
+      .orderBy(asc(repeatableRunDefinitions.createdAt));
+
+    return rows.map((definition) => this.mapRepeatableRunDefinition(definition));
+  }
+
+  async createRepeatableRunDefinition(input: RepeatableRunDefinitionCreate, access?: AccessBoundary) {
+    const boundary = requireAccessBoundary(access);
+    const repository = await this.assertRepositoryExists(input.repositoryId, boundary);
+    const now = this.clock.now();
+
+    const [definition] = await this.db.insert(repeatableRunDefinitions).values({
+      id: crypto.randomUUID(),
+      repositoryId: repository.id,
+      workspaceId: repository.workspaceId,
+      teamId: repository.teamId,
+      name: input.name,
+      description: input.description ?? null,
+      status: input.status,
+      execution: input.execution,
+      createdAt: now,
+      updatedAt: now
+    }).returning();
+
+    return this.mapRepeatableRunDefinition(expectPersistedRecord(definition, "repeatable run definition"));
+  }
+
+  async updateRepeatableRunDefinition(repeatableRunId: string, input: RepeatableRunDefinitionUpdate, access?: AccessBoundary) {
+    const existing = await this.assertRepeatableRunDefinitionExists(repeatableRunId, access);
+    const repository = input.repositoryId
+      ? await this.assertRepositoryExists(input.repositoryId, access)
+      : await this.assertRepositoryExists(existing.repositoryId, access);
+    const now = this.clock.now();
+
+    const [definition] = await this.db.update(repeatableRunDefinitions).set({
+      repositoryId: repository.id,
+      workspaceId: repository.workspaceId,
+      teamId: repository.teamId,
+      name: input.name ?? existing.name,
+      description: input.description === undefined ? existing.description : input.description,
+      status: input.status ?? existing.status,
+      execution: input.execution ?? existing.execution,
+      updatedAt: now
+    }).where(eq(repeatableRunDefinitions.id, repeatableRunId)).returning();
+
+    return this.mapRepeatableRunDefinition(expectPersistedRecord(definition, "repeatable run definition"));
+  }
+
+  async deleteRepeatableRunDefinition(repeatableRunId: string, access?: AccessBoundary) {
+    await this.assertRepeatableRunDefinitionExists(repeatableRunId, access);
+    const relatedTriggers = await this.db
+      .select({ id: repeatableRunTriggers.id })
+      .from(repeatableRunTriggers)
+      .where(eq(repeatableRunTriggers.repeatableRunId, repeatableRunId));
+
+    if (relatedTriggers.length > 0) {
+      throw new HttpError(409, "repeatable run cannot be deleted while triggers still reference it");
+    }
+
+    await this.db.delete(repeatableRunDefinitions).where(eq(repeatableRunDefinitions.id, repeatableRunId));
+  }
+
+  async listRepeatableRunTriggers(
+    query: {
+      repositoryId?: string | undefined;
+      repeatableRunId?: string | undefined;
+    },
+    access?: AccessBoundary
+  ) {
+    const boundary = requireAccessBoundary(access);
+    const definitions = await this.listRepeatableRunDefinitions(query.repositoryId, boundary);
+    const definitionIds = new Set(
+      definitions
+        .filter((definition) => !query.repeatableRunId || definition.id === query.repeatableRunId)
+        .map((definition) => definition.id)
+    );
+
+    if (definitionIds.size === 0) {
+      return [] as RepeatableRunTrigger[];
+    }
+
+    const rows = await this.db
+      .select()
+      .from(repeatableRunTriggers)
+      .where(and(
+        eq(repeatableRunTriggers.workspaceId, boundary.workspaceId),
+        eq(repeatableRunTriggers.teamId, boundary.teamId),
+        inArray(repeatableRunTriggers.repeatableRunId, [...definitionIds])
+      ))
+      .orderBy(asc(repeatableRunTriggers.createdAt));
+
+    return rows.map((trigger) => this.mapRepeatableRunTrigger(trigger));
+  }
+
+  async createRepeatableRunTrigger(input: RepeatableRunTriggerCreate, access?: AccessBoundary) {
+    const definition = await this.assertRepeatableRunDefinitionExists(input.repeatableRunId, access);
+
+    if (input.kind === "webhook") {
+      await this.assertWebhookEndpointAvailable(input.config.endpointPath);
+    }
+
+    const now = this.clock.now();
+    const [trigger] = await this.db.insert(repeatableRunTriggers).values({
+      id: crypto.randomUUID(),
+      repeatableRunId: definition.id,
+      workspaceId: definition.workspaceId,
+      teamId: definition.teamId,
+      name: input.name,
+      description: input.description ?? null,
+      enabled: input.enabled,
+      kind: input.kind,
+      config: input.config,
+      createdAt: now,
+      updatedAt: now
+    }).returning();
+
+    return this.mapRepeatableRunTrigger(expectPersistedRecord(trigger, "repeatable run trigger"));
+  }
+
+  async updateRepeatableRunTrigger(triggerId: string, input: RepeatableRunTriggerUpdate, access?: AccessBoundary) {
+    const existing = await this.assertRepeatableRunTriggerExists(triggerId, access);
+    const definition = input.repeatableRunId
+      ? await this.assertRepeatableRunDefinitionExists(input.repeatableRunId, access)
+      : await this.assertRepeatableRunDefinitionExists(existing.repeatableRunId, access);
+    const nextConfig = input.config ?? existing.config;
+
+    if (existing.kind === "webhook") {
+      await this.assertWebhookEndpointAvailable(nextConfig.endpointPath, existing.id);
+    }
+
+    const now = this.clock.now();
+    const [trigger] = await this.db.update(repeatableRunTriggers).set({
+      repeatableRunId: definition.id,
+      workspaceId: definition.workspaceId,
+      teamId: definition.teamId,
+      name: input.name ?? existing.name,
+      description: input.description === undefined ? existing.description : input.description,
+      enabled: input.enabled ?? existing.enabled,
+      config: nextConfig,
+      updatedAt: now
+    }).where(eq(repeatableRunTriggers.id, triggerId)).returning();
+
+    return this.mapRepeatableRunTrigger(expectPersistedRecord(trigger, "repeatable run trigger"));
+  }
+
+  async deleteRepeatableRunTrigger(triggerId: string, access?: AccessBoundary) {
+    await this.assertRepeatableRunTriggerExists(triggerId, access);
+    const relatedReceipts = await this.db
+      .select({ id: externalEventReceipts.id })
+      .from(externalEventReceipts)
+      .where(eq(externalEventReceipts.repeatableRunTriggerId, triggerId));
+
+    if (relatedReceipts.length > 0) {
+      throw new HttpError(409, "repeatable run trigger cannot be deleted after receiving events");
+    }
+
+    await this.db.delete(repeatableRunTriggers).where(eq(repeatableRunTriggers.id, triggerId));
+  }
+
+  async listExternalEventReceipts(
+    query: {
+      repositoryId?: string | undefined;
+      repeatableRunId?: string | undefined;
+      repeatableRunTriggerId?: string | undefined;
+    },
+    access?: AccessBoundary
+  ) {
+    const boundary = requireAccessBoundary(access);
+    const conditions = [
+      eq(externalEventReceipts.workspaceId, boundary.workspaceId),
+      eq(externalEventReceipts.teamId, boundary.teamId)
+    ];
+
+    if (query.repositoryId) {
+      await this.assertRepositoryExists(query.repositoryId, boundary);
+      conditions.push(eq(externalEventReceipts.repositoryId, query.repositoryId));
+    }
+
+    if (query.repeatableRunId) {
+      await this.assertRepeatableRunDefinitionExists(query.repeatableRunId, boundary);
+      conditions.push(eq(externalEventReceipts.repeatableRunId, query.repeatableRunId));
+    }
+
+    if (query.repeatableRunTriggerId) {
+      await this.assertRepeatableRunTriggerExists(query.repeatableRunTriggerId, boundary);
+      conditions.push(eq(externalEventReceipts.repeatableRunTriggerId, query.repeatableRunTriggerId));
+    }
+
+    const rows = await this.db
+      .select()
+      .from(externalEventReceipts)
+      .where(and(...conditions))
+      .orderBy(asc(externalEventReceipts.createdAt));
+
+    return rows.map((receipt) => this.mapExternalEventReceipt(receipt));
+  }
+
   async listRuns(repositoryId?: string, access?: AccessBoundary) {
     const boundary = requireAccessBoundary(access);
     if (repositoryId) {
@@ -906,12 +1216,180 @@ export class ControlPlaneService {
       handoffStatus: "pending",
       completedAt: null,
       metadata: input.metadata,
+      context: input.context,
       createdBy,
       createdAt: now,
       updatedAt: now
     }).returning();
 
     return this.mapRun(expectPersistedRecord(run, "run"));
+  }
+
+  async ingestWebhook(input: IngestWebhookInput): Promise<IngestWebhookResult> {
+    const now = this.clock.now();
+    const trigger = await this.resolveWebhookTriggerByPath(input.endpointPath);
+    const repeatableRun = await this.assertRepeatableRunDefinitionExists(trigger.repeatableRunId);
+    const repository = await this.assertRepositoryExists(repeatableRun.repositoryId, {
+      workspaceId: repeatableRun.workspaceId,
+      workspaceName: null,
+      teamId: repeatableRun.teamId,
+      teamName: null
+    });
+    const headerValue = normalizeHeaderLookup(input.headers);
+    const signatureValue = headerValue(trigger.config.signatureHeader);
+    const deliveryId = headerValue(trigger.config.deliveryIdHeader) ?? crypto.randomUUID();
+    const eventName = headerValue(trigger.config.eventNameHeader);
+    const action = readWebhookAction(input.body);
+    const event = inboundWebhookEventEnvelopeSchema.parse({
+      sourceType: "webhook",
+      eventId: deliveryId,
+      eventName,
+      action,
+      source: "webhook",
+      payload: input.body ?? null,
+      request: {
+        method: input.method,
+        path: input.endpointPath,
+        query: input.query,
+        headers: input.headers,
+        contentType: input.contentType ?? null,
+        contentLengthBytes: input.contentLengthBytes ?? null,
+        receivedAt: now,
+        remoteAddress: input.remoteAddress ?? null,
+        userAgent: input.userAgent ?? null,
+        deliveryId,
+        signature: trigger.config.signatureHeader && signatureValue
+          ? {
+              header: trigger.config.signatureHeader,
+              value: signatureValue,
+              algorithm: null,
+              valid: null
+            }
+          : null
+      },
+      metadata: {
+        endpointPath: input.endpointPath
+      }
+    });
+
+    const [receiptRow] = await this.db.insert(externalEventReceipts).values({
+      id: crypto.randomUUID(),
+      repeatableRunTriggerId: trigger.id,
+      repeatableRunId: repeatableRun.id,
+      repositoryId: repeatableRun.repositoryId,
+      workspaceId: repeatableRun.workspaceId,
+      teamId: repeatableRun.teamId,
+      sourceType: "webhook",
+      status: "received",
+      event,
+      rejectionReason: null,
+      createdRunId: null,
+      createdAt: now,
+      updatedAt: now
+    }).returning();
+
+    const receiptId = expectPersistedRecord(receiptRow, "external event receipt").id;
+    const rejectionReason = this.validateWebhookTriggerRequest(trigger, repeatableRun, input, event);
+
+    if (rejectionReason) {
+      const [updatedReceipt] = await this.db.update(externalEventReceipts).set({
+        status: "rejected",
+        rejectionReason,
+        updatedAt: now,
+        event: {
+          ...event,
+          request: {
+            ...event.request,
+            signature: event.request.signature
+              ? {
+                  ...event.request.signature,
+                  valid: false
+                }
+              : null
+          }
+        }
+      }).where(eq(externalEventReceipts.id, receiptId)).returning();
+
+      return {
+        receipt: this.mapExternalEventReceipt(expectPersistedRecord(updatedReceipt, "external event receipt")),
+        run: null
+      };
+    }
+
+    try {
+      const runContext: RunContext = {
+        externalInput: {
+          kind: "webhook",
+          trigger: {
+            id: trigger.id,
+            repeatableRunId: repeatableRun.id,
+            name: trigger.name,
+            kind: "webhook",
+            metadata: trigger.config.metadata
+          },
+          event: {
+            ...event,
+            request: {
+              ...event.request,
+              signature: event.request.signature
+                ? {
+                    ...event.request.signature,
+                    valid: trigger.config.secretRef ? true : null
+                  }
+                : null
+            }
+          },
+          receivedAt: now,
+          metadata: {
+            receiptId
+          }
+        },
+        values: {}
+      };
+      const run = await this.createRun({
+        repositoryId: repository.id,
+        goal: repeatableRun.execution.goal,
+        branchName: repeatableRun.execution.branchName ?? undefined,
+        planArtifactPath: repeatableRun.execution.planArtifactPath ?? undefined,
+        budgetTokens: repeatableRun.execution.budgetTokens ?? undefined,
+        budgetCostUsd: repeatableRun.execution.budgetCostUsd ?? undefined,
+        concurrencyCap: repeatableRun.execution.concurrencyCap,
+        policyProfile: repeatableRun.execution.policyProfile ?? undefined,
+        metadata: {
+          ...repeatableRun.execution.metadata,
+          repeatableRun: {
+            id: repeatableRun.id,
+            name: repeatableRun.name
+          },
+          externalEventReceiptId: receiptId
+        },
+        context: runContext
+      }, "external-trigger", {
+        workspaceId: repeatableRun.workspaceId,
+        workspaceName: null,
+        teamId: repeatableRun.teamId,
+        teamName: null,
+        policyProfile: repository.approvalProfile
+      });
+
+      const [updatedReceipt] = await this.db.update(externalEventReceipts).set({
+        status: "run_created",
+        createdRunId: run.id,
+        updatedAt: now
+      }).where(eq(externalEventReceipts.id, receiptId)).returning();
+
+      return {
+        receipt: this.mapExternalEventReceipt(expectPersistedRecord(updatedReceipt, "external event receipt")),
+        run
+      };
+    } catch (error) {
+      await this.db.update(externalEventReceipts).set({
+        status: "failed",
+        rejectionReason: error instanceof Error ? error.message : "webhook_processing_failed",
+        updatedAt: now
+      }).where(eq(externalEventReceipts.id, receiptId));
+      throw error;
+    }
   }
 
   async updateRunStatus(runId: string, input: RunStatusUpdate, access?: AccessBoundary) {
@@ -946,6 +1424,7 @@ export class ControlPlaneService {
       concurrencyCap: input.concurrencyCap ?? existingRun.concurrencyCap,
       policyProfile: input.policyProfile === undefined ? existingRun.policyProfile : input.policyProfile,
       metadata: input.metadata === undefined ? existingRun.metadata : input.metadata,
+      context: input.context === undefined ? existingRun.context : input.context,
       updatedAt: now
     }).where(eq(runs.id, runId)).returning();
 
@@ -3127,10 +3606,12 @@ export class ControlPlaneService {
     const acceptanceCriteria = task.acceptanceCriteria.length > 0
       ? task.acceptanceCriteria.map((criterion) => `- ${criterion}`).join("\n")
       : "- Complete the assigned task and leave clear implementation notes.";
+    const runContext = formatRunExecutionContext(run.context);
 
     return [
       `Repository: ${repository.name}`,
       `Run goal: ${run.goal}`,
+      ...(runContext ? [runContext] : []),
       `Task: ${task.title}`,
       `Role: ${task.role}`,
       "",
@@ -3692,6 +4173,172 @@ export class ControlPlaneService {
     };
   }
 
+  private async resolveWebhookTriggerByPath(endpointPath: string): Promise<RepeatableRunTrigger> {
+    const rows = await this.db.select().from(repeatableRunTriggers).orderBy(asc(repeatableRunTriggers.createdAt));
+    const matches = rows
+      .map((row) => this.mapRepeatableRunTrigger(row))
+      .filter((trigger) => trigger.kind === "webhook" && trigger.config.endpointPath === endpointPath);
+
+    if (matches.length === 0) {
+      throw new HttpError(404, `no webhook trigger is configured for ${endpointPath}`);
+    }
+
+    if (matches.length > 1) {
+      throw new HttpError(409, `multiple webhook triggers are configured for ${endpointPath}`);
+    }
+
+    return matches[0]!;
+  }
+
+  private async assertRepeatableRunDefinitionExists(repeatableRunId: string, access?: AccessBoundary): Promise<RepeatableRunDefinition> {
+    const rows = await this.db.select().from(repeatableRunDefinitions).where(eq(repeatableRunDefinitions.id, repeatableRunId));
+    const definition = rows[0];
+
+    if (!definition) {
+      throw new HttpError(404, `repeatable run ${repeatableRunId} was not found`);
+    }
+
+    if (access) {
+      const boundary = requireAccessBoundary(access);
+
+      if (definition.workspaceId !== boundary.workspaceId || definition.teamId !== boundary.teamId) {
+        throw new HttpError(404, `repeatable run ${repeatableRunId} was not found`);
+      }
+    }
+
+    return this.mapRepeatableRunDefinition(definition);
+  }
+
+  private async assertRepeatableRunTriggerExists(triggerId: string, access?: AccessBoundary): Promise<RepeatableRunTrigger> {
+    const rows = await this.db.select().from(repeatableRunTriggers).where(eq(repeatableRunTriggers.id, triggerId));
+    const trigger = rows[0];
+
+    if (!trigger) {
+      throw new HttpError(404, `repeatable run trigger ${triggerId} was not found`);
+    }
+
+    if (access) {
+      const boundary = requireAccessBoundary(access);
+
+      if (trigger.workspaceId !== boundary.workspaceId || trigger.teamId !== boundary.teamId) {
+        throw new HttpError(404, `repeatable run trigger ${triggerId} was not found`);
+      }
+    }
+
+    return this.mapRepeatableRunTrigger(trigger);
+  }
+
+  private async assertWebhookEndpointAvailable(endpointPath: string, excludingTriggerId?: string) {
+    const rows = await this.db.select().from(repeatableRunTriggers).orderBy(asc(repeatableRunTriggers.createdAt));
+    const conflictingTrigger = rows
+      .map((row) => this.mapRepeatableRunTrigger(row))
+      .find((trigger) =>
+        trigger.kind === "webhook"
+        && trigger.config.endpointPath === endpointPath
+        && trigger.id !== excludingTriggerId
+      );
+
+    if (conflictingTrigger) {
+      throw new HttpError(409, `webhook endpoint path ${endpointPath} is already assigned to trigger ${conflictingTrigger.name}`);
+    }
+  }
+
+  private validateWebhookTriggerRequest(
+    trigger: RepeatableRunTrigger,
+    repeatableRun: RepeatableRunDefinition,
+    input: IngestWebhookInput,
+    event: WebhookEnvelope
+  ) {
+    const headerValue = normalizeHeaderLookup(input.headers);
+
+    if (!trigger.enabled) {
+      return "trigger is disabled";
+    }
+
+    if (repeatableRun.status !== "active") {
+      return `repeatable run is ${repeatableRun.status}`;
+    }
+
+    if (!trigger.config.allowedMethods.includes(input.method as "POST" | "PUT")) {
+      return `method ${input.method} is not allowed`;
+    }
+
+    if ((input.contentLengthBytes ?? 0) > trigger.config.maxPayloadBytes) {
+      return `payload exceeds configured limit of ${trigger.config.maxPayloadBytes} bytes`;
+    }
+
+    if (trigger.config.secretRef) {
+      if (!trigger.config.signatureHeader) {
+        return "trigger secretRef requires signatureHeader configuration";
+      }
+
+      const expectedSecret = process.env[trigger.config.secretRef];
+
+      if (!expectedSecret) {
+        return `configured secret ${trigger.config.secretRef} is unavailable`;
+      }
+
+      const providedSignature = headerValue(trigger.config.signatureHeader);
+
+      if (!providedSignature || providedSignature !== expectedSecret) {
+        return "webhook signature validation failed";
+      }
+    }
+
+    if (trigger.config.filters.eventNames.length > 0 && !trigger.config.filters.eventNames.includes(event.eventName ?? "")) {
+      return `event ${event.eventName ?? "unknown"} is not accepted`;
+    }
+
+    if (trigger.config.filters.actions.length > 0 && !trigger.config.filters.actions.includes(event.action ?? "")) {
+      return `action ${event.action ?? "unknown"} is not accepted`;
+    }
+
+    const branch = readWebhookBranch(input.body);
+
+    if (trigger.config.filters.branches.length > 0 && !trigger.config.filters.branches.includes(branch ?? "")) {
+      return `branch ${branch ?? "unknown"} is not accepted`;
+    }
+
+    if (trigger.config.filters.path && trigger.config.filters.path !== input.endpointPath) {
+      return `path ${input.endpointPath} does not match trigger filter`;
+    }
+
+    if (Object.keys(trigger.config.filters.metadata).length > 0) {
+      const payloadMetadata = input.body && typeof input.body === "object" && !Array.isArray(input.body)
+        ? ((input.body as Record<string, unknown>).metadata ?? {})
+        : {};
+
+      if (!payloadMetadata || typeof payloadMetadata !== "object" || Array.isArray(payloadMetadata)) {
+        return "metadata filters require payload.metadata object";
+      }
+
+      for (const [key, value] of Object.entries(trigger.config.filters.metadata)) {
+        if ((payloadMetadata as Record<string, unknown>)[key] !== value) {
+          return `metadata filter ${key} did not match`;
+        }
+      }
+    }
+
+    return null;
+  }
+
+  private mapRepeatableRunDefinition(record: RepeatableRunDefinitionRecord): RepeatableRunDefinition {
+    return repeatableRunDefinitionSchema.parse(record);
+  }
+
+  private mapRepeatableRunTrigger(record: RepeatableRunTriggerRecord): RepeatableRunTrigger {
+    return repeatableRunTriggerSchema.parse(record);
+  }
+
+  private mapExternalEventReceipt(record: typeof externalEventReceipts.$inferSelect): ExternalEventReceipt {
+    return {
+      ...record,
+      sourceType: record.sourceType as ExternalEventReceipt["sourceType"],
+      status: record.status as ExternalEventReceipt["status"],
+      event: inboundWebhookEventEnvelopeSchema.parse(record.event)
+    };
+  }
+
   private mapRun(run: typeof runs.$inferSelect): Run {
     return {
       ...run,
@@ -3700,7 +4347,11 @@ export class ControlPlaneService {
       branchPublishApprovalId: run.branchPublishApprovalId ?? null,
       pullRequestStatus: run.pullRequestStatus as Run["pullRequestStatus"],
       pullRequestApprovalId: run.pullRequestApprovalId ?? null,
-      handoffStatus: run.handoffStatus as Run["handoffStatus"]
+      handoffStatus: run.handoffStatus as Run["handoffStatus"],
+      context: runContextSchema.parse(run.context ?? {
+        externalInput: null,
+        values: {}
+      })
     };
   }
 

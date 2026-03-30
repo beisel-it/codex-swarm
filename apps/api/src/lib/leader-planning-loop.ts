@@ -200,9 +200,9 @@ export async function runLeaderPlanningLoop(input: LeaderPlanningLoopInput): Pro
     });
     const continued = await continueRuntime.continueSession(
       persistedSession.id,
-      input.planningPrompt ?? buildLeaderPlanningPrompt(runDetail.goal)
+      input.planningPrompt ?? buildLeaderPlanningPrompt(runDetail.goal, runDetail.context)
     );
-    const planningPrompt = input.planningPrompt ?? buildLeaderPlanningPrompt(runDetail.goal);
+    const planningPrompt = input.planningPrompt ?? buildLeaderPlanningPrompt(runDetail.goal, runDetail.context);
     const planningBudgetState = await checkpointRunBudget(
       input.request,
       input.runId,

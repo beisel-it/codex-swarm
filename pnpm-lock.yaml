@@ -107,6 +107,9 @@ importers:
 
   frontend:
     dependencies:
+      '@codex-swarm/contracts':
+        specifier: workspace:*
+        version: link:../packages/contracts
       '@fontsource/iosevka':
         specifier: ^5.2.5
         version: 5.2.5

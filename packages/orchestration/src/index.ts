@@ -65,6 +65,11 @@ export interface WorkerTaskOutcome {
   pullRequestHandoff?: WorkerOutcomePullRequestHandoff;
 }
 
+export interface RunExecutionContextLike {
+  externalInput?: unknown;
+  values?: Record<string, unknown>;
+}
+
 const leaderPlanSchema = {
   type: "object",
   additionalProperties: false,
@@ -178,10 +183,36 @@ function extractJsonDocument(output: string) {
   throw new Error("output must be exactly one JSON object");
 }
 
-export function buildLeaderPlanningPrompt(goal: string) {
+function shouldRenderRunContext(context?: RunExecutionContextLike | null) {
+  if (!context) {
+    return false;
+  }
+
+  if (context.externalInput !== null && context.externalInput !== undefined) {
+    return true;
+  }
+
+  return Object.keys(context.values ?? {}).length > 0;
+}
+
+export function formatRunExecutionContext(context?: RunExecutionContextLike | null) {
+  if (!shouldRenderRunContext(context)) {
+    return null;
+  }
+
+  return [
+    "Run context:",
+    JSON.stringify(context, null, 2)
+  ].join("\n");
+}
+
+export function buildLeaderPlanningPrompt(goal: string, runContext?: RunExecutionContextLike | null) {
   return [
     "You are the leader agent for a Codex Swarm orchestration run.",
     `Goal: ${goal}`,
+    ...(formatRunExecutionContext(runContext)
+      ? ["", formatRunExecutionContext(runContext) as string]
+      : []),
     "",
     "Return exactly one JSON object and nothing else.",
     "The response must start with `{` and end with `}`.",
@@ -205,6 +236,7 @@ export function buildWorkerTaskExecutionPrompt(input: {
   taskRole: string;
   taskDescription: string;
   acceptanceCriteria: string[];
+  runContext?: RunExecutionContextLike | null;
   inboundMessages?: Array<{
     sender: string;
     body: string;
@@ -222,6 +254,9 @@ export function buildWorkerTaskExecutionPrompt(input: {
   return [
     `Repository: ${input.repositoryName}`,
     `Run goal: ${input.runGoal}`,
+    ...(formatRunExecutionContext(input.runContext)
+      ? [formatRunExecutionContext(input.runContext) as string]
+      : []),
     `Task: ${input.taskTitle}`,
     `Role: ${input.taskRole}`,
     "",

@@ -5,6 +5,7 @@ import {
   buildLeaderPlanningPrompt,
   buildLeaderReslicePrompt,
   buildWorkerTaskExecutionPrompt,
+  formatRunExecutionContext,
   orderLeaderPlanTasks,
   parseLeaderPlanOutput,
   parseWorkerTaskOutcome,
@@ -131,6 +132,32 @@ describe("buildLeaderPlanningPrompt", () => {
     expect(prompt).toContain("Follow this JSON Schema exactly:");
     expect(prompt).toContain("\"additionalProperties\": false");
   });
+
+  it("includes structured run context when present", () => {
+    const prompt = buildLeaderPlanningPrompt("React to an external issue event", {
+      externalInput: {
+        kind: "webhook",
+        trigger: {
+          id: "trigger-1",
+          repeatableRunId: "repeatable-1",
+          name: "Issue opened",
+          kind: "webhook",
+          metadata: {
+            provider: "github"
+          }
+        },
+        event: {
+          sourceType: "webhook",
+          eventName: "issues.opened"
+        }
+      },
+      values: {}
+    });
+
+    expect(prompt).toContain("Run context:");
+    expect(prompt).toContain("\"eventName\": \"issues.opened\"");
+    expect(prompt).toContain("\"provider\": \"github\"");
+  });
 });
 
 describe("buildWorkerTaskExecutionPrompt", () => {
@@ -154,6 +181,67 @@ describe("buildWorkerTaskExecutionPrompt", () => {
     expect(prompt).toContain("leader: Take the task and report blockers.");
     expect(prompt).toContain("\"enum\": [");
     expect(prompt).toContain("\"needs_slicing\"");
+  });
+
+  it("includes run context when present and omits it for ad-hoc runs", () => {
+    const withContext = buildWorkerTaskExecutionPrompt({
+      repositoryName: "codex-swarm",
+      runGoal: "Handle external triggers",
+      runContext: {
+        externalInput: {
+          kind: "webhook",
+          trigger: {
+            id: "trigger-1",
+            repeatableRunId: "repeatable-1",
+            name: "PR opened",
+            kind: "webhook",
+            metadata: {
+              provider: "github"
+            }
+          },
+          event: {
+            sourceType: "webhook",
+            eventName: "pull_request.opened",
+            payload: {
+              action: "opened"
+            }
+          }
+        },
+        values: {
+          receiptId: "receipt-1"
+        }
+      },
+      taskTitle: "Inspect event context",
+      taskRole: "backend-developer",
+      taskDescription: "Verify the execution prompt",
+      acceptanceCriteria: []
+    });
+    const withoutContext = buildWorkerTaskExecutionPrompt({
+      repositoryName: "codex-swarm",
+      runGoal: "Handle manual runs",
+      runContext: {
+        externalInput: null,
+        values: {}
+      },
+      taskTitle: "Inspect event context",
+      taskRole: "backend-developer",
+      taskDescription: "Verify the execution prompt",
+      acceptanceCriteria: []
+    });
+
+    expect(withContext).toContain("Run context:");
+    expect(withContext).toContain("\"action\": \"opened\"");
+    expect(withContext).toContain("\"receiptId\": \"receipt-1\"");
+    expect(withoutContext).not.toContain("Run context:");
+  });
+});
+
+describe("formatRunExecutionContext", () => {
+  it("returns null for empty ad-hoc run context", () => {
+    expect(formatRunExecutionContext({
+      externalInput: null,
+      values: {}
+    })).toBeNull();
   });
 });
 

@@ -62,7 +62,48 @@ const statements = [
     handoff_status text not null default 'pending',
     completed_at timestamptz,
     metadata jsonb not null default '{}'::jsonb,
+    context jsonb not null default '{"externalInput":null,"values":{}}'::jsonb,
     created_by text not null,
+    created_at timestamptz not null default now(),
+    updated_at timestamptz not null default now()
+  )`,
+  `create table if not exists repeatable_run_definitions (
+    id text primary key,
+    repository_id text not null references repositories(id),
+    workspace_id text not null default 'default-workspace',
+    team_id text not null default 'default-team',
+    name text not null,
+    description text,
+    status text not null,
+    execution jsonb not null default '{}'::jsonb,
+    created_at timestamptz not null default now(),
+    updated_at timestamptz not null default now()
+  )`,
+  `create table if not exists repeatable_run_triggers (
+    id text primary key,
+    repeatable_run_id text not null references repeatable_run_definitions(id),
+    workspace_id text not null default 'default-workspace',
+    team_id text not null default 'default-team',
+    name text not null,
+    description text,
+    enabled boolean not null default true,
+    kind text not null,
+    config jsonb not null default '{}'::jsonb,
+    created_at timestamptz not null default now(),
+    updated_at timestamptz not null default now()
+  )`,
+  `create table if not exists external_event_receipts (
+    id text primary key,
+    repeatable_run_trigger_id text not null references repeatable_run_triggers(id),
+    repeatable_run_id text not null references repeatable_run_definitions(id),
+    repository_id text not null references repositories(id),
+    workspace_id text not null default 'default-workspace',
+    team_id text not null default 'default-team',
+    source_type text not null,
+    status text not null,
+    event jsonb not null default '{}'::jsonb,
+    rejection_reason text,
+    created_run_id text references runs(id),
     created_at timestamptz not null default now(),
     updated_at timestamptz not null default now()
   )`,
@@ -290,6 +331,47 @@ async function main() {
   await db.execute(sql.raw("alter table runs add column if not exists pull_request_approval_id text references approvals(id)"));
   await db.execute(sql.raw("alter table runs add column if not exists handoff_status text not null default 'pending'"));
   await db.execute(sql.raw("alter table runs add column if not exists completed_at timestamptz"));
+  await db.execute(sql.raw("alter table runs add column if not exists context jsonb not null default '{\"externalInput\":null,\"values\":{}}'::jsonb"));
+  await db.execute(sql.raw(`create table if not exists repeatable_run_definitions (
+    id text primary key,
+    repository_id text not null references repositories(id),
+    workspace_id text not null default 'default-workspace',
+    team_id text not null default 'default-team',
+    name text not null,
+    description text,
+    status text not null,
+    execution jsonb not null default '{}'::jsonb,
+    created_at timestamptz not null default now(),
+    updated_at timestamptz not null default now()
+  )`));
+  await db.execute(sql.raw(`create table if not exists repeatable_run_triggers (
+    id text primary key,
+    repeatable_run_id text not null references repeatable_run_definitions(id),
+    workspace_id text not null default 'default-workspace',
+    team_id text not null default 'default-team',
+    name text not null,
+    description text,
+    enabled boolean not null default true,
+    kind text not null,
+    config jsonb not null default '{}'::jsonb,
+    created_at timestamptz not null default now(),
+    updated_at timestamptz not null default now()
+  )`));
+  await db.execute(sql.raw(`create table if not exists external_event_receipts (
+    id text primary key,
+    repeatable_run_trigger_id text not null references repeatable_run_triggers(id),
+    repeatable_run_id text not null references repeatable_run_definitions(id),
+    repository_id text not null references repositories(id),
+    workspace_id text not null default 'default-workspace',
+    team_id text not null default 'default-team',
+    source_type text not null,
+    status text not null,
+    event jsonb not null default '{}'::jsonb,
+    rejection_reason text,
+    created_run_id text references runs(id),
+    created_at timestamptz not null default now(),
+    updated_at timestamptz not null default now()
+  )`));
   await db.execute(sql.raw("alter table artifacts add column if not exists url text"));
   await db.execute(sql.raw("alter table artifacts add column if not exists size_bytes integer"));
   await db.execute(sql.raw("alter table artifacts add column if not exists sha256 text"));

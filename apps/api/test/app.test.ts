@@ -470,6 +470,10 @@ class FakeVerticalSliceControlPlane {
       handoffStatus: "pending",
       completedAt: null,
       metadata: input.metadata,
+      context: input.context ?? {
+        externalInput: null,
+        values: {}
+      },
       createdBy,
       createdAt: new Date("2026-03-28T00:00:00.000Z"),
       updatedAt: new Date("2026-03-28T00:00:00.000Z"),
@@ -498,6 +502,7 @@ class FakeVerticalSliceControlPlane {
     run.concurrencyCap = input.concurrencyCap ?? run.concurrencyCap;
     run.policyProfile = input.policyProfile === undefined ? run.policyProfile : input.policyProfile;
     run.metadata = input.metadata === undefined ? run.metadata : input.metadata;
+    run.context = input.context === undefined ? run.context : input.context;
     run.updatedAt = new Date();
     return run;
   }
@@ -1437,7 +1442,7 @@ describe("buildApp", () => {
     expect(response.json()).toMatchObject({
       status: "ok",
       versions: {
-        schema: "2026-03-29",
+        schema: "2026-03-30",
         config: "1"
       }
     });
@@ -6164,7 +6169,51 @@ describe("buildApp", () => {
           repositoryId: ids.repository,
           goal: "Drive automatic reslicing through leader coordination",
           concurrencyCap: 4,
-          metadata: {}
+          metadata: {},
+          context: {
+            externalInput: {
+              kind: "webhook",
+              trigger: {
+                id: crypto.randomUUID(),
+                repeatableRunId: crypto.randomUUID(),
+                name: "PR opened",
+                kind: "webhook",
+                metadata: {
+                  provider: "github",
+                  installationId: 7
+                }
+              },
+              event: {
+                sourceType: "webhook",
+                eventId: "evt-pr-opened",
+                eventName: "pull_request.opened",
+                source: "github",
+                payload: {
+                  action: "opened",
+                  repository: {
+                    full_name: "beisel-it/codex-swarm"
+                  }
+                },
+                receivedAt: new Date().toISOString(),
+                request: {
+                  method: "POST",
+                  path: "/webhooks/project/pr-review",
+                  headers: {
+                    "x-github-event": "pull_request"
+                  },
+                  query: {},
+                  receivedAt: new Date().toISOString()
+                }
+              },
+              receivedAt: new Date().toISOString(),
+              metadata: {
+                receiptId: "receipt-reslice"
+              }
+            },
+            values: {
+              repeatableRunName: "PR review"
+            }
+          }
         }
       });
 
@@ -6378,6 +6427,9 @@ describe("buildApp", () => {
 
       expect(prompts[0]).toContain("If the task is too large, ask for slicing");
       expect(prompts[0]).toContain("Frontend will need a smaller API-ready slice.");
+      expect(prompts[0]).toContain("Run context:");
+      expect(prompts[0]).toContain("\"eventName\": \"pull_request.opened\"");
+      expect(prompts[0]).toContain("\"receiptId\": \"receipt-reslice\"");
 
       const messagesResponse = await app.inject({
         method: "GET",

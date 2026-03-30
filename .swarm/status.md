@@ -13,6 +13,9 @@
 
 - post-M10 backlog work is now focused on a codex-swarm terminal UI with clawteam-style board polish and codex-swarm-specific operator depth
 - the real M9 run found and fixed product issues in artifact metadata persistence and audit-export compatibility on commit `cb51312`
+- external-trigger backend work now persists repeatable run definitions/triggers/event receipts, exposes public webhook ingress, and stores normalized webhook context on created runs for downstream orchestration
+- worker and orchestration prompts now forward persisted run context, including external trigger metadata and original/normalized event payloads, into leader and worker execution without webhook-specific branching in the core loop
+- operator runbooks and QA coverage now document how to configure webhook-triggered repeatable runs, inspect stored event context, and debug receipt-to-run linkage while keeping service-specific integrations explicitly out of scope
 
 ## Current Validation
 

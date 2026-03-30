@@ -1317,6 +1317,99 @@ code {
   resize: vertical;
 }
 
+.repeatable-run-card {
+  margin-top: 10px;
+}
+
+.repeatable-run-layout {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.repeatable-run-column,
+.repeatable-run-form,
+.repeatable-run-list,
+.repeatable-run-item,
+.repeatable-run-context {
+  display: grid;
+  gap: 10px;
+}
+
+.repeatable-run-form,
+.repeatable-run-item {
+  padding: 10px;
+  border-radius: 6px;
+  border: 1px solid var(--theme-border-soft);
+  background: var(--theme-grid-line);
+}
+
+.repeatable-run-section-header,
+.repeatable-run-item-header,
+.repeatable-run-action-row,
+.repeatable-run-toggle-row,
+.repeatable-run-code-block,
+.repeatable-run-receipt {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+}
+
+.repeatable-run-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.repeatable-run-checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--mono);
+  font-size: 0.74rem;
+  color: var(--text-muted);
+}
+
+.repeatable-run-meta,
+.repeatable-run-item-header p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.repeatable-run-context {
+  padding: 9px 10px;
+  border-radius: 6px;
+  background: var(--theme-card-fill-soft);
+  border: 1px solid var(--theme-border-subtle);
+}
+
+.repeatable-run-context strong,
+.repeatable-run-context span,
+.repeatable-run-code-block,
+.repeatable-run-receipt-list {
+  font-family: var(--mono);
+  font-size: 0.72rem;
+}
+
+.repeatable-run-code-block {
+  padding: 8px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--theme-border-subtle);
+  background: var(--theme-card-fill-strong);
+}
+
+.repeatable-run-code-block code {
+  word-break: break-all;
+}
+
+.repeatable-run-receipt-list {
+  display: grid;
+  gap: 6px;
+}
+
 .action-button {
   min-height: 34px;
   padding: 0 12px;
@@ -1370,6 +1463,13 @@ code {
 .inline-form {
   grid-template-columns: 1.1fr 0.7fr 1.6fr auto;
   width: 100%;
+}
+
+@media (max-width: 1024px) {
+  .repeatable-run-layout,
+  .repeatable-run-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 .task-columns {

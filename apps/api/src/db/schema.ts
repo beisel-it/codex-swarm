@@ -61,7 +61,54 @@ export const runs = pgTable("runs", {
   handoffStatus: text("handoff_status").notNull().default("pending"),
   completedAt: timestamp("completed_at", { withTimezone: true }),
   metadata: jsonb("metadata").$type<Record<string, unknown>>().notNull().default({}),
+  context: jsonb("context").$type<Record<string, unknown>>().notNull().default({
+    externalInput: null,
+    values: {}
+  }),
   createdBy: text("created_by").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
+});
+
+export const repeatableRunDefinitions = pgTable("repeatable_run_definitions", {
+  id: text("id").primaryKey(),
+  repositoryId: text("repository_id").notNull().references(() => repositories.id),
+  workspaceId: text("workspace_id").notNull(),
+  teamId: text("team_id").notNull(),
+  name: text("name").notNull(),
+  description: text("description"),
+  status: text("status").notNull(),
+  execution: jsonb("execution").$type<Record<string, unknown>>().notNull().default({}),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
+});
+
+export const repeatableRunTriggers = pgTable("repeatable_run_triggers", {
+  id: text("id").primaryKey(),
+  repeatableRunId: text("repeatable_run_id").notNull().references(() => repeatableRunDefinitions.id),
+  workspaceId: text("workspace_id").notNull(),
+  teamId: text("team_id").notNull(),
+  name: text("name").notNull(),
+  description: text("description"),
+  enabled: boolean("enabled").notNull().default(true),
+  kind: text("kind").notNull(),
+  config: jsonb("config").$type<Record<string, unknown>>().notNull().default({}),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
+});
+
+export const externalEventReceipts = pgTable("external_event_receipts", {
+  id: text("id").primaryKey(),
+  repeatableRunTriggerId: text("repeatable_run_trigger_id").notNull().references(() => repeatableRunTriggers.id),
+  repeatableRunId: text("repeatable_run_id").notNull().references(() => repeatableRunDefinitions.id),
+  repositoryId: text("repository_id").notNull().references(() => repositories.id),
+  workspaceId: text("workspace_id").notNull(),
+  teamId: text("team_id").notNull(),
+  sourceType: text("source_type").notNull(),
+  status: text("status").notNull(),
+  event: jsonb("event").$type<Record<string, unknown>>().notNull().default({}),
+  rejectionReason: text("rejection_reason"),
+  createdRunId: text("created_run_id").references(() => runs.id),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
 });
