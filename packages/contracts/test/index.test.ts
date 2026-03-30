@@ -15,6 +15,7 @@ import {
   inboundExternalEventEnvelopeSchema,
   identityEntrypointSchema,
   projectDetailSchema,
+  projectTeamImportSchema,
   projectSummarySchema,
   repeatableRunDefinitionSchema,
   repeatableRunTriggerCreateSchema,
@@ -237,10 +238,33 @@ describe("project schemas", () => {
     const run = runCreateSchema.parse({
       repositoryId: "550e8400-e29b-41d4-a716-446655440000",
       projectId: "550e8400-e29b-41d4-a716-446655440010",
+      projectTeamId: "550e8400-e29b-41d4-a716-446655440011",
       goal: "Ship alpha"
     });
 
     expect(run.projectId).toBe("550e8400-e29b-41d4-a716-446655440010");
+  });
+});
+
+describe("projectTeamImportSchema", () => {
+  it("accepts blueprint-based project team imports", () => {
+    const input = projectTeamImportSchema.parse({
+      projectId: "550e8400-e29b-41d4-a716-446655440110",
+      blueprintId: "development-stack"
+    });
+
+    expect(input.blueprintId).toBe("development-stack");
+    expect(input.templateId).toBeUndefined();
+  });
+
+  it("keeps templateId as a compatibility alias for blueprintId", () => {
+    const input = projectTeamImportSchema.parse({
+      projectId: "550e8400-e29b-41d4-a716-446655440111",
+      templateId: "development-stack"
+    });
+
+    expect(input.templateId).toBe("development-stack");
+    expect(input.blueprintId).toBeUndefined();
   });
 });
 
@@ -265,6 +289,8 @@ describe("repeatableRunDefinitionSchema", () => {
     const definition = repeatableRunDefinitionSchema.parse({
       id: "550e8400-e29b-41d4-a716-446655440100",
       repositoryId: "550e8400-e29b-41d4-a716-446655440000",
+      projectTeamId: "550e8400-e29b-41d4-a716-446655440011",
+      projectTeamName: "Issue review team",
       workspaceId: "workspace-1",
       teamId: "team-1",
       name: "Issue review",
@@ -605,6 +631,8 @@ describe("runsByJobScopeSchema", () => {
           id: "550e8400-e29b-41d4-a716-446655440020",
           repositoryId: "550e8400-e29b-41d4-a716-446655440001",
           projectId: "550e8400-e29b-41d4-a716-446655440010",
+          projectTeamId: "550e8400-e29b-41d4-a716-446655440011",
+          projectTeamName: "Core delivery",
           workspaceId: "workspace-1",
           teamId: "team-1",
           goal: "Project run",

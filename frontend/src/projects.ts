@@ -18,6 +18,7 @@ export type ProjectRepository = {
 export type ProjectRun = {
   id: string
   repositoryId: string
+  projectId?: string | null
   goal: string
   status: string
   createdAt: string
@@ -61,7 +62,7 @@ export function deriveProjectSummaries(
         .filter((repository): repository is ProjectRepository => repository !== undefined)
       const repositoryIdSet = new Set(projectRepositories.map((repository) => repository.id))
       const projectRuns = runs
-        .filter((run) => repositoryIdSet.has(run.repositoryId))
+        .filter((run) => run.projectId === project.id || (!run.projectId && repositoryIdSet.has(run.repositoryId)))
         .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
 
       return {
@@ -96,7 +97,7 @@ export function deriveAdHocWorkspace(
     .sort((left, right) => left.name.localeCompare(right.name))
   const adHocRepositoryIds = new Set(adHocRepositories.map((repository) => repository.id))
   const adHocRuns = runs
-    .filter((run) => adHocRepositoryIds.has(run.repositoryId))
+    .filter((run) => !run.projectId && adHocRepositoryIds.has(run.repositoryId))
     .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
 
   return {

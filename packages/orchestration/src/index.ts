@@ -20,6 +20,13 @@ export interface LeaderPlan {
   tasks: LeaderPlanTask[];
 }
 
+export interface LeaderPlanningRoleOption {
+  role: string;
+  profile?: string | null;
+  name?: string | null;
+  responsibility?: string | null;
+}
+
 export type WorkerCoordinationMessageTarget =
   | "leader"
   | "broadcast"
@@ -58,6 +65,7 @@ export interface WorkerOutcomePullRequestHandoff {
 export interface WorkerTaskOutcome {
   summary: string;
   status: "completed" | "needs_slicing" | "blocked";
+  blockerKind?: "external" | "actionable";
   messages: WorkerCoordinationMessage[];
   blockingIssues: string[];
   artifacts?: WorkerOutcomeArtifact[];
@@ -68,6 +76,35 @@ export interface WorkerTaskOutcome {
 export interface RunExecutionContextLike {
   externalInput?: unknown;
   values?: Record<string, unknown>;
+}
+
+function formatLeaderPlanningRoles(availableRoles?: LeaderPlanningRoleOption[]) {
+  if (!availableRoles || availableRoles.length === 0) {
+    return null;
+  }
+
+  const uniqueRoles = new Map<string, LeaderPlanningRoleOption>();
+
+  for (const option of availableRoles) {
+    if (!uniqueRoles.has(option.role)) {
+      uniqueRoles.set(option.role, option);
+    }
+  }
+
+  return [
+    "Available team roles:",
+    ...[...uniqueRoles.values()].map((option) => {
+      const details = [
+        option.name?.trim() ? `member ${option.name.trim()}` : null,
+        option.profile?.trim() ? `profile ${option.profile.trim()}` : null,
+        option.responsibility?.trim() ? option.responsibility.trim() : null
+      ].filter((value): value is string => Boolean(value));
+
+      return details.length > 0
+        ? `- ${option.role}: ${details.join(" | ")}`
+        : `- ${option.role}`;
+    })
+  ].join("\n");
 }
 
 const leaderPlanSchema = {
@@ -103,6 +140,7 @@ const workerTaskOutcomeSchema = {
   properties: {
     summary: { type: "string", minLength: 1 },
     status: { type: "string", enum: ["completed", "needs_slicing", "blocked"] },
+    blockerKind: { type: "string", enum: ["external", "actionable"] },
     messages: {
       type: "array",
       items: {
@@ -206,13 +244,23 @@ export function formatRunExecutionContext(context?: RunExecutionContextLike | nu
   ].join("\n");
 }
 
-export function buildLeaderPlanningPrompt(goal: string, runContext?: RunExecutionContextLike | null) {
+export function buildLeaderPlanningPrompt(
+  goal: string,
+  runContext?: RunExecutionContextLike | null,
+  availableRoles?: LeaderPlanningRoleOption[]
+) {
+  const formattedRoles = formatLeaderPlanningRoles(availableRoles);
+  const availableRoleNames = availableRoles
+    ? [...new Set(availableRoles.map((role) => role.role))]
+    : [];
+
   return [
     "You are the leader agent for a Codex Swarm orchestration run.",
     `Goal: ${goal}`,
     ...(formatRunExecutionContext(runContext)
       ? ["", formatRunExecutionContext(runContext) as string]
       : []),
+    ...(formattedRoles ? ["", formattedRoles] : []),
     "",
     "Return exactly one JSON object and nothing else.",
     "The response must start with `{` and end with `}`.",
@@ -223,8 +271,16 @@ export function buildLeaderPlanningPrompt(goal: string, runContext?: RunExecutio
     "Rules:",
     "- provide at least one task",
     "- keys must be unique",
-    "- dependencyKeys must reference earlier or later task keys in the same JSON",
-    "- use concrete role names such as `frontend-developer`, `backend-developer`, `infrastructure-engineer`, `technical-writer`, or `tech-lead`",
+    "- dependencyKeys may only reference earlier task keys from the same JSON response",
+    "- prefer parallel branches when work can proceed independently",
+    "- do not serialize tasks unless one task materially depends on another",
+    "- materialize only concrete near-term work; avoid deep future chains that are not yet specific",
+    ...(availableRoleNames.length > 0
+      ? [`- use only these role names in task.role: ${availableRoleNames.map((role) => `\`${role}\``).join(", ")}`]
+      : ["- use concrete role names such as `frontend-developer`, `backend-developer`, `infrastructure-engineer`, `technical-writer`, or `tech-lead`"]),
+    ...(availableRoleNames.length > 0
+      ? ["- do not invent task roles outside the available team role list"]
+      : []),
     "- do not add any properties beyond the schema"
   ].join("\n");
 }
@@ -278,7 +334,8 @@ export function buildWorkerTaskExecutionPrompt(input: {
     "- every message target must be one of `leader`, `broadcast`, `role:<role>`, or `agent:<agentId>`",
     "- Use completed when the task can stand as done for this slice.",
     "- Use needs_slicing when the task should be broken into smaller follow-on tasks.",
-    "- Use blocked when an external blocker prevents useful progress.",
+    "- Use blocked when progress is prevented by a blocker.",
+    "- When status is blocked, set blockerKind to `external` for outside blockers or `actionable` when follow-on tasks could remove the blocker.",
     "- Include a leader message whenever status is needs_slicing or blocked.",
     "- If you publish a branch, include branchPublish with the published branch details.",
     "- If you open or prepare a PR handoff, include pullRequestHandoff with the PR details.",
@@ -295,6 +352,7 @@ export function buildLeaderReslicePrompt(input: {
   workerSummary: string;
   blockingIssues: string[];
   messages: WorkerCoordinationMessage[];
+  availableRoles?: LeaderPlanningRoleOption[];
 }) {
   const blockingIssues = input.blockingIssues.length > 0
     ? input.blockingIssues.map((issue) => `- ${issue}`).join("\n")
@@ -302,6 +360,10 @@ export function buildLeaderReslicePrompt(input: {
   const workerMessages = input.messages.length > 0
     ? input.messages.map((message) => `- ${message.target}: ${message.body}`).join("\n")
     : "- No explicit worker coordination messages were returned.";
+  const formattedRoles = formatLeaderPlanningRoles(input.availableRoles);
+  const availableRoleNames = input.availableRoles
+    ? [...new Set(input.availableRoles.map((role) => role.role))]
+    : [];
 
   return [
     "You are continuing the leader orchestration session for a running Codex Swarm run.",
@@ -319,6 +381,7 @@ export function buildLeaderReslicePrompt(input: {
     "",
     "Worker coordination messages:",
     workerMessages,
+    ...(formattedRoles ? ["", formattedRoles] : []),
     "",
     "Return exactly one JSON object and nothing else.",
     "The response must start with `{` and end with `}`.",
@@ -328,7 +391,77 @@ export function buildLeaderReslicePrompt(input: {
     "",
     "Rules:",
     "- Return at least one follow-on task when the worker asked for more slicing.",
-    "- dependencyKeys may only reference keys from the same response.",
+    "- dependencyKeys may only reference earlier task keys from the same response.",
+    ...(availableRoleNames.length > 0
+      ? [`- use only these role names in task.role: ${availableRoleNames.map((role) => `\`${role}\``).join(", ")}`]
+      : []),
+    ...(availableRoleNames.length > 0
+      ? ["- do not invent task roles outside the available team role list"]
+      : []),
+    "- Keep the tasks specific enough for workers to execute without hidden context.",
+    "- do not add any properties beyond the schema"
+  ].join("\n");
+}
+
+export function buildLeaderUnblockPrompt(input: {
+  goal: string;
+  taskTitle: string;
+  taskRole: string;
+  taskDescription: string;
+  workerSummary: string;
+  blockingIssues: string[];
+  messages: WorkerCoordinationMessage[];
+  availableRoles?: LeaderPlanningRoleOption[];
+}) {
+  const blockingIssues = input.blockingIssues.length > 0
+    ? input.blockingIssues.map((issue) => `- ${issue}`).join("\n")
+    : "- No explicit blocking issues were reported.";
+  const workerMessages = input.messages.length > 0
+    ? input.messages.map((message) => `- ${message.target}: ${message.body}`).join("\n")
+    : "- No explicit worker coordination messages were returned.";
+  const formattedRoles = formatLeaderPlanningRoles(input.availableRoles);
+  const availableRoleNames = input.availableRoles
+    ? [...new Set(input.availableRoles.map((role) => role.role))]
+    : [];
+
+  return [
+    "You are continuing the leader orchestration session for a running Codex Swarm run.",
+    `Goal: ${input.goal}`,
+    `Blocked task: ${input.taskTitle}`,
+    `Blocked role: ${input.taskRole}`,
+    "",
+    "Blocked task description:",
+    input.taskDescription,
+    "",
+    `Worker outcome summary: ${input.workerSummary}`,
+    "",
+    "Blocking issues:",
+    blockingIssues,
+    "",
+    "Worker coordination messages:",
+    workerMessages,
+    ...(formattedRoles ? ["", formattedRoles] : []),
+    "",
+    "Create only the concrete follow-on tasks that remove or isolate the blocker.",
+    "Do not recreate the blocked parent task.",
+    "Prefer the smallest set of tasks that would make the blocked parent runnable again.",
+    "",
+    "Return exactly one JSON object and nothing else.",
+    "The response must start with `{` and end with `}`.",
+    "Do not include markdown fences, prose, headings, explanations, or any text outside the JSON object.",
+    "Follow this JSON Schema exactly:",
+    JSON.stringify(leaderPlanSchema, null, 2),
+    "",
+    "Rules:",
+    "- Return at least one follow-on task when the blocker can be addressed with more work.",
+    "- dependencyKeys may only reference earlier task keys from the same response.",
+    "- Prefer parallel unblock tasks when they are independent.",
+    ...(availableRoleNames.length > 0
+      ? [`- use only these role names in task.role: ${availableRoleNames.map((role) => `\`${role}\``).join(", ")}`]
+      : []),
+    ...(availableRoleNames.length > 0
+      ? ["- do not invent task roles outside the available team role list"]
+      : []),
     "- Keep the tasks specific enough for workers to execute without hidden context.",
     "- do not add any properties beyond the schema"
   ].join("\n");
@@ -474,6 +607,9 @@ export function parseWorkerTaskOutcome(output: string): WorkerTaskOutcome {
   return {
     summary,
     status,
+    ...(status === "blocked" && (parsed.blockerKind === "external" || parsed.blockerKind === "actionable")
+      ? { blockerKind: parsed.blockerKind }
+      : {}),
     messages,
     blockingIssues,
     ...(artifacts.length > 0 ? { artifacts } : {}),
@@ -515,4 +651,27 @@ export function orderLeaderPlanTasks(plan: LeaderPlan): LeaderPlanTask[] {
   }
 
   return ordered;
+}
+
+export function normalizeLeaderPlanTasks(plan: LeaderPlan): LeaderPlanTask[] {
+  const tasksByKey = new Map(plan.tasks.map((task) => [task.key, task] as const));
+  const sanitizedTasks = plan.tasks.map((task) => ({
+    ...task,
+    dependencyKeys: Array.from(new Set(task.dependencyKeys.filter((dependencyKey) => (
+      dependencyKey !== task.key && tasksByKey.has(dependencyKey)
+    ))))
+  }));
+
+  try {
+    return orderLeaderPlanTasks({
+      ...plan,
+      tasks: sanitizedTasks
+    });
+  } catch (error) {
+    if (error instanceof Error && error.message.includes("cycle")) {
+      throw new Error("leader plan contains invalid cyclic dependencies");
+    }
+
+    throw error;
+  }
 }

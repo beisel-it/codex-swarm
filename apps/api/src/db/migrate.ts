@@ -50,10 +50,36 @@ const statements = [
     created_at timestamptz not null default now(),
     updated_at timestamptz not null default now()
   )`,
+  `create table if not exists project_teams (
+    id text primary key,
+    project_id text not null references projects(id),
+    workspace_id text not null default 'default-workspace',
+    team_id text not null default 'default-team',
+    name text not null,
+    description text,
+    concurrency_cap integer not null default 1,
+    source_template_id text,
+    created_at timestamptz not null default now(),
+    updated_at timestamptz not null default now()
+  )`,
+  `create table if not exists project_team_members (
+    id text primary key,
+    project_team_id text not null references project_teams(id),
+    key text not null,
+    position integer not null default 0,
+    name text not null,
+    role text not null,
+    profile text not null,
+    responsibility text,
+    created_at timestamptz not null default now(),
+    updated_at timestamptz not null default now()
+  )`,
   `create table if not exists runs (
     id text primary key,
     repository_id text not null references repositories(id),
     project_id text,
+    project_team_id text,
+    project_team_name text,
     workspace_id text not null default 'default-workspace',
     team_id text not null default 'default-team',
     project_id text,
@@ -85,6 +111,8 @@ const statements = [
   `create table if not exists repeatable_run_definitions (
     id text primary key,
     repository_id text not null references repositories(id),
+    project_team_id text,
+    project_team_name text,
     workspace_id text not null default 'default-workspace',
     team_id text not null default 'default-team',
     name text not null,
@@ -141,8 +169,10 @@ const statements = [
   `create table if not exists agents (
     id text primary key,
     run_id text not null references runs(id),
+    project_team_member_id text,
     name text not null,
     role text not null,
+    profile text not null default 'default',
     status text not null,
     worktree_path text,
     branch_name text,
@@ -343,12 +373,38 @@ async function main() {
     created_at timestamptz not null default now(),
     updated_at timestamptz not null default now()
   )`));
+  await db.execute(sql.raw(`create table if not exists project_teams (
+    id text primary key,
+    project_id text not null references projects(id),
+    workspace_id text not null default 'default-workspace',
+    team_id text not null default 'default-team',
+    name text not null,
+    description text,
+    concurrency_cap integer not null default 1,
+    source_template_id text,
+    created_at timestamptz not null default now(),
+    updated_at timestamptz not null default now()
+  )`));
+  await db.execute(sql.raw(`create table if not exists project_team_members (
+    id text primary key,
+    project_team_id text not null references project_teams(id),
+    key text not null,
+    position integer not null default 0,
+    name text not null,
+    role text not null,
+    profile text not null,
+    responsibility text,
+    created_at timestamptz not null default now(),
+    updated_at timestamptz not null default now()
+  )`));
   await db.execute(sql.raw("alter table teams add column if not exists policy_profile text not null default 'standard'"));
   await db.execute(sql.raw("alter table runs add column if not exists budget_tokens integer"));
   await db.execute(sql.raw("alter table runs add column if not exists budget_cost_usd_cents integer"));
   await db.execute(sql.raw("alter table runs add column if not exists workspace_id text not null default 'default-workspace'"));
   await db.execute(sql.raw("alter table runs add column if not exists team_id text not null default 'default-team'"));
   await db.execute(sql.raw("alter table runs add column if not exists project_id text"));
+  await db.execute(sql.raw("alter table runs add column if not exists project_team_id text"));
+  await db.execute(sql.raw("alter table runs add column if not exists project_team_name text"));
   await db.execute(sql.raw("alter table runs add column if not exists concurrency_cap integer not null default 1"));
   await db.execute(sql.raw("alter table runs add column if not exists policy_profile text"));
   await db.execute(sql.raw("alter table runs add column if not exists published_branch text"));
@@ -366,6 +422,8 @@ async function main() {
   await db.execute(sql.raw(`create table if not exists repeatable_run_definitions (
     id text primary key,
     repository_id text not null references repositories(id),
+    project_team_id text,
+    project_team_name text,
     workspace_id text not null default 'default-workspace',
     team_id text not null default 'default-team',
     name text not null,
@@ -375,6 +433,10 @@ async function main() {
     created_at timestamptz not null default now(),
     updated_at timestamptz not null default now()
   )`));
+  await db.execute(sql.raw("alter table repeatable_run_definitions add column if not exists project_team_id text"));
+  await db.execute(sql.raw("alter table repeatable_run_definitions add column if not exists project_team_name text"));
+  await db.execute(sql.raw("alter table agents add column if not exists project_team_member_id text"));
+  await db.execute(sql.raw("alter table agents add column if not exists profile text not null default 'default'"));
   await db.execute(sql.raw(`create table if not exists repeatable_run_triggers (
     id text primary key,
     repeatable_run_id text not null references repeatable_run_definitions(id),

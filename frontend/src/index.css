@@ -787,7 +787,7 @@ a {
   flex: 1 1 220px;
 }
 
-.repeatable-run-preset-row,
+.repeatable-run-shape-row,
 .repeatable-run-generated-endpoint,
 .repeatable-run-optional-tools,
 .repeatable-run-subsection {
@@ -796,7 +796,7 @@ a {
   gap: 10px;
 }
 
-.repeatable-run-preset-label {
+.repeatable-run-shape-label {
   font-size: 0.84rem;
   font-weight: 600;
   color: var(--text-muted);

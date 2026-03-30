@@ -1,5 +1,4 @@
 import { execFile } from "node:child_process";
-import { readFile } from "node:fs/promises";
 import { isAbsolute, resolve } from "node:path";
 import { promisify } from "node:util";
 import type {
@@ -82,6 +81,15 @@ function toDate(value: Date | string | null | undefined) {
   }
 
   return value instanceof Date ? value : new Date(value);
+}
+
+function getOptionalEnv(name: string) {
+  const value = process.env[name]?.trim();
+  return value && value.length > 0 ? value : null;
+}
+
+function resolveCodexExecutionProfile() {
+  return getOptionalEnv("CODEX_SWARM_WORKER_PROFILE") ?? "default";
 }
 
 function toSessionRecord(session: Session, worktreePath: string) {
@@ -285,8 +293,6 @@ async function recordWorkerOutcomeArtifacts(
     const resolvedArtifactPath = isAbsolute(artifact.path)
       ? artifact.path
       : resolve(workspacePath, artifact.path);
-    const contentBase64 = artifact.contentBase64
-      ?? (await readFile(resolvedArtifactPath)).toString("base64");
 
     await request(
       "POST",
@@ -297,7 +303,9 @@ async function recordWorkerOutcomeArtifacts(
         kind: artifact.kind,
         path: artifact.path,
         contentType: artifact.contentType,
-        contentBase64,
+        ...(artifact.contentBase64
+          ? { contentBase64: artifact.contentBase64 }
+          : {}),
         metadata: {
           source: "worker-outcome",
           assignmentId: assignment.id,
@@ -399,7 +407,7 @@ export async function runManagedWorkerDispatch(
   const supervisor = new CodexServerSupervisor({
     config: {
       cwd: workspace.path,
-      profile: assignment.profile,
+      profile: resolveCodexExecutionProfile(),
       sandbox: assignment.sandbox,
       approvalPolicy: assignment.approvalPolicy,
       includePlanTool: assignment.includePlanTool
@@ -550,7 +558,7 @@ export async function runManagedWorkerDispatch(
         outcome
       );
 
-      if (outcome.status === "needs_slicing") {
+      if (outcome.status === "needs_slicing" || (outcome.status === "blocked" && outcome.blockerKind === "actionable")) {
         await runLeaderResliceLoop({
           request: input.request,
           runId: assignment.runId,

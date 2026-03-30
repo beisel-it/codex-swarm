@@ -2,6 +2,10 @@ import { useEffect, useMemo, useState, type FormEvent, type PointerEvent as Reac
 import type {
   ExternalEventReceipt,
   ProjectSummary as ContractProjectSummary,
+  ProjectTeamCreateInput,
+  ProjectTeamDetail,
+  ProjectTeamImportInput,
+  ProjectTeamUpdateInput,
   RepositoryUpdateInput,
   RepeatableRunDefinition,
   RepeatableRunDefinitionCreateInput,
@@ -65,19 +69,28 @@ type Repository = {
   updatedAt?: string
 }
 
-type TeamTemplate = {
+type TeamBlueprint = {
   id: string
   name: string
   summary: string
-  focus: 'delivery' | 'platform'
+  focus: 'delivery' | 'platform' | 'studio'
   suggestedGoal: string
   suggestedConcurrencyCap: number
+}
+
+type ProjectTeamMemberDraft = {
+  name: string
+  role: string
+  profile: string
+  responsibility: string
 }
 
 type Run = {
   id: string
   repositoryId: string
   projectId?: string | null
+  projectTeamId?: string | null
+  projectTeamName?: string | null
   goal: string
   status: RunStatus
   branchName: string | null
@@ -117,7 +130,9 @@ type Agent = {
   id: string
   runId: string
   taskId: string | null
+  projectTeamMemberId?: string | null
   name: string
+  profile?: string
   status: string
 }
 
@@ -272,6 +287,7 @@ type RunDetail = Run & {
 
 type SwarmData = {
   projectSummaries: ContractProjectSummary[]
+  projectTeams: ProjectTeamDetail[]
   repositories: Repository[]
   runs: Run[]
   tasks: Task[]
@@ -293,7 +309,7 @@ type SwarmData = {
 type Route =
   | { kind: 'projects' }
   | { kind: 'project-new' }
-  | { kind: 'project'; projectId: string; section: 'overview' | 'repositories' | 'runs' | 'automation' | 'settings'; mode?: 'new-repository' | 'new-run' | 'new-repeatable-run' | 'new-webhook' }
+  | { kind: 'project'; projectId: string; section: 'overview' | 'teams' | 'repositories' | 'runs' | 'automation' | 'settings'; mode?: 'new-repository' | 'new-run' | 'new-repeatable-run' | 'new-webhook' | 'new-team' | 'import-team' }
   | { kind: 'adhoc-runs'; mode?: 'new' }
   | { kind: 'settings' }
   | { kind: 'run'; runId: string; section: 'overview' | 'board' | 'lifecycle' | 'review' }
@@ -317,6 +333,7 @@ let API_TOKEN = (
 function createEmptySwarmData(): SwarmData {
   return {
     projectSummaries: [],
+    projectTeams: [],
     repositories: [],
     runs: [],
     tasks: [],
@@ -368,6 +385,15 @@ function parseRoute(pathname: string): Route {
     const section = segments[2] ?? 'overview'
     if (section === 'repositories') {
       return { kind: 'project', projectId, section, mode: segments[3] === 'new' ? 'new-repository' : undefined }
+    }
+    if (section === 'teams') {
+      const mode =
+        segments[3] === 'new'
+          ? 'new-team'
+          : segments[3] === 'import'
+            ? 'import-team'
+            : undefined
+      return { kind: 'project', projectId, section, mode }
     }
     if (section === 'automation') {
       const mode =
@@ -510,8 +536,8 @@ async function requestJson<T>(path: string, init?: RequestInit, allowRetry = tru
   return (await response.json()) as T
 }
 
-async function loadTeamTemplates(): Promise<TeamTemplate[]> {
-  return requestJson<TeamTemplate[]>('/api/v1/team-templates')
+async function loadTeamBlueprints(): Promise<TeamBlueprint[]> {
+  return requestJson<TeamBlueprint[]>('/api/v1/team-blueprints')
 }
 
 async function loadProjectSummaries() {
@@ -538,6 +564,38 @@ async function createRepository(input: {
   })
 }
 
+async function loadProjectTeams(projectId?: string) {
+  const suffix = projectId ? `?projectId=${encodeURIComponent(projectId)}` : ''
+  return requestJson<ProjectTeamDetail[]>(`/api/v1/project-teams${suffix}`).catch(() => [])
+}
+
+async function createProjectTeam(input: ProjectTeamCreateInput) {
+  return requestJson<ProjectTeamDetail>('/api/v1/project-teams', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  })
+}
+
+async function importProjectTeam(input: ProjectTeamImportInput) {
+  return requestJson<ProjectTeamDetail>('/api/v1/project-teams/import', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  })
+}
+
+async function updateProjectTeam(projectTeamId: string, input: ProjectTeamUpdateInput) {
+  return requestJson<ProjectTeamDetail>(`/api/v1/project-teams/${encodeURIComponent(projectTeamId)}`, {
+    method: 'PATCH',
+    body: JSON.stringify(input),
+  })
+}
+
+async function deleteProjectTeam(projectTeamId: string) {
+  return requestJson<void>(`/api/v1/project-teams/${encodeURIComponent(projectTeamId)}`, {
+    method: 'DELETE',
+  })
+}
+
 async function updateRepository(repositoryId: string, input: RepositoryUpdateInput): Promise<Repository> {
   return requestJson<Repository>(`/api/v1/repositories/${encodeURIComponent(repositoryId)}`, {
     method: 'PATCH',
@@ -548,10 +606,10 @@ async function updateRepository(repositoryId: string, input: RepositoryUpdateInp
 async function createRun(input: {
   repositoryId: string
   projectId?: string | null
+  projectTeamId?: string | null
   goal: string
   branchName?: string | null
   concurrencyCap?: number
-  metadata?: Record<string, unknown>
   handoff: Run['handoff']
 }): Promise<Run> {
   return requestJson<Run>('/api/v1/runs', {
@@ -684,6 +742,7 @@ async function loadGovernanceReport() {
 async function loadSwarmData(): Promise<SwarmData> {
   try {
     const projectSummaries = await loadProjectSummaries()
+    const projectTeams = await loadProjectTeams()
     const repositories = await requestJson<Repository[]>('/api/v1/repositories').catch(() => [])
     const runs = await requestJson<Run[]>('/api/v1/runs').catch(() => [])
     const workerNodes = await requestJson<WorkerNode[]>('/api/v1/worker-nodes').catch(() => [])
@@ -697,6 +756,7 @@ async function loadSwarmData(): Promise<SwarmData> {
       return {
         ...createEmptySwarmData(),
         projectSummaries,
+        projectTeams,
         repositories,
         runs,
         workerNodes,
@@ -732,6 +792,7 @@ async function loadSwarmData(): Promise<SwarmData> {
 
     return {
       projectSummaries,
+      projectTeams,
       repositories,
       runs,
       tasks: details.flatMap((detail) => detail.tasks),
@@ -784,7 +845,7 @@ function App() {
   const [route, setRoute] = useState<Route>(() => parseRoute(window.location.pathname))
   const [data, setData] = useState<SwarmData>(createEmptySwarmData())
   const [projects, setProjects] = useState<ProjectRecord[]>([])
-  const [templates, setTemplates] = useState<TeamTemplate[]>([])
+  const [teamBlueprints, setTeamBlueprints] = useState<TeamBlueprint[]>([])
   const [loading, setLoading] = useState(true)
   const [refreshError, setRefreshError] = useState('')
   const [busy, setBusy] = useState(false)
@@ -794,8 +855,19 @@ function App() {
   const [projectView, setProjectView] = useState<'all' | 'recent' | 'needs-setup'>('all')
   const [settingsScope, setSettingsScope] = useState<'workspace' | 'policy' | 'provider'>('workspace')
   const [projectForm, setProjectForm] = useState({ name: '', summary: '', repositoryIds: [] as string[] })
+  const [projectTeamForm, setProjectTeamForm] = useState({
+    name: '',
+    description: '',
+    concurrencyCap: '1',
+    members: [
+      { name: 'Leader', role: 'tech-lead', profile: 'leader', responsibility: 'Own sequencing, planning, and run closure.' },
+      { name: 'Implementer', role: 'implementer', profile: 'implementer', responsibility: 'Implement the assigned slice.' },
+    ] as ProjectTeamMemberDraft[],
+  })
+  const [projectTeamImportForm, setProjectTeamImportForm] = useState({ blueprintId: '', name: '', description: '' })
+  const [editingProjectTeamId, setEditingProjectTeamId] = useState('')
   const [repoForm, setRepoForm] = useState({ name: '', url: '', provider: 'github' as RepositoryProvider, localPath: '' })
-  const [runForm, setRunForm] = useState({ repositoryId: '', goal: '', branchName: 'main', concurrencyCap: '1', templateId: '' })
+  const [runForm, setRunForm] = useState({ repositoryId: '', projectTeamId: '', goal: '', branchName: 'main', concurrencyCap: '1' })
   const [boardDraft, setBoardDraft] = useState({ title: '', description: '', role: 'implementer' })
   const [reviewNotes, setReviewNotes] = useState('')
   const [selectedApprovalId, setSelectedApprovalId] = useState('')
@@ -827,9 +899,9 @@ function App() {
     let active = true
     async function hydrate() {
       setLoading(true)
-      const [swarmData, nextTemplates] = await Promise.all([
+      const [swarmData, nextTeamBlueprints] = await Promise.all([
         loadSwarmData(),
-        loadTeamTemplates().catch(() => []),
+        loadTeamBlueprints().catch(() => []),
       ])
 
       if (!active) {
@@ -837,7 +909,7 @@ function App() {
       }
 
       setData(swarmData)
-      setTemplates(nextTemplates)
+      setTeamBlueprints(nextTeamBlueprints)
       setProjects(normalizeProjects(
         swarmData.projectSummaries.map((project) => ({
           id: project.id,
@@ -868,16 +940,17 @@ function App() {
   }, [])
 
   useEffect(() => {
-    const template = templates.find((item) => item.id === runForm.templateId)
-    if (!template) {
+    const projectTeam = data.projectTeams.find((item) => item.id === runForm.projectTeamId)
+    if (!projectTeam) {
       return
     }
     setRunForm((current) => ({
       ...current,
-      goal: current.goal || template.suggestedGoal,
-      concurrencyCap: String(template.suggestedConcurrencyCap),
+      concurrencyCap: current.concurrencyCap === String(projectTeam.concurrencyCap)
+        ? current.concurrencyCap
+        : String(projectTeam.concurrencyCap),
     }))
-  }, [runForm.templateId, templates])
+  }, [data.projectTeams, runForm.projectTeamId])
 
   const projectSummaries = useMemo(
     () => deriveProjectSummaries(projects, data.repositories, data.runs),
@@ -891,9 +964,18 @@ function App() {
   const selectedProject = route.kind === 'project'
     ? projectSummaries.find((item) => item.project.id === route.projectId) ?? null
     : null
-  const selectedProjectRepositories = selectedProject
-    ? data.repositories.filter((repository) => selectedProject.project.repositoryIds.includes(repository.id))
-    : []
+  const selectedProjectTeams = useMemo(
+    () => (selectedProject
+      ? data.projectTeams.filter((projectTeam) => projectTeam.projectId === selectedProject.project.id)
+      : []),
+    [data.projectTeams, selectedProject],
+  )
+  const selectedProjectRepositories = useMemo(
+    () => (selectedProject
+      ? data.repositories.filter((repository) => selectedProject.project.repositoryIds.includes(repository.id))
+      : []),
+    [data.repositories, selectedProject],
+  )
   const selectedRun = route.kind === 'run'
     ? data.runs.find((run) => run.id === route.runId) ?? null
     : null
@@ -901,11 +983,14 @@ function App() {
     ? data.repositories.find((repository) => repository.id === selectedRun.repositoryId) ?? null
     : null
   const selectedRunProject = selectedRun
-    ? projectSummaries.find((summary) => summary.project.repositoryIds.includes(selectedRun.repositoryId)) ?? null
+    ? projectSummaries.find((summary) => summary.project.id === (selectedRun.projectId ?? null)) ?? null
     : null
-  const selectedProjectRunsFull = selectedProject
-    ? data.runs.filter((run) => selectedProject.project.repositoryIds.includes(run.repositoryId))
-    : []
+  const selectedProjectRunsFull = useMemo(
+    () => (selectedProject
+      ? data.runs.filter((run) => run.projectId === selectedProject.project.id)
+      : []),
+    [data.runs, selectedProject],
+  )
   const isProjectRunCreate = route.kind === 'project' && route.section === 'runs' && route.mode === 'new-run'
   const newRunRepositories = isProjectRunCreate ? selectedProjectRepositories : adHocWorkspace.repositories
   const shouldShowRunRepositoryPicker = isProjectRunCreate ? newRunRepositories.length > 1 : true
@@ -968,6 +1053,24 @@ function App() {
       return stillVisible ? current : { ...current, repositoryId: '' }
     })
   }, [newRunRepositories])
+
+  useEffect(() => {
+    if (!isProjectRunCreate) {
+      return
+    }
+    if (selectedProjectTeams.length === 1) {
+      const onlyTeam = selectedProjectTeams[0]
+      setRunForm((current) => current.projectTeamId === onlyTeam.id ? current : { ...current, projectTeamId: onlyTeam.id })
+      return
+    }
+    setRunForm((current) => {
+      if (!current.projectTeamId) {
+        return current
+      }
+      const stillVisible = selectedProjectTeams.some((projectTeam) => projectTeam.id === current.projectTeamId)
+      return stillVisible ? current : { ...current, projectTeamId: '' }
+    })
+  }, [isProjectRunCreate, selectedProjectTeams])
 
   useEffect(() => {
     if (!selectedApprovalId) {
@@ -1079,6 +1182,112 @@ function App() {
     }
   }
 
+  function resetProjectTeamForm() {
+    setEditingProjectTeamId('')
+    setProjectTeamForm({
+      name: '',
+      description: '',
+      concurrencyCap: '1',
+      members: [
+        { name: 'Leader', role: 'tech-lead', profile: 'leader', responsibility: 'Own sequencing, planning, and run closure.' },
+        { name: 'Implementer', role: 'implementer', profile: 'implementer', responsibility: 'Implement the assigned slice.' },
+      ],
+    })
+  }
+
+  function patchProjectTeamMember(index: number, patch: Partial<ProjectTeamMemberDraft>) {
+    setProjectTeamForm((current) => ({
+      ...current,
+      members: current.members.map((member, memberIndex) => memberIndex === index ? { ...member, ...patch } : member),
+    }))
+  }
+
+  async function handleSubmitProjectTeam(event: FormEvent) {
+    event.preventDefault()
+    if (!selectedProject || !projectTeamForm.name.trim()) {
+      return
+    }
+
+    const members = projectTeamForm.members
+      .map((member) => ({
+        name: member.name.trim(),
+        role: member.role.trim(),
+        profile: member.profile.trim(),
+        responsibility: member.responsibility.trim() || null,
+      }))
+      .filter((member) => member.name && member.role && member.profile)
+
+    if (members.length === 0) {
+      return
+    }
+
+    setBusy(true)
+    try {
+      if (editingProjectTeamId) {
+        await updateProjectTeam(editingProjectTeamId, {
+          name: projectTeamForm.name.trim(),
+          description: projectTeamForm.description.trim() || null,
+          concurrencyCap: Math.max(1, Number.parseInt(projectTeamForm.concurrencyCap, 10) || 1),
+          members,
+        })
+        flash('Project team updated')
+      } else {
+        await createProjectTeam({
+          projectId: selectedProject.project.id,
+          name: projectTeamForm.name.trim(),
+          description: projectTeamForm.description.trim() || null,
+          concurrencyCap: Math.max(1, Number.parseInt(projectTeamForm.concurrencyCap, 10) || 1),
+          members,
+        })
+        flash('Project team created')
+      }
+      resetProjectTeamForm()
+      await refresh()
+      navigate(`/projects/${selectedProject.project.id}/teams`)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function handleImportProjectTeam(event: FormEvent) {
+    event.preventDefault()
+    if (!selectedProject || !projectTeamImportForm.blueprintId) {
+      return
+    }
+    setBusy(true)
+    try {
+      await importProjectTeam({
+        projectId: selectedProject.project.id,
+        blueprintId: projectTeamImportForm.blueprintId,
+        name: projectTeamImportForm.name.trim() || null,
+        description: projectTeamImportForm.description.trim() || null,
+      })
+      setProjectTeamImportForm({ blueprintId: '', name: '', description: '' })
+      await refresh()
+      flash('Project team imported')
+      navigate(`/projects/${selectedProject.project.id}/teams`)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function handleDeleteProjectTeam(projectTeamId: string) {
+    if (!selectedProject) {
+      return
+    }
+    setBusy(true)
+    try {
+      await deleteProjectTeam(projectTeamId)
+      if (runForm.projectTeamId === projectTeamId) {
+        setRunForm((current) => ({ ...current, projectTeamId: '' }))
+      }
+      await refresh()
+      flash('Project team deleted')
+    } finally {
+      setBusy(false)
+    }
+  }
+
   async function handleCreateRepository(event: FormEvent) {
     event.preventDefault()
     if (!repoForm.name.trim() || !repoForm.url.trim()) {
@@ -1121,10 +1330,10 @@ function App() {
       const run = await createRun({
         repositoryId: runForm.repositoryId,
         projectId: isProjectRunCreate ? selectedProject?.project.id ?? null : null,
+        projectTeamId: isProjectRunCreate ? runForm.projectTeamId || null : null,
         goal: runForm.goal.trim(),
         branchName: runForm.branchName.trim() || null,
         concurrencyCap: Math.max(1, Number.parseInt(runForm.concurrencyCap, 10) || 1),
-        metadata: runForm.templateId ? { teamTemplateId: runForm.templateId } : {},
         handoff: {
           mode: 'manual',
           provider: null,
@@ -1136,7 +1345,7 @@ function App() {
         },
       })
       await refresh()
-      setRunForm({ repositoryId: '', goal: '', branchName: 'main', concurrencyCap: '1', templateId: '' })
+      setRunForm({ repositoryId: '', projectTeamId: '', goal: '', branchName: 'main', concurrencyCap: '1' })
       flash('Run created')
       navigate(`/runs/${run.id}/overview`)
     } finally {
@@ -1344,11 +1553,12 @@ function App() {
           <div>
             <p className="eyebrow">Projects / {selectedProject.project.name}</p>
             <h1>{selectedProject.project.name}</h1>
-            <p>{selectedProject.project.summary || 'Project context for repositories, runs, automation, and policy defaults.'}</p>
+            <p>{selectedProject.project.summary || 'Project context for teams, repositories, runs, automation, and policy defaults.'}</p>
           </div>
           <nav className="context-tabs" aria-label="Project sections">
             {[
               ['Overview', `/projects/${selectedProject.project.id}`],
+              ['Teams', `/projects/${selectedProject.project.id}/teams`],
               ['Repositories', `/projects/${selectedProject.project.id}/repositories`],
               ['Runs', `/projects/${selectedProject.project.id}/runs`],
               ['Automation', `/projects/${selectedProject.project.id}/automation`],
@@ -1429,6 +1639,18 @@ function App() {
               </div>
               <div className="sidebar-section">
                 <button type="button" className="action-button" onClick={() => navigate(`/projects/${selectedProject.project.id}/repositories/new`)}>New Repo</button>
+              </div>
+            </>
+          )}
+
+          {route.kind === 'project' && selectedProject && route.section === 'teams' && (
+            <>
+              <div className="sidebar-section">
+                <h2>Team shortcuts</h2>
+                <div className="sidebar-button-stack">
+                  <button type="button" className={sidebarPillClassName(route.mode === 'new-team')} onClick={() => navigate(`/projects/${selectedProject.project.id}/teams/new`)}>New team</button>
+                  <button type="button" className={sidebarPillClassName(route.mode === 'import-team')} onClick={() => navigate(`/projects/${selectedProject.project.id}/teams/import`)}>Import blueprint</button>
+                </div>
               </div>
             </>
           )}
@@ -1649,23 +1871,205 @@ function App() {
             <>
               <section className="panel">
                 <div className="stats-row">
+                  <article className="stat-card"><span>Teams</span><strong>{selectedProjectTeams.length}</strong></article>
                   <article className="stat-card"><span>Repositories</span><strong>{selectedProject.repositories.length}</strong></article>
                   <article className="stat-card"><span>Runs</span><strong>{selectedProject.runs.length}</strong></article>
                   <article className="stat-card"><span>Active runs</span><strong>{selectedProject.activeRuns.length}</strong></article>
-                  <article className="stat-card"><span>Last activity</span><strong>{formatDate(selectedProject.lastRun?.updatedAt ?? selectedProject.project.updatedAt)}</strong></article>
                 </div>
               </section>
               <section className="panel split-panel">
                 <article className="surface-card">
                   <p className="eyebrow">Summary</p>
                   <h3>{selectedProject.project.name}</h3>
-                  <p>{selectedProject.project.summary || 'This project groups repositories, run history, and automation rules.'}</p>
+                  <p>{selectedProject.project.summary || 'This project groups teams, repositories, run history, and automation rules.'}</p>
                 </article>
                 <article className="surface-card">
-                  <p className="eyebrow">Recent run</p>
-                  <h3>{selectedProject.lastRun?.goal ?? 'No runs yet'}</h3>
-                  <p>{selectedProject.lastRun ? `${formatLabel(selectedProject.lastRun.status)} on ${formatDate(selectedProject.lastRun.updatedAt)}` : 'Create a run to establish recent activity.'}</p>
+                  <p className="eyebrow">Team ownership</p>
+                  <h3>{selectedProjectTeams[0]?.name ?? 'No teams yet'}</h3>
+                  <p>{selectedProjectTeams.length > 0 ? `${selectedProjectTeams.length} project team${selectedProjectTeams.length === 1 ? '' : 's'} are available for runs and automation.` : 'Create or import a project team before planning project runs.'}</p>
                 </article>
+              </section>
+            </>
+          )}
+
+          {!loading && route.kind === 'project' && selectedProject && route.section === 'teams' && (
+            <>
+              {(route.mode === 'new-team' || editingProjectTeamId) ? (
+                <section className="panel form-panel">
+                  <div className="section-header">
+                    <div>
+                      <p className="eyebrow">Project teams</p>
+                      <h2>{editingProjectTeamId ? 'Edit team' : 'New team'}</h2>
+                    </div>
+                  </div>
+                  <form className="stack-form" onSubmit={(event) => void handleSubmitProjectTeam(event)}>
+                    <label className="field">
+                      <span>Name</span>
+                      <input value={projectTeamForm.name} onChange={(event) => setProjectTeamForm((current) => ({ ...current, name: event.target.value }))} />
+                    </label>
+                    <label className="field">
+                      <span>Description</span>
+                      <textarea rows={3} value={projectTeamForm.description} onChange={(event) => setProjectTeamForm((current) => ({ ...current, description: event.target.value }))} />
+                    </label>
+                    <label className="field">
+                      <span>Concurrency cap</span>
+                      <input type="number" min={1} value={projectTeamForm.concurrencyCap} onChange={(event) => setProjectTeamForm((current) => ({ ...current, concurrencyCap: event.target.value }))} />
+                    </label>
+                    <fieldset className="repo-picker">
+                      <legend>Members</legend>
+                      {projectTeamForm.members.map((member, index) => (
+                        <div key={`${member.role}-${index}`} className="stack-form">
+                          <div className="two-column">
+                            <label className="field">
+                              <span>Name</span>
+                              <input value={member.name} onChange={(event) => patchProjectTeamMember(index, { name: event.target.value })} />
+                            </label>
+                            <label className="field">
+                              <span>Role</span>
+                              <input value={member.role} onChange={(event) => patchProjectTeamMember(index, { role: event.target.value })} />
+                            </label>
+                          </div>
+                          <div className="two-column">
+                            <label className="field">
+                              <span>Profile</span>
+                              <input value={member.profile} onChange={(event) => patchProjectTeamMember(index, { profile: event.target.value })} />
+                            </label>
+                            <label className="field">
+                              <span>Responsibility</span>
+                              <input value={member.responsibility} onChange={(event) => patchProjectTeamMember(index, { responsibility: event.target.value })} />
+                            </label>
+                          </div>
+                          <div className="action-row">
+                            <button
+                              type="button"
+                              className="table-action table-action-danger"
+                              onClick={() => setProjectTeamForm((current) => ({
+                                ...current,
+                                members: current.members.filter((_, memberIndex) => memberIndex !== index),
+                              }))}
+                              disabled={projectTeamForm.members.length <= 1}
+                            >
+                              Remove member
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                      <div className="action-row">
+                        <button
+                          type="button"
+                          className="table-action"
+                          onClick={() => setProjectTeamForm((current) => ({
+                            ...current,
+                            members: [...current.members, { name: '', role: 'implementer', profile: 'implementer', responsibility: '' }],
+                          }))}
+                        >
+                          Add member
+                        </button>
+                      </div>
+                    </fieldset>
+                    <div className="action-row">
+                      <button type="submit" className="action-button" disabled={busy}>{editingProjectTeamId ? 'Save team' : 'Create team'}</button>
+                      {editingProjectTeamId ? <button type="button" className="table-action" onClick={resetProjectTeamForm}>Cancel</button> : null}
+                    </div>
+                  </form>
+                </section>
+              ) : null}
+
+              {route.mode === 'import-team' ? (
+                <section className="panel form-panel">
+                  <div className="section-header">
+                    <div>
+                      <p className="eyebrow">Project teams</p>
+                      <h2>Import team blueprint</h2>
+                    </div>
+                  </div>
+                  <form className="stack-form" onSubmit={(event) => void handleImportProjectTeam(event)}>
+                    <label className="field">
+                      <span>Blueprint</span>
+                      <select value={projectTeamImportForm.blueprintId} onChange={(event) => setProjectTeamImportForm((current) => ({ ...current, blueprintId: event.target.value }))}>
+                        <option value="">Select blueprint</option>
+                        {teamBlueprints.map((blueprint) => (
+                          <option key={blueprint.id} value={blueprint.id}>{blueprint.name}</option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="field">
+                      <span>Name override</span>
+                      <input value={projectTeamImportForm.name} onChange={(event) => setProjectTeamImportForm((current) => ({ ...current, name: event.target.value }))} />
+                    </label>
+                    <label className="field">
+                      <span>Description override</span>
+                      <textarea rows={3} value={projectTeamImportForm.description} onChange={(event) => setProjectTeamImportForm((current) => ({ ...current, description: event.target.value }))} />
+                    </label>
+                    <div className="action-row">
+                      <button type="submit" className="action-button" disabled={busy || !projectTeamImportForm.blueprintId}>Import team</button>
+                    </div>
+                  </form>
+                </section>
+              ) : null}
+
+              <section className="panel">
+                <div className="section-header">
+                  <div>
+                    <p className="eyebrow">Team inventory</p>
+                    <h2>Project teams</h2>
+                  </div>
+                </div>
+                <table className="data-table">
+                  <thead>
+                    <tr>
+                      <th>Name</th>
+                      <th>Members</th>
+                      <th>Concurrency</th>
+                      <th>Blueprint source</th>
+                      <th />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {selectedProjectTeams.map((projectTeam) => (
+                      <tr key={projectTeam.id}>
+                        <td>
+                          <strong>{projectTeam.name}</strong>
+                          <div className="cell-subtitle">{projectTeam.description ?? 'No description provided.'}</div>
+                        </td>
+                        <td>{projectTeam.members.map((member) => member.name).join(', ') || 'No members'}</td>
+                        <td>{projectTeam.concurrencyCap}</td>
+                        <td>{projectTeam.sourceBlueprintId ?? projectTeam.sourceTemplateId ?? 'Manual'}</td>
+                        <td>
+                          <div className="action-row">
+                            <button
+                              type="button"
+                              className="table-action"
+                              onClick={() => {
+                                setEditingProjectTeamId(projectTeam.id)
+                                setProjectTeamForm({
+                                  name: projectTeam.name,
+                                  description: projectTeam.description ?? '',
+                                  concurrencyCap: String(projectTeam.concurrencyCap),
+                                  members: projectTeam.members.map((member) => ({
+                                    name: member.name,
+                                    role: member.role,
+                                    profile: member.profile,
+                                    responsibility: member.responsibility ?? '',
+                                  })),
+                                })
+                                navigate(`/projects/${selectedProject.project.id}/teams/new`)
+                              }}
+                            >
+                              Edit
+                            </button>
+                            <button type="button" className="table-action table-action-danger" onClick={() => void handleDeleteProjectTeam(projectTeam.id)} disabled={busy}>
+                              Delete
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                    {selectedProjectTeams.length === 0 ? (
+                      <tr><td colSpan={5}><div className="compact-empty">No project teams configured yet.</div></td></tr>
+                    ) : null}
+                  </tbody>
+                </table>
               </section>
             </>
           )}
@@ -1755,6 +2159,22 @@ function App() {
                       </button>
                     </div>
                   </section>
+                ) : selectedProjectTeams.length === 0 ? (
+                  <section className="panel form-panel">
+                    <div className="section-header">
+                      <div>
+                        <p className="eyebrow">Project Runs</p>
+                        <h2>New project run</h2>
+                      </div>
+                    </div>
+                    <div className="compact-empty">
+                      Create or import a project team before planning a project run.
+                      {' '}
+                      <button type="button" className="table-action" onClick={() => navigate(`/projects/${selectedProject.project.id}/teams/import`)}>
+                        Import team
+                      </button>
+                    </div>
+                  </section>
                 ) : (
                   <section className="panel form-panel">
                     <div className="section-header">
@@ -1789,11 +2209,11 @@ function App() {
                         <label className="field"><span>Concurrency</span><input type="number" min={1} value={runForm.concurrencyCap} onChange={(event) => setRunForm((current) => ({ ...current, concurrencyCap: event.target.value }))} /></label>
                       </div>
                       <label className="field">
-                        <span>Team template</span>
-                        <select value={runForm.templateId} onChange={(event) => setRunForm((current) => ({ ...current, templateId: event.target.value }))}>
-                          <option value="">None</option>
-                          {templates.map((template) => (
-                            <option key={template.id} value={template.id}>{template.name}</option>
+                        <span>Project team</span>
+                        <select value={runForm.projectTeamId} onChange={(event) => setRunForm((current) => ({ ...current, projectTeamId: event.target.value }))}>
+                          <option value="">Select team</option>
+                          {selectedProjectTeams.map((projectTeam) => (
+                            <option key={projectTeam.id} value={projectTeam.id}>{projectTeam.name}</option>
                           ))}
                         </select>
                       </label>
@@ -1858,6 +2278,7 @@ function App() {
               </div>
               <RepeatableRunsPanel
                 repositories={selectedProjectRepositories.map((repository) => ({ id: repository.id, name: repository.name, provider: repository.provider }))}
+                projectTeams={selectedProjectTeams}
                 selectedRepositoryId={automationRepositoryId}
                 onSelectedRepositoryIdChange={setAutomationRepositoryId}
                 definitions={data.repeatableRunDefinitions.filter((definition) => selectedProject.project.repositoryIds.includes(definition.repositoryId))}
@@ -1941,15 +2362,6 @@ function App() {
                         <label className="field"><span>Branch</span><input value={runForm.branchName} onChange={(event) => setRunForm((current) => ({ ...current, branchName: event.target.value }))} /></label>
                         <label className="field"><span>Concurrency</span><input type="number" min={1} value={runForm.concurrencyCap} onChange={(event) => setRunForm((current) => ({ ...current, concurrencyCap: event.target.value }))} /></label>
                       </div>
-                      <label className="field">
-                        <span>Team template</span>
-                        <select value={runForm.templateId} onChange={(event) => setRunForm((current) => ({ ...current, templateId: event.target.value }))}>
-                          <option value="">None</option>
-                          {templates.map((template) => (
-                            <option key={template.id} value={template.id}>{template.name}</option>
-                          ))}
-                        </select>
-                      </label>
                       <div className="action-row"><button type="submit" className="action-button" disabled={busy}>Create Run</button></div>
                     </form>
                   </section>

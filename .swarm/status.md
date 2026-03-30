@@ -21,10 +21,14 @@
 - the frontend run editor and repeatable run configuration surfaces now expose auto-handoff settings, and run detail messaging now distinguishes manual state, in-progress auto handoff, and failed auto handoff
 - the frontend shell has been recut around route-driven `Projects`, `Ad-Hoc Runs`, and `Settings` globals, with `Overview`, `Board`, `Lifecycle`, and `Review` moved into compact run-context workspaces and list/table-first layouts replacing the prior card-wall navigation mix
 - the Projects workspace now reads project inventory from the API as the source of truth, removes the old seed/local fallback that could invent phantom projects, and persists repository-to-project assignment when creating a project from the UI
+- project-owned agent teams are now first-class resources: projects can import team blueprints or author teams manually, project runs and repeatable runs bind to a concrete project team instead of a run-level team selector, and worker/leader execution now uses persisted team member names, roles, and profiles when provisioning agents
+- local project-team execution now falls back to the runtime Codex profile defaults instead of trying to execute non-existent per-role CLI profiles, and leader planning normalizes cyclic/forward task dependencies instead of failing run start on an invalid DAG
 - frontend runtime config loading is now hardened for preview deployments: the app consumes `window.__CODEX_SWARM_CONFIG__` on initial load, can refresh from `runtime-config.json` with a `runtime-config.js` fallback, and the runtime-config writer now sources tailnet env defaults so manual preview/build starts no longer silently ship stale API tokens
-- project automation webhook setup now uses server-generated immutable endpoint paths, keeps the persisted trigger model generic, and exposes GitHub-specific affordances only as an opt-in UI preset with collapsed optional filter/security sections instead of a flat GitHub-biased form
+- project automation webhook setup now uses server-generated immutable endpoint paths, keeps the persisted trigger model generic, and exposes GitHub-specific affordances only as an opt-in UI shape with collapsed optional filter/security sections instead of a flat GitHub-biased form
 - the public README screenshot set now uses current staging captures and the shipped route structure, replacing the old mobile-heavy board/run-detail/admin shot list with desktop-only Projects, Project Runs, Project Automation, Ad-Hoc Runs, Run Board, Run Lifecycle, and Settings surfaces
 - GitHub Actions CI now checks out the repository before invoking the local `setup-workspace` composite action, aligning the pipeline with how local actions are resolved on runners instead of failing before any real gate executes
+- the checked-in Codex Swarm skill library has been hard-recut around real product subsystems (`run operations`, `project automation`, `review/governance`, `worker lifecycle`, `observability/diagnostics`, `recovery/restore`) and no longer describes the repo as a Clawteam-style board/inbox control pack
+- leader/task orchestration now rejects cyclic leader DAGs instead of silently serializing them, and actionable blocked worker outcomes can generate unblock child tasks that are wired back into the blocked parent so the graph can widen and reopen automatically once the unblock work completes
 
 ## Current Validation
 
@@ -37,3 +41,4 @@
 - `corepack pnpm --dir apps/api test -- control-plane-service.auto-handoff.test.ts config.test.ts` passed
 - `corepack pnpm ci:typecheck`, `corepack pnpm ci:build`, and `corepack pnpm ci:test` passed after the webhook automation re-cut
 - `corepack pnpm ci:lint`, `corepack pnpm ci:typecheck`, `corepack pnpm ci:test`, and `corepack pnpm ci:build` passed after the CI workflow checkout-order fix
+- `corepack pnpm --dir packages/orchestration test -- --runInBand`, `corepack pnpm --dir apps/api test -- app.test.ts`, `corepack pnpm ci:typecheck`, `corepack pnpm ci:lint`, `corepack pnpm ci:test`, and `corepack pnpm ci:build` passed after the DAG-width and actionable-blocker follow-up fix

@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { PassThrough } from "node:stream";
 import { describe, expect, it } from "vitest";
@@ -420,6 +420,8 @@ describe("worker runtime helpers", () => {
         repositoryId: "55555555-5555-4555-8555-555555555555",
         workspaceId: "default-workspace",
         teamId: "default-team",
+        projectTeamId: null,
+        projectTeamName: null,
         goal: "Provision isolated worker worktrees",
         status: "in_progress",
         branchName: "main",
@@ -974,6 +976,69 @@ describe("worker runtime helpers", () => {
       "thread-cli-001",
       "Continue the worker"
     ]);
+  });
+
+  it("resolves relative cwd values before invoking local codex exec", async () => {
+    const calls: Array<{ args: string[]; cwd: string | undefined }> = [];
+    const executeTool = createLocalCodexCliExecutor({
+      command: process.execPath,
+      spawnImpl: (_command, args, options) => {
+        calls.push({
+          args: [...args],
+          cwd: options.cwd?.toString()
+        });
+
+        const stdout = new PassThrough();
+        const stderr = new PassThrough();
+        const child = {
+          stdout,
+          stderr
+        } as any;
+
+        queueMicrotask(() => {
+          stdout.end([
+            JSON.stringify({ type: "thread.started", thread_id: "thread-cli-relative-001" }),
+            JSON.stringify({ type: "item.completed", item: { id: "item-1", type: "agent_message", text: "cli-started-relative" } }),
+            JSON.stringify({ type: "turn.completed", usage: { output_tokens: 1 } })
+          ].join("\n"));
+          child.emit("exit", 0, null);
+        });
+
+        Object.setPrototypeOf(child, PassThrough.prototype);
+        child.on = Function.prototype.bind.call((new PassThrough() as any).on, child);
+        child.once = Function.prototype.bind.call((new PassThrough() as any).once, child);
+        child.emit = Function.prototype.bind.call((new PassThrough() as any).emit, child);
+
+        return child;
+      }
+    });
+
+    const relativeCwd = ".swarm/worktrees/example/run-001/shared";
+    const resolvedCwd = resolve(relativeCwd);
+
+    await executeTool(buildCodexSessionStartRequest({
+      prompt: "Start the worker",
+      config: {
+        cwd: relativeCwd,
+        profile: "leader",
+        sandbox: "workspace-write",
+        approvalPolicy: "never"
+      }
+    }));
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.args).toEqual([
+      "exec",
+      "--skip-git-repo-check",
+      "--json",
+      "--dangerously-bypass-approvals-and-sandbox",
+      "-C",
+      resolvedCwd,
+      "-p",
+      "leader",
+      "Start the worker"
+    ]);
+    expect(calls[0]?.cwd).toBe(resolvedCwd);
   });
 
   it("executes codex start and reply flows with persisted thread reuse", async () => {

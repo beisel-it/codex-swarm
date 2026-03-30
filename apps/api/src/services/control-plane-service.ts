@@ -19,6 +19,13 @@ import {
   type ProjectRepositoryAssignment,
   type ProjectRunAssignment,
   type ProjectSummary,
+  type ProjectTeam,
+  type ProjectTeamCreateInput,
+  type ProjectTeamDetail,
+  type ProjectTeamImportInput,
+  type ProjectTeamMember,
+  type ProjectTeamMemberCreateInput,
+  type ProjectTeamUpdateInput,
   type ProjectUpdateInput,
   type Run,
   type RunAuditExport,
@@ -77,7 +84,8 @@ import {
   repeatableRunTriggerSchema,
   runContextSchema,
   runHandoffConfigSchema,
-  runHandoffExecutionSchema
+  runHandoffExecutionSchema,
+  projectTeamDetailSchema
 } from "@codex-swarm/contracts";
 import { formatRunExecutionContext, resolveInitialTaskStatus } from "@codex-swarm/orchestration";
 import {
@@ -95,6 +103,8 @@ import {
   controlPlaneEvents,
   externalEventReceipts,
   messages,
+  projectTeamMembers,
+  projectTeams,
   repeatableRunDefinitions,
   repeatableRunTriggers,
   projects,
@@ -109,6 +119,7 @@ import {
   workspaces
 } from "../db/schema.js";
 import type { Clock } from "../lib/clock.js";
+import { agentTeamBlueprints } from "../lib/team-templates.js";
 import { HttpError } from "../lib/http-error.js";
 import type { ProviderHandoffAdapter } from "../lib/provider-handoff.js";
 import { inspectRepositoryProvider } from "../lib/repository-provider.js";
@@ -133,6 +144,9 @@ type RepeatableRunTriggerCreate = RepeatableRunTriggerCreateInput;
 type RepeatableRunTriggerUpdate = z.infer<typeof repeatableRunTriggerUpdateSchema>;
 type ProjectCreate = ProjectCreateInput;
 type ProjectUpdate = ProjectUpdateInput;
+type ProjectTeamCreate = ProjectTeamCreateInput;
+type ProjectTeamImport = ProjectTeamImportInput;
+type ProjectTeamUpdate = ProjectTeamUpdateInput;
 type RunCreate = RunCreateInput;
 type RunUpdate = RunUpdateInput;
 type RunStatusUpdate = RunStatusUpdateInput;
@@ -170,6 +184,8 @@ type OwnershipBoundary = {
 };
 type TeamRecord = typeof teams.$inferSelect;
 type ProjectRecord = typeof projects.$inferSelect;
+type ProjectTeamRecord = typeof projectTeams.$inferSelect;
+type ProjectTeamMemberRecord = typeof projectTeamMembers.$inferSelect;
 type AgentRecord = typeof agents.$inferSelect;
 type SessionRecord = typeof sessions.$inferSelect;
 type RepeatableRunDefinitionRecord = typeof repeatableRunDefinitions.$inferSelect;
@@ -264,6 +280,23 @@ function normalizeLegacyEventActor<T>(value: T): T {
       roles
     }
   } as T;
+}
+
+function slugifyProjectTeamMemberKey(value: string) {
+  const normalized = value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+
+  return normalized || "member";
+}
+
+function resolveRuntimeRole(profile: string, explicitRole?: string | null) {
+  if (explicitRole && explicitRole.trim().length > 0) {
+    return explicitRole.trim();
+  }
+
+  return profile === "leader" ? "tech-lead" : profile;
 }
 
 function assertAccessBoundary(access: AccessBoundary | undefined): asserts access is AccessBoundary & {
@@ -944,7 +977,7 @@ export class ControlPlaneService {
 
   async listProjects(access?: AccessBoundary): Promise<ProjectSummary[]> {
     const boundary = requireAccessBoundary(access);
-    const [projectRows, repositoryRows, runRows] = await Promise.all([
+    const [projectRows, repositoryRows, runRows, projectTeamRows] = await Promise.all([
       this.db
         .select()
         .from(projects)
@@ -968,15 +1001,23 @@ export class ControlPlaneService {
           eq(runs.workspaceId, boundary.workspaceId),
           eq(runs.teamId, boundary.teamId)
         ))
-        .orderBy(asc(runs.createdAt))
+        .orderBy(asc(runs.createdAt)),
+      this.db
+        .select()
+        .from(projectTeams)
+        .where(and(
+          eq(projectTeams.workspaceId, boundary.workspaceId),
+          eq(projectTeams.teamId, boundary.teamId)
+        ))
+        .orderBy(asc(projectTeams.createdAt))
     ]);
 
-    return projectRows.map((project) => this.mapProjectSummary(project, repositoryRows, runRows));
+    return projectRows.map((project) => this.mapProjectSummary(project, repositoryRows, runRows, projectTeamRows));
   }
 
   async getProject(projectId: string, access?: AccessBoundary): Promise<ProjectDetail> {
     const project = await this.assertProjectExists(projectId, access);
-    const [repositoryRows, runRows] = await Promise.all([
+    const [repositoryRows, runRows, projectTeamRows] = await Promise.all([
       this.db
         .select()
         .from(repositories)
@@ -992,10 +1033,22 @@ export class ControlPlaneService {
           eq(runs.workspaceId, project.workspaceId),
           eq(runs.teamId, project.teamId)
         ))
-        .orderBy(asc(runs.createdAt))
+        .orderBy(asc(runs.createdAt)),
+      this.db
+        .select()
+        .from(projectTeams)
+        .where(eq(projectTeams.projectId, project.id))
+        .orderBy(asc(projectTeams.createdAt))
     ]);
+    const projectTeamMemberRows = projectTeamRows.length === 0
+      ? []
+      : await this.db
+        .select()
+        .from(projectTeamMembers)
+        .where(inArray(projectTeamMembers.projectTeamId, projectTeamRows.map((team) => team.id)))
+        .orderBy(asc(projectTeamMembers.position), asc(projectTeamMembers.createdAt));
 
-    return this.mapProjectDetail(project, repositoryRows, runRows);
+    return this.mapProjectDetail(project, repositoryRows, runRows, projectTeamRows, projectTeamMemberRows);
   }
 
   async createProject(input: ProjectCreate, access?: AccessBoundary): Promise<Project> {
@@ -1032,15 +1085,169 @@ export class ControlPlaneService {
 
     await this.db.transaction(async (tx) => {
       const now = this.clock.now();
+      const teamRows = await tx.select().from(projectTeams).where(eq(projectTeams.projectId, projectId));
+      const teamIds = teamRows.map((team) => team.id);
+      if (teamIds.length > 0) {
+        const definitionRows = await tx.select({ id: repeatableRunDefinitions.id }).from(repeatableRunDefinitions)
+          .where(inArray(repeatableRunDefinitions.projectTeamId, teamIds));
+        const definitionIds = definitionRows.map((row) => row.id);
+        if (definitionIds.length > 0) {
+          await tx.delete(repeatableRunTriggers).where(inArray(repeatableRunTriggers.repeatableRunId, definitionIds));
+          await tx.delete(repeatableRunDefinitions).where(inArray(repeatableRunDefinitions.id, definitionIds));
+        }
+        await tx.delete(projectTeamMembers).where(inArray(projectTeamMembers.projectTeamId, teamIds));
+        await tx.delete(projectTeams).where(inArray(projectTeams.id, teamIds));
+      }
       await tx.update(repositories).set({
         projectId: null,
         updatedAt: now
       }).where(eq(repositories.projectId, projectId));
       await tx.update(runs).set({
         projectId: null,
+        projectTeamId: null,
+        projectTeamName: null,
         updatedAt: now
       }).where(eq(runs.projectId, projectId));
       await tx.delete(projects).where(eq(projects.id, projectId));
+    });
+  }
+
+  async listProjectTeams(projectId?: string, access?: AccessBoundary): Promise<ProjectTeamDetail[]> {
+    const boundary = requireAccessBoundary(access);
+    const conditions = [
+      eq(projectTeams.workspaceId, boundary.workspaceId),
+      eq(projectTeams.teamId, boundary.teamId)
+    ];
+    if (projectId) {
+      conditions.push(eq(projectTeams.projectId, projectId));
+    }
+    const teamRows = await this.db.select().from(projectTeams).where(and(...conditions)).orderBy(asc(projectTeams.createdAt));
+    if (teamRows.length === 0) {
+      return [];
+    }
+    const memberRows = await this.db.select().from(projectTeamMembers)
+      .where(inArray(projectTeamMembers.projectTeamId, teamRows.map((team) => team.id)))
+      .orderBy(asc(projectTeamMembers.position), asc(projectTeamMembers.createdAt));
+
+    return teamRows.map((team) => this.mapProjectTeamDetail(team, memberRows));
+  }
+
+  async createProjectTeam(input: ProjectTeamCreate, access?: AccessBoundary): Promise<ProjectTeamDetail> {
+    const boundary = requireAccessBoundary(access);
+    await this.ensureOwnershipBoundary(boundary);
+    const project = await this.assertProjectExists(input.projectId, boundary);
+    const now = this.clock.now();
+    const teamId = crypto.randomUUID();
+
+    await this.db.transaction(async (tx) => {
+      await tx.insert(projectTeams).values({
+        id: teamId,
+        projectId: project.id,
+        workspaceId: project.workspaceId,
+        teamId: project.teamId,
+        name: input.name,
+        description: input.description ?? null,
+        concurrencyCap: input.concurrencyCap,
+        sourceTemplateId: null,
+        createdAt: now,
+        updatedAt: now
+      });
+      await this.replaceProjectTeamMembers(tx, teamId, input.members, now);
+    });
+
+    return this.getProjectTeam(teamId, boundary);
+  }
+
+  async importProjectTeam(input: ProjectTeamImport, access?: AccessBoundary): Promise<ProjectTeamDetail> {
+    const blueprintId = input.blueprintId ?? input.templateId;
+    const blueprint = agentTeamBlueprints.find((candidate) => candidate.id === blueprintId);
+    if (!blueprintId || !blueprint) {
+      throw new HttpError(404, `team blueprint ${blueprintId ?? "unknown"} not found`);
+    }
+
+    const boundary = requireAccessBoundary(access);
+    await this.ensureOwnershipBoundary(boundary);
+    const project = await this.assertProjectExists(input.projectId, boundary);
+    const now = this.clock.now();
+    const teamId = crypto.randomUUID();
+
+    await this.db.transaction(async (tx) => {
+      await tx.insert(projectTeams).values({
+        id: teamId,
+        projectId: project.id,
+        workspaceId: project.workspaceId,
+        teamId: project.teamId,
+        name: input.name ?? blueprint.name,
+        description: input.description ?? blueprint.summary,
+        concurrencyCap: blueprint.suggestedConcurrencyCap,
+        sourceTemplateId: blueprint.id,
+        createdAt: now,
+        updatedAt: now
+      });
+      await this.replaceProjectTeamMembers(tx, teamId, blueprint.members.map((member) => ({
+        name: member.displayName,
+        role: resolveRuntimeRole(member.roleProfile),
+        profile: member.roleProfile,
+        responsibility: member.responsibility
+      })), now);
+    });
+
+    return this.getProjectTeam(teamId, boundary);
+  }
+
+  async getProjectTeam(projectTeamId: string, access?: AccessBoundary): Promise<ProjectTeamDetail> {
+    const team = await this.assertProjectTeamExists(projectTeamId, access);
+    const memberRows = await this.db.select().from(projectTeamMembers)
+      .where(eq(projectTeamMembers.projectTeamId, projectTeamId))
+      .orderBy(asc(projectTeamMembers.position), asc(projectTeamMembers.createdAt));
+    return this.mapProjectTeamDetail(team, memberRows);
+  }
+
+  async updateProjectTeam(projectTeamId: string, input: ProjectTeamUpdate, access?: AccessBoundary): Promise<ProjectTeamDetail> {
+    const existing = await this.assertProjectTeamExists(projectTeamId, access);
+    const now = this.clock.now();
+
+    await this.db.transaction(async (tx) => {
+      await tx.update(projectTeams).set({
+        name: input.name ?? existing.name,
+        description: input.description === undefined ? existing.description : input.description,
+        concurrencyCap: input.concurrencyCap ?? existing.concurrencyCap,
+        updatedAt: now
+      }).where(eq(projectTeams.id, projectTeamId));
+
+      if (input.members) {
+        await this.replaceProjectTeamMembers(tx, projectTeamId, input.members, now);
+      }
+    });
+
+    const [updatedTeam] = await this.db.select().from(projectTeams).where(eq(projectTeams.id, projectTeamId));
+    if (input.name && updatedTeam) {
+      await this.db.update(runs).set({
+        projectTeamName: input.name,
+        updatedAt: now
+      }).where(eq(runs.projectTeamId, projectTeamId));
+      await this.db.update(repeatableRunDefinitions).set({
+        projectTeamName: input.name,
+        updatedAt: now
+      }).where(eq(repeatableRunDefinitions.projectTeamId, projectTeamId));
+    }
+
+    return this.getProjectTeam(projectTeamId, access);
+  }
+
+  async deleteProjectTeam(projectTeamId: string, access?: AccessBoundary) {
+    await this.assertProjectTeamExists(projectTeamId, access);
+    const linkedDefinition = await this.db.select({ id: repeatableRunDefinitions.id, name: repeatableRunDefinitions.name })
+      .from(repeatableRunDefinitions)
+      .where(eq(repeatableRunDefinitions.projectTeamId, projectTeamId))
+      .limit(1);
+    if (linkedDefinition[0]) {
+      throw new HttpError(409, `project team is still referenced by repeatable run ${linkedDefinition[0].name}`);
+    }
+
+    await this.db.transaction(async (tx) => {
+      await tx.delete(projectTeamMembers).where(eq(projectTeamMembers.projectTeamId, projectTeamId));
+      await tx.delete(projectTeams).where(eq(projectTeams.id, projectTeamId));
     });
   }
 
@@ -1219,11 +1426,20 @@ export class ControlPlaneService {
   async createRepeatableRunDefinition(input: RepeatableRunDefinitionCreate, access?: AccessBoundary) {
     const boundary = requireAccessBoundary(access);
     const repository = await this.assertRepositoryExists(input.repositoryId, boundary);
+    const projectTeam = await this.assertProjectTeamExists(input.projectTeamId, boundary);
+    if (!repository.projectId) {
+      throw new HttpError(409, "repeatable runs require a repository assigned to a project");
+    }
+    if (projectTeam.projectId !== repository.projectId) {
+      throw new HttpError(409, `project team ${projectTeam.id} does not belong to repository project ${repository.projectId}`);
+    }
     const now = this.clock.now();
 
     const [definition] = await this.db.insert(repeatableRunDefinitions).values({
       id: crypto.randomUUID(),
       repositoryId: repository.id,
+      projectTeamId: projectTeam.id,
+      projectTeamName: projectTeam.name,
       workspaceId: repository.workspaceId,
       teamId: repository.teamId,
       name: input.name,
@@ -1242,10 +1458,21 @@ export class ControlPlaneService {
     const repository = input.repositoryId
       ? await this.assertRepositoryExists(input.repositoryId, access)
       : await this.assertRepositoryExists(existing.repositoryId, access);
+    const projectTeam = input.projectTeamId
+      ? await this.assertProjectTeamExists(input.projectTeamId, access)
+      : await this.assertProjectTeamExists(existing.projectTeamId, access);
+    if (!repository.projectId) {
+      throw new HttpError(409, "repeatable runs require a repository assigned to a project");
+    }
+    if (projectTeam.projectId !== repository.projectId) {
+      throw new HttpError(409, `project team ${projectTeam.id} does not belong to repository project ${repository.projectId}`);
+    }
     const now = this.clock.now();
 
     const [definition] = await this.db.update(repeatableRunDefinitions).set({
       repositoryId: repository.id,
+      projectTeamId: projectTeam.id,
+      projectTeamName: projectTeam.name,
       workspaceId: repository.workspaceId,
       teamId: repository.teamId,
       name: input.name ?? existing.name,
@@ -1518,6 +1745,18 @@ export class ControlPlaneService {
     if (projectId) {
       await this.assertProjectExists(projectId, access);
     }
+    const projectTeam = input.projectTeamId
+      ? await this.assertProjectTeamExists(input.projectTeamId, access)
+      : null;
+    if (projectId && !projectTeam) {
+      throw new HttpError(400, "project runs require projectTeamId");
+    }
+    if (!projectId && projectTeam) {
+      throw new HttpError(400, "ad-hoc runs cannot set projectTeamId");
+    }
+    if (projectTeam && projectTeam.projectId !== projectId) {
+      throw new HttpError(409, `project team ${projectTeam.id} does not belong to project ${projectId}`);
+    }
 
     const id = crypto.randomUUID();
     const now = this.clock.now();
@@ -1534,6 +1773,8 @@ export class ControlPlaneService {
       workspaceId: repository.workspaceId,
       teamId: repository.teamId,
       projectId,
+      projectTeamId: projectTeam?.id ?? null,
+      projectTeamName: projectTeam?.name ?? null,
       goal: input.goal,
       status: "pending",
       branchName: input.branchName ?? null,
@@ -1693,6 +1934,8 @@ export class ControlPlaneService {
       };
       const run = await this.createRun({
         repositoryId: repository.id,
+        projectId: repository.projectId ?? null,
+        projectTeamId: repeatableRun.projectTeamId,
         goal: repeatableRun.execution.goal,
         branchName: repeatableRun.execution.branchName ?? undefined,
         planArtifactPath: repeatableRun.execution.planArtifactPath ?? undefined,
@@ -1767,12 +2010,31 @@ export class ControlPlaneService {
     if (input.projectId) {
       await this.assertProjectExists(input.projectId, access);
     }
+    const nextProjectId = input.projectId === undefined ? existingRun.projectId : input.projectId;
+    const nextProjectTeam = input.projectTeamId === undefined
+      ? existingRun.projectTeamId
+        ? await this.assertProjectTeamExists(existingRun.projectTeamId, access)
+        : null
+      : input.projectTeamId
+        ? await this.assertProjectTeamExists(input.projectTeamId, access)
+        : null;
+    if (nextProjectId && !nextProjectTeam) {
+      throw new HttpError(400, "project runs require projectTeamId");
+    }
+    if (!nextProjectId && nextProjectTeam) {
+      throw new HttpError(400, "ad-hoc runs cannot set projectTeamId");
+    }
+    if (nextProjectTeam && nextProjectTeam.projectId !== nextProjectId) {
+      throw new HttpError(409, `project team ${nextProjectTeam.id} does not belong to project ${nextProjectId}`);
+    }
     const now = this.clock.now();
     const context = resolveRunContext(input.context, input.metadata, existingRun.metadata);
     const handoff = resolveRunHandoffConfig(input.handoff, existingRun.handoffConfig);
 
     const [run] = await this.db.update(runs).set({
-      projectId: input.projectId === undefined ? existingRun.projectId : input.projectId,
+      projectId: nextProjectId,
+      projectTeamId: nextProjectTeam?.id ?? null,
+      projectTeamName: nextProjectTeam?.name ?? null,
       goal: input.goal ?? existingRun.goal,
       branchName: input.branchName === undefined ? existingRun.branchName : input.branchName,
       budgetTokens: input.budgetTokens === undefined ? existingRun.budgetTokens : input.budgetTokens,
@@ -2108,7 +2370,9 @@ export class ControlPlaneService {
       await this.assertAgentExists(input.ownerAgentId, access);
     }
 
-    const ready = await this.areDependenciesSatisfied(task.runId, task.dependencyIds);
+    const nextDependencyIds = input.dependencyIds ?? task.dependencyIds;
+    await this.assertDependenciesBelongToRun(task.runId, nextDependencyIds);
+    const ready = await this.areDependenciesSatisfied(task.runId, nextDependencyIds);
 
     if (input.status === "in_progress" && !ready) {
       throw new HttpError(409, "task dependencies are not satisfied");
@@ -2120,6 +2384,7 @@ export class ControlPlaneService {
     const [updated] = await this.db.update(tasks).set({
       status: effectiveStatus,
       ownerAgentId: input.ownerAgentId ?? task.ownerAgentId,
+      dependencyIds: nextDependencyIds,
       updatedAt: now
     }).where(eq(tasks.id, taskId)).returning();
 
@@ -2164,8 +2429,10 @@ export class ControlPlaneService {
       const [createdAgent] = await tx.insert(agents).values({
         id,
         runId: input.runId,
+        projectTeamMemberId: input.projectTeamMemberId ?? null,
         name: input.name,
         role: input.role,
+        profile: input.profile ?? "default",
         status: input.status,
         worktreePath: input.worktreePath ?? null,
         branchName: input.branchName ?? null,
@@ -2268,8 +2535,10 @@ export class ControlPlaneService {
     const agentRows = await this.db.select({
       id: agents.id,
       runId: agents.runId,
+      projectTeamMemberId: agents.projectTeamMemberId,
       name: agents.name,
       role: agents.role,
+      profile: agents.profile,
       status: agents.status,
       worktreePath: agents.worktreePath,
       branchName: agents.branchName,
@@ -2679,9 +2948,50 @@ export class ControlPlaneService {
     return this.mapWorkerDispatchAssignment(expectPersistedRecord(updatedAssignment, "worker dispatch assignment"));
   }
 
+  private async loadRunProjectTeam(projectTeamId: string | null, access?: AccessBoundary): Promise<ProjectTeamDetail | null> {
+    if (!projectTeamId) {
+      return null;
+    }
+
+    return this.getProjectTeam(projectTeamId, access);
+  }
+
+  private selectProjectTeamMemberForRole(
+    projectTeam: ProjectTeamDetail | null,
+    role: string,
+    runAgents: Agent[]
+  ): ProjectTeamMember | null {
+    if (!projectTeam) {
+      return null;
+    }
+
+    const candidates = projectTeam.members
+      .filter((member) => member.role === role)
+      .sort((left, right) => left.position - right.position || left.name.localeCompare(right.name));
+
+    if (candidates.length === 0) {
+      return null;
+    }
+
+    const assignmentCounts = new Map<string, number>(candidates.map((member) => [member.id, 0]));
+    for (const agent of runAgents) {
+      if (!agent.projectTeamMemberId || !assignmentCounts.has(agent.projectTeamMemberId)) {
+        continue;
+      }
+      assignmentCounts.set(agent.projectTeamMemberId, (assignmentCounts.get(agent.projectTeamMemberId) ?? 0) + 1);
+    }
+
+    return [...candidates].sort((left, right) =>
+      (assignmentCounts.get(left.id) ?? 0) - (assignmentCounts.get(right.id) ?? 0)
+      || left.position - right.position
+      || left.name.localeCompare(right.name)
+    )[0] ?? null;
+  }
+
   async enqueueRunnableWorkerDispatches(runId: string, access?: AccessBoundary) {
     const runDetail = await this.getRun(runId, access);
     const repository = this.mapRepository(await this.assertRepositoryExists(runDetail.repositoryId, access));
+    const projectTeam = await this.loadRunProjectTeam(runDetail.projectTeamId, access);
 
     if (["awaiting_approval", "completed", "failed", "cancelled"].includes(runDetail.status)) {
       return [];
@@ -2736,11 +3046,17 @@ export class ControlPlaneService {
     const workspaceProvisioningMode = resolveWorkspaceProvisioningMode();
 
     for (const task of tasksToQueue) {
+      const projectTeamMember = this.selectProjectTeamMemberForRole(projectTeam, task.role, runDetail.agents);
+      if (runDetail.projectTeamId && !projectTeamMember) {
+        throw new HttpError(409, `project team ${runDetail.projectTeamName ?? runDetail.projectTeamId} has no member for role ${task.role}`);
+      }
       const existingAgent = existingAgentsByTaskId.get(task.id);
       const agent = existingAgent ?? await this.createAgent({
         runId,
-        name: `${task.role}-${task.title}`.slice(0, 72),
-        role: task.role,
+        projectTeamMemberId: projectTeamMember?.id,
+        name: (projectTeamMember?.name ?? `${task.role}-${task.title}`).slice(0, 72),
+        role: projectTeamMember?.role ?? task.role,
+        profile: projectTeamMember?.profile ?? "default",
         status: "idle",
         branchName: runDetail.branchName ?? repository.defaultBranch,
         currentTaskId: task.id
@@ -2774,7 +3090,7 @@ export class ControlPlaneService {
         worktreePath,
         branchName: runDetail.branchName ?? repository.defaultBranch,
         prompt: this.buildTaskExecutionPrompt(runDetail, repository, task),
-        profile: "default",
+        profile: updatedAgent?.profile ?? agent.profile,
         sandbox: workerSandbox,
         approvalPolicy: workerApprovalPolicy,
         includePlanTool: false,
@@ -3746,6 +4062,18 @@ export class ControlPlaneService {
     return project;
   }
 
+  private async assertProjectTeamExists(projectTeamId: string, access?: AccessBoundary) {
+    const [projectTeam] = await this.db.select().from(projectTeams).where(eq(projectTeams.id, projectTeamId));
+
+    if (!projectTeam) {
+      throw new HttpError(404, `project team ${projectTeamId} not found`);
+    }
+
+    this.assertBoundaryMatch(access, projectTeam.workspaceId, projectTeam.teamId, "project team", projectTeamId);
+
+    return projectTeam;
+  }
+
   private async assertRepositoryExists(repositoryId: string, access?: AccessBoundary) {
     const [repository] = await this.db.select().from(repositories).where(eq(repositories.id, repositoryId));
 
@@ -3756,6 +4084,33 @@ export class ControlPlaneService {
     this.assertBoundaryMatch(access, repository.workspaceId, repository.teamId, "repository", repositoryId);
 
     return repository;
+  }
+
+  private async replaceProjectTeamMembers(
+    tx: Pick<AppDb, "delete" | "insert">,
+    projectTeamId: string,
+    members: ProjectTeamMemberCreateInput[],
+    now: Date
+  ) {
+    await tx.delete(projectTeamMembers).where(eq(projectTeamMembers.projectTeamId, projectTeamId));
+    if (members.length === 0) {
+      return;
+    }
+
+    await tx.insert(projectTeamMembers).values(
+      members.map((member, index) => ({
+        id: crypto.randomUUID(),
+        projectTeamId,
+        key: `${slugifyProjectTeamMemberKey(member.name)}-${index + 1}`,
+        position: index,
+        name: member.name,
+        role: member.role,
+        profile: member.profile,
+        responsibility: member.responsibility ?? null,
+        createdAt: now,
+        updatedAt: now
+      }))
+    );
   }
 
   private async assertWorkerNodeExists(nodeId: string) {
@@ -3919,12 +4274,14 @@ export class ControlPlaneService {
   private mapProjectSummary(
     project: ProjectRecord,
     repositoryRows: Array<typeof repositories.$inferSelect>,
-    runRows: Array<typeof runs.$inferSelect>
+    runRows: Array<typeof runs.$inferSelect>,
+    projectTeamRows: ProjectTeamRecord[]
   ): ProjectSummary {
     const projectRuns = runRows.filter((run) => run.projectId === project.id);
 
     return {
       ...this.mapProject(project),
+      teamCount: projectTeamRows.filter((team) => team.projectId === project.id).length,
       repositoryCount: repositoryRows.filter((repository) => repository.projectId === project.id).length,
       runCount: projectRuns.length,
       latestRunAt: projectRuns.length === 0
@@ -3946,19 +4303,27 @@ export class ControlPlaneService {
     return {
       projectId,
       runId: run.id,
-      run: this.mapRun(run)
+      run: {
+        ...this.mapRun(run),
+        projectId: run.projectId ?? null
+      }
     };
   }
 
   private mapProjectDetail(
     project: ProjectRecord,
     repositoryRows: Array<typeof repositories.$inferSelect>,
-    runRows: Array<typeof runs.$inferSelect>
+    runRows: Array<typeof runs.$inferSelect>,
+    projectTeamRows: ProjectTeamRecord[],
+    projectTeamMemberRows: ProjectTeamMemberRecord[] = []
   ): ProjectDetail {
-    const summary = this.mapProjectSummary(project, repositoryRows, runRows);
+    const summary = this.mapProjectSummary(project, repositoryRows, runRows, projectTeamRows);
 
     return {
       ...summary,
+      projectTeams: projectTeamRows
+        .filter((team) => team.projectId === project.id)
+        .map((team) => this.mapProjectTeamDetail(team, projectTeamMemberRows)),
       repositoryAssignments: repositoryRows
         .filter((repository) => repository.projectId === project.id)
         .map((repository) => this.mapProjectRepositoryAssignment(project.id, repository)),
@@ -3966,6 +4331,35 @@ export class ControlPlaneService {
         .filter((run) => run.projectId === project.id)
         .map((run) => this.mapProjectRunAssignment(project.id, run))
     };
+  }
+
+  private mapProjectTeamMember(record: ProjectTeamMemberRecord): ProjectTeamMember {
+    return {
+      ...record,
+      responsibility: record.responsibility ?? null
+    };
+  }
+
+  private mapProjectTeam(record: ProjectTeamRecord): ProjectTeam {
+    return {
+      ...record,
+      description: record.description ?? null,
+      sourceBlueprintId: record.sourceTemplateId ?? null,
+      sourceTemplateId: record.sourceTemplateId ?? null
+    };
+  }
+
+  private mapProjectTeamDetail(
+    record: ProjectTeamRecord,
+    memberRows: ProjectTeamMemberRecord[]
+  ): ProjectTeamDetail {
+    return projectTeamDetailSchema.parse({
+      ...this.mapProjectTeam(record),
+      members: memberRows
+        .filter((member) => member.projectTeamId === record.id)
+        .map((member) => this.mapProjectTeamMember(member)),
+      memberCount: memberRows.filter((member) => member.projectTeamId === record.id).length
+    });
   }
 
   private mapRepository(repository: typeof repositories.$inferSelect): Repository {
@@ -4610,6 +5004,8 @@ export class ControlPlaneService {
   private mapAgent(agent: AgentRecord, agentSessions: SessionRecord[]): Agent {
     return {
       ...agent,
+      profile: agent.profile ?? "default",
+      projectTeamMemberId: agent.projectTeamMemberId ?? null,
       status: agent.status as Agent["status"],
       observability: this.buildAgentObservability(agent, agentSessions)
     };
@@ -5040,7 +5436,10 @@ export class ControlPlaneService {
   }
 
   private mapRepeatableRunDefinition(record: RepeatableRunDefinitionRecord): RepeatableRunDefinition {
-    return repeatableRunDefinitionSchema.parse(record);
+    return repeatableRunDefinitionSchema.parse({
+      ...record,
+      projectTeamName: record.projectTeamName ?? null
+    });
   }
 
   private mapRepeatableRunTrigger(record: RepeatableRunTriggerRecord): RepeatableRunTrigger {
@@ -5064,6 +5463,8 @@ export class ControlPlaneService {
     return {
       ...run,
       projectId: runProjectId,
+      projectTeamId: run.projectTeamId ?? null,
+      projectTeamName: run.projectTeamName ?? null,
       status: run.status as Run["status"],
       budgetCostUsd: centsToDollars(run.budgetCostUsd),
       branchPublishApprovalId: run.branchPublishApprovalId ?? null,

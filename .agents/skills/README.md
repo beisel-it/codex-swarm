@@ -1,43 +1,32 @@
 # Codex Swarm Skill Library
 
-This directory contains the checked-in Codex skill library for operating and
-extending `codex-swarm`.
+This directory contains the checked-in skill library for operating, extending,
+and validating the real Codex Swarm product.
+
+The library is grounded in shipped Codex Swarm surfaces:
+
+- frontend routes and workspaces
+- HTTP control-plane routes under `/api/v1`
+- checked-in operational commands such as `corepack pnpm ops:*`
+- repo docs under `docs/`, `.swarm/`, and `packages/contracts`
+
+It is not a generic agent-coordination pack and it is not a wrapper around
+another product's control model.
 
 ## Skill groups
 
-## Checked-in role and team templates
+### Codex Swarm product-operation skills
 
-### Individual agent roles
+- `codex-swarm-run-operations`
+- `codex-swarm-project-automation`
+- `codex-swarm-review-governance`
+- `codex-swarm-worker-lifecycle`
+- `codex-swarm-observability-diagnostics`
+- `codex-swarm-recovery-restore`
 
-- `.codex/agents/leader.toml`
-- `.codex/agents/architect.toml`
-- `.codex/agents/designer.toml`
-- `.codex/agents/frontend-developer.toml`
-- `.codex/agents/backend-developer.toml`
-- `.codex/agents/infrastructure-engineer.toml`
-- `.codex/agents/reviewer.toml`
-- `.codex/agents/tester.toml`
-- `.codex/agents/technical-writer.toml`
-
-### Launchable team templates
-
-- `templates/agent-teams/development-stack.md`
-- `templates/agent-teams/platform-ops-stack.md`
-
-Use these when the next run needs a pre-shaped team instead of ad hoc role
-selection.
-
-### External operator skills
-
-- `codex-swarm-board-triage`
-- `codex-swarm-inbox-inspection`
-- `codex-swarm-task-control`
-- `codex-swarm-agent-coordination`
-- `codex-swarm-diagnostics`
-- `codex-swarm-recovery`
-
-These are the M8 codex-swarm-specific skills for operating the workspace from
-the outside.
+Use these when the work is about the inner mechanics of Codex Swarm itself:
+runs, automation, review, governance, worker placement, diagnostics, and
+recovery.
 
 ### Workflow execution skills
 
@@ -46,34 +35,62 @@ the outside.
 - `validate-milestone`
 - `prepare-pr`
 
-These are reusable execution workflows used inside repo delivery work.
+Use these when the work is about shaping, validating, and handing off delivery
+inside this repo or a repo managed by Codex Swarm.
 
-## How to add a new codex-swarm skill
+## Role and team templates
 
-1. Create a new directory under `.agents/skills/<skill-name>/`.
-2. Add a `SKILL.md` with:
-   - purpose
-   - trigger conditions
-   - required inputs
-   - concrete commands or workflow steps
-   - expected outputs
-3. Reference only real codex-swarm control surfaces:
-   - `clawteam` board/inbox/task/workspace commands
-   - repo docs under `docs/`
-   - local verification commands such as `corepack pnpm ...`
-4. Add the skill to [docs/operator-skill-library.md](../../docs/operator-skill-library.md)
-   if it is part of the external operator pack.
-5. Add or update an example workflow in
-   [docs/operator-skill-workflows.md](../../docs/operator-skill-workflows.md)
-   if the new skill changes operator guidance.
+### Individual agent roles
 
-## How to evaluate whether a skill belongs here
+- `.codex/agents/leader.toml`
+- `.codex/agents/architect.toml`
+- `.codex/agents/art-director.toml`
+- `.codex/agents/designer.toml`
+- `.codex/agents/design-researcher.toml`
+- `.codex/agents/design-engineer.toml`
+- `.codex/agents/frontend-developer.toml`
+- `.codex/agents/backend-developer.toml`
+- `.codex/agents/infrastructure-engineer.toml`
+- `.codex/agents/reviewer.toml`
+- `.codex/agents/tester.toml`
+- `.codex/agents/technical-writer.toml`
+- `.codex/agents/visual-reviewer.toml`
 
-Add the skill if it teaches Codex how to operate `codex-swarm` or a repo
-managed by `codex-swarm` through concrete, repeatable workflows.
+### Launchable team templates
 
-Do not add the skill if it is only:
+- `templates/agent-teams/development-stack.md`
+- `templates/agent-teams/platform-ops-stack.md`
+- `templates/agent-teams/web-design-studio.md`
 
-- generic product advice
-- generic ClawTeam usage unrelated to codex-swarm
-- generic coding help with no codex-swarm workflow tie-in
+## How to add a new Codex Swarm skill
+
+1. Create `.agents/skills/<skill-name>/SKILL.md`.
+2. Use this structure:
+   - Purpose
+   - Trigger Conditions
+   - Required Inputs
+   - Primary Codex Swarm Surfaces
+   - Concrete Commands and Routes
+   - Expected Outputs
+   - Workflow
+   - Guardrails
+3. Ground the skill in actual Codex Swarm surfaces only:
+   - shipped frontend routes
+   - real `/api/v1` routes
+   - checked-in ops commands
+   - repo docs and verification records
+4. Update:
+   - `docs/operator-skill-library.md`
+   - `docs/operator-skill-workflows.md`
+   - `docs/agent-skill-authoring.md`
+   when the new skill changes the curated library.
+
+## What does not belong here
+
+Do not add a skill if it is only:
+
+- generic coding advice with no Codex Swarm workflow tie-in
+- generic task-board or inbox guidance from another product
+- dynamic “current board wave” lore tied to temporary task IDs
+- references to surfaces or product names that Codex Swarm does not actually
+  ship

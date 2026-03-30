@@ -1,8 +1,10 @@
-import type { RunDetail, Task } from "@codex-swarm/contracts";
+import type { ProjectTeamDetail, RunDetail, Task } from "@codex-swarm/contracts";
 import {
   buildLeaderPlanningPrompt,
   buildLeaderReslicePrompt,
-  orderLeaderPlanTasks,
+  buildLeaderUnblockPrompt,
+  type LeaderPlanningRoleOption,
+  normalizeLeaderPlanTasks,
   parseLeaderPlanOutput,
   type WorkerTaskOutcome
 } from "@codex-swarm/orchestration";
@@ -106,6 +108,83 @@ function buildLeaderStartPrompt(runId: string) {
   ].join("\n");
 }
 
+async function loadProjectTeamForRun(
+  request: LeaderPlanningLoopRequest,
+  runDetail: RunDetail
+): Promise<ProjectTeamDetail | null> {
+  if (!runDetail.projectTeamId) {
+    return null;
+  }
+
+  return request<ProjectTeamDetail>("GET", `/api/v1/project-teams/${runDetail.projectTeamId}`);
+}
+
+function toLeaderPlanningRoleOptions(projectTeam: ProjectTeamDetail | null): LeaderPlanningRoleOption[] {
+  if (!projectTeam) {
+    return [];
+  }
+
+  return projectTeam.members.map((member) => ({
+    role: member.role,
+    profile: member.profile,
+    name: member.name,
+    responsibility: member.responsibility
+  }));
+}
+
+function mapFollowOnDependencyIds(
+  parentTask: Task,
+  localDependencyKeys: string[],
+  createdTaskIds: Map<string, string>
+) {
+  return [
+    ...parentTask.dependencyIds,
+    ...localDependencyKeys.map((key) => {
+      const dependencyId = createdTaskIds.get(key);
+
+      if (!dependencyId) {
+        throw new Error(`task dependency ${key} has not been created yet`);
+      }
+
+      return dependencyId;
+    })
+  ];
+}
+
+async function createFollowOnTasks(
+  request: LeaderPlanningLoopRequest,
+  input: {
+    runId: string;
+    parentTask: Task;
+    orderedTasks: ReturnType<typeof normalizeLeaderPlanTasks>;
+  }
+) {
+  const createdTaskIds = new Map<string, string>();
+  const createdTasks: Task[] = [];
+
+  for (const task of input.orderedTasks) {
+    const createdTask = await request<Task>("POST", "/api/v1/tasks", {
+      runId: input.runId,
+      parentTaskId: input.parentTask.id,
+      title: task.title,
+      description: task.description,
+      role: task.role,
+      priority: Math.min(input.parentTask.priority + 1, 5),
+      dependencyIds: mapFollowOnDependencyIds(
+        input.parentTask,
+        task.dependencyKeys,
+        createdTaskIds
+      ),
+      acceptanceCriteria: task.acceptanceCriteria
+    });
+
+    createdTaskIds.set(task.key, createdTask.id);
+    createdTasks.push(createdTask);
+  }
+
+  return createdTasks;
+}
+
 export async function runLeaderPlanningLoop(input: LeaderPlanningLoopInput): Promise<LeaderPlanningLoopResult> {
   const registry = new SessionRegistry();
   registry.seed({
@@ -163,6 +242,10 @@ export async function runLeaderPlanningLoop(input: LeaderPlanningLoopInput): Pro
     });
 
     const runDetail = await input.request<RunDetail>("GET", `/api/v1/runs/${input.runId}`);
+    const projectTeam = input.planningPrompt
+      ? null
+      : await loadProjectTeamForRun(input.request, runDetail);
+    const availableRoles = toLeaderPlanningRoleOptions(projectTeam);
     const persistedSession = runDetail.sessions.find((session) => session.agentId === agent.id);
 
     if (!persistedSession) {
@@ -198,11 +281,15 @@ export async function runLeaderPlanningLoop(input: LeaderPlanningLoopInput): Pro
       supervisor,
       executeTool: input.executeTool
     });
+    const planningPrompt = input.planningPrompt ?? buildLeaderPlanningPrompt(
+      runDetail.goal,
+      runDetail.context,
+      availableRoles
+    );
     const continued = await continueRuntime.continueSession(
       persistedSession.id,
-      input.planningPrompt ?? buildLeaderPlanningPrompt(runDetail.goal, runDetail.context)
+      planningPrompt
     );
-    const planningPrompt = input.planningPrompt ?? buildLeaderPlanningPrompt(runDetail.goal, runDetail.context);
     const planningBudgetState = await checkpointRunBudget(
       input.request,
       input.runId,
@@ -223,7 +310,7 @@ export async function runLeaderPlanningLoop(input: LeaderPlanningLoopInput): Pro
     );
 
     const plan = parseLeaderPlanOutput(continued.response.output);
-    const orderedTasks = orderLeaderPlanTasks(plan);
+    const orderedTasks = normalizeLeaderPlanTasks(plan);
 
     const planArtifact = await materializePlanArtifact({
       cwd: input.workspaceRoot,
@@ -297,11 +384,13 @@ export async function runLeaderPlanningLoop(input: LeaderPlanningLoopInput): Pro
 }
 
 export async function runLeaderResliceLoop(input: LeaderResliceLoopInput): Promise<LeaderResliceLoopResult | null> {
-  if (input.workerOutcome.status !== "needs_slicing") {
+  if (input.workerOutcome.status !== "needs_slicing" && !(input.workerOutcome.status === "blocked" && input.workerOutcome.blockerKind === "actionable")) {
     return null;
   }
 
   const runDetail = await input.request<RunDetail>("GET", `/api/v1/runs/${input.runId}`);
+  const projectTeam = await loadProjectTeamForRun(input.request, runDetail);
+  const availableRoles = toLeaderPlanningRoleOptions(projectTeam);
   const parentTask = runDetail.tasks.find((task) => task.id === input.parentTaskId);
   const leaderAgent = runDetail.agents.find((agent) => agent.role === "tech-lead");
 
@@ -347,20 +436,32 @@ export async function runLeaderResliceLoop(input: LeaderResliceLoopInput): Promi
   });
 
   try {
-    const planningPrompt = buildLeaderReslicePrompt({
-      goal: runDetail.goal,
-      taskTitle: parentTask.title,
-      taskRole: parentTask.role,
-      taskDescription: parentTask.description,
-      workerSummary: input.workerOutcome.summary,
-      blockingIssues: input.workerOutcome.blockingIssues,
-      messages: input.workerOutcome.messages
-    });
+    const planningPrompt = input.workerOutcome.status === "blocked"
+      ? buildLeaderUnblockPrompt({
+        goal: runDetail.goal,
+        taskTitle: parentTask.title,
+        taskRole: parentTask.role,
+        taskDescription: parentTask.description,
+        workerSummary: input.workerOutcome.summary,
+        blockingIssues: input.workerOutcome.blockingIssues,
+        messages: input.workerOutcome.messages,
+        availableRoles
+      })
+      : buildLeaderReslicePrompt({
+        goal: runDetail.goal,
+        taskTitle: parentTask.title,
+        taskRole: parentTask.role,
+        taskDescription: parentTask.description,
+        workerSummary: input.workerOutcome.summary,
+        blockingIssues: input.workerOutcome.blockingIssues,
+        messages: input.workerOutcome.messages,
+        availableRoles
+      });
     const continued = await runtime.continueSession(persistedSession.id, planningPrompt);
     const planningBudgetState = await checkpointRunBudget(
       input.request,
       input.runId,
-      "leader.reslice",
+      input.workerOutcome.status === "blocked" ? "leader.unblock" : "leader.reslice",
       continued.response
     );
 
@@ -377,32 +478,21 @@ export async function runLeaderResliceLoop(input: LeaderResliceLoopInput): Promi
     );
 
     const plan = parseLeaderPlanOutput(continued.response.output);
-    const orderedTasks = orderLeaderPlanTasks(plan);
-    const createdTaskIds = new Map<string, string>();
-    const createdTasks: Task[] = [];
+    const orderedTasks = normalizeLeaderPlanTasks(plan);
+    const createdTasks = await createFollowOnTasks(input.request, {
+      runId: input.runId,
+      parentTask,
+      orderedTasks
+    });
 
-    for (const task of orderedTasks) {
-      const createdTask = await input.request<Task>("POST", "/api/v1/tasks", {
-        runId: input.runId,
-        parentTaskId: parentTask.id,
-        title: task.title,
-        description: task.description,
-        role: task.role,
-        priority: Math.min(parentTask.priority + 1, 5),
-        dependencyIds: task.dependencyKeys.map((key) => {
-          const dependencyId = createdTaskIds.get(key);
-
-          if (!dependencyId) {
-            throw new Error(`task dependency ${key} has not been created yet`);
-          }
-
-          return dependencyId;
-        }),
-        acceptanceCriteria: task.acceptanceCriteria
+    if (input.workerOutcome.status === "blocked" && input.workerOutcome.blockerKind === "actionable") {
+      await input.request("PATCH", `/api/v1/tasks/${parentTask.id}/status`, {
+        status: "blocked",
+        dependencyIds: Array.from(new Set([
+          ...parentTask.dependencyIds,
+          ...createdTasks.map((task) => task.id)
+        ]))
       });
-
-      createdTaskIds.set(task.key, createdTask.id);
-      createdTasks.push(createdTask);
     }
 
     return {

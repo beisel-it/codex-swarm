@@ -1,9 +1,13 @@
 import type { FastifyPluginAsync } from "fastify";
 
-import { agentTeamTemplates } from "../lib/team-templates.js";
+import { agentTeamBlueprints } from "../lib/team-templates.js";
 
-export const teamTemplateRoutes: FastifyPluginAsync = async (app) => {
+export const teamBlueprintRoutes: FastifyPluginAsync = async (app) => {
+  app.get("/team-blueprints", async () => {
+    return agentTeamBlueprints;
+  });
+
   app.get("/team-templates", async () => {
-    return agentTeamTemplates;
+    return agentTeamBlueprints;
   });
 };

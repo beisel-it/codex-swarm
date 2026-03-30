@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { projects, repositories, runs } from "../src/db/schema.js";
+import { projectTeamMembers, projectTeams, projects, repeatableRunDefinitions, repeatableRunTriggers, repositories, runs } from "../src/db/schema.js";
 import { ControlPlaneService } from "../src/services/control-plane-service.js";
 
 function result<T>(rows: T[]) {
@@ -17,6 +17,10 @@ function result<T>(rows: T[]) {
 
 class FakeProjectDb {
   projectStore: any[] = [];
+  projectTeamStore: any[] = [];
+  projectTeamMemberStore: any[] = [];
+  repeatableRunDefinitionStore: any[] = [];
+  repeatableRunTriggerStore: any[] = [];
   repositoryStore: any[] = [];
   runStore: any[] = [];
 
@@ -36,6 +40,22 @@ class FakeProjectDb {
             return result(this.runStore);
           }
 
+          if (table === projectTeams) {
+            return result(this.projectTeamStore);
+          }
+
+          if (table === projectTeamMembers) {
+            return result(this.projectTeamMemberStore);
+          }
+
+          if (table === repeatableRunDefinitions) {
+            return result(this.repeatableRunDefinitionStore);
+          }
+
+          if (table === repeatableRunTriggers) {
+            return result(this.repeatableRunTriggerStore);
+          }
+
           throw new Error("unexpected select table");
         },
         orderBy: async () => {
@@ -49,6 +69,22 @@ class FakeProjectDb {
 
           if (table === runs) {
             return this.runStore;
+          }
+
+          if (table === projectTeams) {
+            return this.projectTeamStore;
+          }
+
+          if (table === projectTeamMembers) {
+            return this.projectTeamMemberStore;
+          }
+
+          if (table === repeatableRunDefinitions) {
+            return this.repeatableRunDefinitionStore;
+          }
+
+          if (table === repeatableRunTriggers) {
+            return this.repeatableRunTriggerStore;
           }
 
           throw new Error("unexpected ordered select table");
@@ -68,6 +104,11 @@ class FakeProjectDb {
 
           if (table === runs) {
             this.runStore.push(values);
+            return [values];
+          }
+
+          if (table === projectTeams) {
+            this.projectTeamStore.push(values);
             return [values];
           }
 
@@ -107,6 +148,11 @@ class FakeProjectDb {
               return store.repositoryStore;
             }
 
+            if (table === projectTeams) {
+              store.projectTeamStore = store.projectTeamStore.map((record) => ({ ...record, ...values }));
+              return store.projectTeamStore;
+            }
+
             throw new Error("unexpected update table");
           },
           then<TResult1 = unknown, TResult2 = never>(
@@ -127,6 +173,11 @@ class FakeProjectDb {
               return Promise.resolve(store.runStore).then(onfulfilled, onrejected);
             }
 
+            if (table === projectTeams) {
+              store.projectTeamStore = store.projectTeamStore.map((record) => ({ ...record, ...values }));
+              return Promise.resolve(store.projectTeamStore).then(onfulfilled, onrejected);
+            }
+
             return Promise.resolve([]).then(onfulfilled, onrejected);
           }
         })
@@ -139,6 +190,26 @@ class FakeProjectDb {
       where: async () => {
         if (table === projects) {
           this.projectStore = [];
+          return;
+        }
+
+        if (table === projectTeamMembers) {
+          this.projectTeamMemberStore = [];
+          return;
+        }
+
+        if (table === projectTeams) {
+          this.projectTeamStore = [];
+          return;
+        }
+
+        if (table === repeatableRunTriggers) {
+          this.repeatableRunTriggerStore = [];
+          return;
+        }
+
+        if (table === repeatableRunDefinitions) {
+          this.repeatableRunDefinitionStore = [];
           return;
         }
 
@@ -201,12 +272,26 @@ describe("ControlPlaneService projects", () => {
       createdAt: now,
       updatedAt: now
     });
+    db.projectTeamStore.push({
+      id: "550e8400-e29b-41d4-a716-446655440099",
+      projectId: project.id,
+      workspaceId: "workspace-1",
+      teamId: "team-1",
+      name: "Platform team",
+      description: "Delivery team",
+      concurrencyCap: 2,
+      sourceTemplateId: null,
+      createdAt: now,
+      updatedAt: now
+    });
     db.runStore.push({
       id: "run-1",
       repositoryId: "repo-1",
       workspaceId: "workspace-1",
       teamId: "team-1",
       projectId: project.id,
+      projectTeamId: "550e8400-e29b-41d4-a716-446655440099",
+      projectTeamName: "Platform team",
       goal: "Ship projects",
       status: "pending",
       branchName: null,
@@ -294,9 +379,17 @@ describe("ControlPlaneService projects", () => {
       workspaceId: "workspace-1",
       teamId: "team-1"
     });
+    (service as any).assertProjectTeamExists = async () => ({
+      id: "project-team-1",
+      projectId: "project-1",
+      workspaceId: "workspace-1",
+      teamId: "team-1",
+      name: "Project Team 1"
+    });
 
     const inheritedRun = await service.createRun({
       repositoryId: "repo-1",
+      projectTeamId: "project-team-1",
       goal: "Inherited project",
       concurrencyCap: 1,
       metadata: {}
@@ -334,6 +427,8 @@ describe("ControlPlaneService projects", () => {
       workspaceId: "workspace-1",
       teamId: "team-1",
       projectId: null,
+      projectTeamId: null,
+      projectTeamName: null,
       goal: "Move into project",
       status: "pending",
       branchName: null,
@@ -372,9 +467,17 @@ describe("ControlPlaneService projects", () => {
       teamId: "team-1",
       projectId: null
     });
+    (service as any).assertProjectTeamExists = async () => ({
+      id: "project-team-1",
+      projectId: "project-1",
+      workspaceId: "workspace-1",
+      teamId: "team-1",
+      name: "Project Team 1"
+    });
 
     const updatedRun = await service.updateRun("run-1", {
-      projectId: "project-1"
+      projectId: "project-1",
+      projectTeamId: "project-team-1"
     }, {
       workspaceId: "workspace-1",
       workspaceName: "Workspace 1",

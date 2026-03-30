@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import type {
   ExternalEventReceipt,
+  ProjectTeamDetail,
   RepeatableRunDefinition,
   RepeatableRunDefinitionCreateInput,
   RepeatableRunTrigger,
@@ -19,6 +20,7 @@ type RepeatableRunTriggerUpdateInput = Partial<Omit<RepeatableRunTriggerCreateIn
 
 type RepeatableRunsPanelProps = {
   repositories: RepositoryOption[]
+  projectTeams: ProjectTeamDetail[]
   selectedRepositoryId: string
   onSelectedRepositoryIdChange: (repositoryId: string) => void
   definitions: RepeatableRunDefinition[]
@@ -34,7 +36,7 @@ type RepeatableRunsPanelProps = {
   onDeleteTrigger: (trigger: RepeatableRunTrigger) => Promise<void>
 }
 
-type WebhookPreset = 'generic' | 'github'
+type WebhookShape = 'generic' | 'github'
 
 const DEFAULT_MAX_PAYLOAD_BYTES = 1024 * 1024
 const GITHUB_EVENT_HEADER = 'x-github-event'
@@ -90,7 +92,7 @@ function describeEventContext(trigger: RepeatableRunTrigger) {
   ]
 }
 
-function inferPreset(repository: RepositoryOption | null, trigger?: RepeatableRunTrigger | null): WebhookPreset {
+function inferTriggerShape(repository: RepositoryOption | null, trigger?: RepeatableRunTrigger | null): WebhookShape {
   if (repository?.provider === 'github') {
     return 'github'
   }
@@ -125,6 +127,7 @@ function buildEmptyTriggerConfig() {
 
 export function RepeatableRunsPanel({
   repositories,
+  projectTeams,
   selectedRepositoryId,
   onSelectedRepositoryIdChange,
   definitions,
@@ -142,6 +145,7 @@ export function RepeatableRunsPanel({
   const [editingDefinitionId, setEditingDefinitionId] = useState('')
   const [definitionName, setDefinitionName] = useState('')
   const [definitionDescription, setDefinitionDescription] = useState('')
+  const [definitionProjectTeamId, setDefinitionProjectTeamId] = useState(() => projectTeams[0]?.id ?? '')
   const [definitionStatus, setDefinitionStatus] = useState<RepeatableRunDefinition['status']>('active')
   const [definitionGoal, setDefinitionGoal] = useState('')
   const [definitionBranchName, setDefinitionBranchName] = useState('main')
@@ -154,7 +158,7 @@ export function RepeatableRunsPanel({
   const [triggerName, setTriggerName] = useState('')
   const [triggerDescription, setTriggerDescription] = useState('')
   const [triggerEnabled, setTriggerEnabled] = useState(true)
-  const [triggerPreset, setTriggerPreset] = useState<WebhookPreset>('generic')
+  const [triggerShape, setTriggerShape] = useState<WebhookShape>('generic')
   const [resolvedEndpointPath, setResolvedEndpointPath] = useState('')
   const [secretRef, setSecretRef] = useState('')
   const [signatureHeader, setSignatureHeader] = useState('')
@@ -189,9 +193,9 @@ export function RepeatableRunsPanel({
 
   const effectiveTriggerRepeatableRunId = triggerRepeatableRunId || scopedDefinitions[0]?.id || ''
   const selectedRepository = repositories.find((repository) => repository.id === selectedRepositoryId) ?? null
-  const effectiveTriggerPreset = editingTriggerId || triggerName || triggerDescription || triggerRepeatableRunId
-    ? triggerPreset
-    : inferPreset(selectedRepository)
+  const effectiveTriggerShape = editingTriggerId || triggerName || triggerDescription || triggerRepeatableRunId
+    ? triggerShape
+    : inferTriggerShape(selectedRepository)
   const displayedEndpointPath = resolvedEndpointPath || GENERATED_ENDPOINT_PLACEHOLDER
 
   useEffect(() => {
@@ -213,6 +217,7 @@ export function RepeatableRunsPanel({
     setEditingDefinitionId('')
     setDefinitionName('')
     setDefinitionDescription('')
+    setDefinitionProjectTeamId(projectTeams[0]?.id ?? '')
     setDefinitionStatus('active')
     setDefinitionGoal('')
     setDefinitionBranchName('main')
@@ -223,19 +228,19 @@ export function RepeatableRunsPanel({
 
   function resetTriggerForm(nextRepeatableRunId?: string) {
     const empty = buildEmptyTriggerConfig()
-    const preset = inferPreset(selectedRepository)
+    const nextShape = inferTriggerShape(selectedRepository)
 
     setEditingTriggerId('')
     setTriggerRepeatableRunId(nextRepeatableRunId ?? scopedDefinitions[0]?.id ?? '')
     setTriggerName('')
     setTriggerDescription('')
     setTriggerEnabled(true)
-    setTriggerPreset(preset)
+    setTriggerShape(nextShape)
     setResolvedEndpointPath('')
     setSecretRef(empty.secretRef)
     setSignatureHeader(empty.signatureHeader)
-    setEventNameHeader(preset === 'github' ? GITHUB_EVENT_HEADER : empty.eventNameHeader)
-    setDeliveryIdHeader(preset === 'github' ? GITHUB_DELIVERY_HEADER : empty.deliveryIdHeader)
+    setEventNameHeader(nextShape === 'github' ? GITHUB_EVENT_HEADER : empty.eventNameHeader)
+    setDeliveryIdHeader(nextShape === 'github' ? GITHUB_DELIVERY_HEADER : empty.deliveryIdHeader)
     setMaxPayloadBytes(empty.maxPayloadBytes)
     setAllowPost(empty.allowPost)
     setAllowPut(empty.allowPut)
@@ -250,12 +255,13 @@ export function RepeatableRunsPanel({
   }
 
   async function handleDefinitionSubmit() {
-    if (!selectedRepositoryId || !definitionName.trim() || !definitionGoal.trim()) {
+    if (!selectedRepositoryId || !definitionProjectTeamId || !definitionName.trim() || !definitionGoal.trim()) {
       return
     }
 
     const payload: RepeatableRunDefinitionCreateInput = {
       repositoryId: selectedRepositoryId,
+      projectTeamId: definitionProjectTeamId,
       name: definitionName.trim(),
       description: definitionDescription.trim() || null,
       status: definitionStatus,
@@ -371,7 +377,7 @@ export function RepeatableRunsPanel({
       setFilterActions('')
       setFilterBranches('')
       setEventNameHeader('')
-    } else if (effectiveTriggerPreset === 'github' && !eventNameHeader) {
+    } else if (effectiveTriggerShape === 'github' && !eventNameHeader) {
       setEventNameHeader(GITHUB_EVENT_HEADER)
     }
   }
@@ -380,15 +386,15 @@ export function RepeatableRunsPanel({
     setEnableDeliveryMetadata(enabled)
     if (!enabled) {
       setDeliveryIdHeader('')
-    } else if (effectiveTriggerPreset === 'github' && !deliveryIdHeader) {
+    } else if (effectiveTriggerShape === 'github' && !deliveryIdHeader) {
       setDeliveryIdHeader(GITHUB_DELIVERY_HEADER)
     }
   }
 
-  function applyTriggerPreset(nextPreset: WebhookPreset) {
-    setTriggerPreset(nextPreset)
+  function applyTriggerShape(nextShape: WebhookShape) {
+    setTriggerShape(nextShape)
 
-    if (nextPreset === 'github') {
+    if (nextShape === 'github') {
       if (!eventNameHeader) {
         setEventNameHeader(GITHUB_EVENT_HEADER)
       }
@@ -430,6 +436,17 @@ export function RepeatableRunsPanel({
                 </button>
               ) : null}
             </div>
+            <label className="control-field">
+              <span>Project team</span>
+              <select value={definitionProjectTeamId} onChange={(event) => setDefinitionProjectTeamId(event.target.value)}>
+                <option value="">Select project team</option>
+                {projectTeams.map((projectTeam) => (
+                  <option key={projectTeam.id} value={projectTeam.id}>
+                    {projectTeam.name}
+                  </option>
+                ))}
+              </select>
+            </label>
             <label className="control-field">
               <span>Name</span>
               <input value={definitionName} onChange={(event) => setDefinitionName(event.target.value)} />
@@ -475,7 +492,7 @@ export function RepeatableRunsPanel({
                 <input value={definitionPolicyProfile} onChange={(event) => setDefinitionPolicyProfile(event.target.value)} />
               </label>
             </div>
-            <button type="button" className="action-button" onClick={() => void handleDefinitionSubmit()} disabled={actionPending || !selectedRepositoryId}>
+            <button type="button" className="action-button" onClick={() => void handleDefinitionSubmit()} disabled={actionPending || !selectedRepositoryId || !definitionProjectTeamId}>
               {editingDefinitionId ? 'Save repeatable run' : 'Create repeatable run'}
             </button>
           </div>
@@ -503,6 +520,7 @@ export function RepeatableRunsPanel({
                         setEditingDefinitionId(definition.id)
                         setDefinitionName(definition.name)
                         setDefinitionDescription(definition.description ?? '')
+                        setDefinitionProjectTeamId(definition.projectTeamId)
                         setDefinitionStatus(definition.status)
                         setDefinitionGoal(definition.execution.goal)
                         setDefinitionBranchName(definition.execution.branchName ?? '')
@@ -536,7 +554,8 @@ export function RepeatableRunsPanel({
                 </article>
               )
             })}
-            {scopedDefinitions.length === 0 ? <p className="inventory-empty">No repeatable runs configured for this project yet.</p> : null}
+            {projectTeams.length === 0 ? <p className="inventory-empty">Import or create a project team before configuring repeatable runs.</p> : null}
+            {projectTeams.length > 0 && scopedDefinitions.length === 0 ? <p className="inventory-empty">No repeatable runs configured for this project yet.</p> : null}
           </div>
         </div>
 
@@ -551,20 +570,20 @@ export function RepeatableRunsPanel({
               ) : null}
             </div>
 
-            <div className="repeatable-run-preset-row">
-              <span className="repeatable-run-preset-label">Webhook shape</span>
+            <div className="repeatable-run-shape-row">
+              <span className="repeatable-run-shape-label">Webhook shape</span>
               <div className="repeatable-run-pill-row">
                 <button
                   type="button"
-                  className={`ghost-pill ${effectiveTriggerPreset === 'generic' ? 'is-active' : ''}`}
-                  onClick={() => applyTriggerPreset('generic')}
+                  className={`ghost-pill ${effectiveTriggerShape === 'generic' ? 'is-active' : ''}`}
+                  onClick={() => applyTriggerShape('generic')}
                 >
                   Generic webhook
                 </button>
                 <button
                   type="button"
-                  className={`ghost-pill ${effectiveTriggerPreset === 'github' ? 'is-active' : ''}`}
-                  onClick={() => applyTriggerPreset('github')}
+                  className={`ghost-pill ${effectiveTriggerShape === 'github' ? 'is-active' : ''}`}
+                  onClick={() => applyTriggerShape('github')}
                 >
                   GitHub webhook
                 </button>
@@ -614,8 +633,8 @@ export function RepeatableRunsPanel({
             <div className="repeatable-run-optional-tools">
               <strong>Optional controls</strong>
               <p>
-                {effectiveTriggerPreset === 'github'
-                  ? 'GitHub preset suggests event matching and delivery metadata, but both stay optional.'
+                {effectiveTriggerShape === 'github'
+                  ? 'GitHub shape suggests event matching and delivery metadata, but both stay optional.'
                   : 'Enable only the constraints you actually need.'}
               </p>
               <div className="repeatable-run-pill-grid">
@@ -700,7 +719,7 @@ export function RepeatableRunsPanel({
                   <input
                     value={eventNameHeader}
                     onChange={(event) => setEventNameHeader(event.target.value)}
-                    placeholder={effectiveTriggerPreset === 'github' ? GITHUB_EVENT_HEADER : 'x-event-name'}
+                    placeholder={effectiveTriggerShape === 'github' ? GITHUB_EVENT_HEADER : 'x-event-name'}
                   />
                 </label>
                 <div className="repeatable-run-grid">
@@ -709,7 +728,7 @@ export function RepeatableRunsPanel({
                     <input
                       value={filterEventNames}
                       onChange={(event) => setFilterEventNames(event.target.value)}
-                      placeholder={effectiveTriggerPreset === 'github' ? 'pull_request, issues' : 'build.completed, deployment.finished'}
+                      placeholder={effectiveTriggerShape === 'github' ? 'pull_request, issues' : 'build.completed, deployment.finished'}
                     />
                   </label>
                   <label className="control-field">
@@ -717,7 +736,7 @@ export function RepeatableRunsPanel({
                     <input
                       value={filterActions}
                       onChange={(event) => setFilterActions(event.target.value)}
-                      placeholder={effectiveTriggerPreset === 'github' ? 'opened, reopened' : 'created, updated'}
+                      placeholder={effectiveTriggerShape === 'github' ? 'opened, reopened' : 'created, updated'}
                     />
                   </label>
                 </div>
@@ -738,7 +757,7 @@ export function RepeatableRunsPanel({
                   <input
                     value={deliveryIdHeader}
                     onChange={(event) => setDeliveryIdHeader(event.target.value)}
-                    placeholder={effectiveTriggerPreset === 'github' ? GITHUB_DELIVERY_HEADER : 'x-delivery-id'}
+                    placeholder={effectiveTriggerShape === 'github' ? GITHUB_DELIVERY_HEADER : 'x-delivery-id'}
                   />
                 </label>
               </section>
@@ -807,13 +826,13 @@ export function RepeatableRunsPanel({
                       type="button"
                       className="table-action"
                       onClick={() => {
-                        const preset = inferPreset(selectedRepository, trigger)
+                        const nextShape = inferTriggerShape(selectedRepository, trigger)
                         setEditingTriggerId(trigger.id)
                         setTriggerRepeatableRunId(trigger.repeatableRunId)
                         setTriggerName(trigger.name)
                         setTriggerDescription(trigger.description ?? '')
                         setTriggerEnabled(trigger.enabled)
-                        setTriggerPreset(preset)
+                        setTriggerShape(nextShape)
                         setResolvedEndpointPath(trigger.config.endpointPath)
                         setSecretRef(trigger.config.secretRef ?? '')
                         setSignatureHeader(trigger.config.signatureHeader ?? '')
