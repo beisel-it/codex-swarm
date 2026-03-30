@@ -29,6 +29,11 @@ Runs move through the board and run-detail surfaces with:
 - validations and artifacts
 - publish/PR handoff state
 
+Projects can also preconfigure repeatable runs and attach generic webhook
+triggers so new runs are created automatically from inbound events. For the
+operator workflow, event-context fields, and debugging steps, use
+[Webhook-Triggered Repeatable Runs](./operations/webhook-triggered-runs.md).
+
 ### 3. Review and approve work
 
 Review surfaces expose:

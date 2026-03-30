@@ -12,14 +12,18 @@ import {
   cleanupJobRunSchema,
   controlPlaneMetricsSchema,
   governanceAdminReportSchema,
+  inboundExternalEventEnvelopeSchema,
   identityEntrypointSchema,
   projectDetailSchema,
   projectSummarySchema,
+  repeatableRunDefinitionSchema,
+  repeatableRunTriggerCreateSchema,
   repositoryCreateSchema,
   repositoryUpdateSchema,
   remoteWorkerBootstrapSchema,
   retentionReconcileReportSchema,
   runBranchPublishSchema,
+  runContextSchema,
   runCreateSchema,
   runDetailSchema,
   runJobScopeSchema,
@@ -95,6 +99,25 @@ describe("runCreateSchema", () => {
     });
 
     expect(run.metadata).toEqual({});
+  });
+
+  it("defaults the run context for manual runs", () => {
+    const run = runCreateSchema.parse({
+      repositoryId: "550e8400-e29b-41d4-a716-446655440000",
+      goal: "Ship alpha"
+    });
+
+    expect(run.context).toEqual({
+      kind: "ad_hoc",
+      projectId: null,
+      projectSlug: null,
+      projectName: null,
+      projectDescription: null,
+      jobId: null,
+      jobName: null,
+      externalInput: null,
+      values: {}
+    });
   });
 
   it("allows runs to stay explicitly unassigned from projects", () => {
@@ -233,6 +256,129 @@ describe("taskCreateSchema", () => {
     expect(task.priority).toBe(3);
     expect(task.dependencyIds).toEqual([]);
     expect(task.acceptanceCriteria).toEqual([]);
+  });
+});
+
+describe("repeatableRunDefinitionSchema", () => {
+  it("accepts a stored repeatable run definition with reusable execution settings", () => {
+    const now = new Date("2026-03-30T09:00:00.000Z");
+    const definition = repeatableRunDefinitionSchema.parse({
+      id: "550e8400-e29b-41d4-a716-446655440100",
+      repositoryId: "550e8400-e29b-41d4-a716-446655440000",
+      workspaceId: "workspace-1",
+      teamId: "team-1",
+      name: "Issue review",
+      description: "Run the review flow for new issues",
+      status: "active",
+      execution: {
+        goal: "Review the incoming issue",
+        concurrencyCap: 2,
+        metadata: {
+          preset: "issue-review"
+        }
+      },
+      createdAt: now,
+      updatedAt: now
+    });
+
+    expect(definition.execution.branchName).toBeNull();
+    expect(definition.execution.metadata).toEqual({
+      preset: "issue-review"
+    });
+  });
+});
+
+describe("repeatableRunTriggerCreateSchema", () => {
+  it("accepts webhook trigger configuration with defaults", () => {
+    const trigger = repeatableRunTriggerCreateSchema.parse({
+      repeatableRunId: "550e8400-e29b-41d4-a716-446655440101",
+      name: "PR opened webhook",
+      kind: "webhook",
+      config: {
+        endpointPath: "/webhooks/project/pr-review",
+        eventNameHeader: "x-github-event",
+        filters: {
+          eventNames: ["pull_request"],
+          actions: ["opened"]
+        }
+      }
+    });
+
+    expect(trigger.config.allowedMethods).toEqual(["POST"]);
+    expect(trigger.config.filters.branches).toEqual([]);
+  });
+});
+
+describe("inboundExternalEventEnvelopeSchema", () => {
+  it("accepts webhook event envelopes with structured request metadata", () => {
+    const event = inboundExternalEventEnvelopeSchema.parse({
+      sourceType: "webhook",
+      eventId: "delivery-123",
+      eventName: "pull_request",
+      action: "opened",
+      payload: {
+        repository: {
+          full_name: "acme/api"
+        },
+        pull_request: {
+          number: 42
+        }
+      },
+      request: {
+        method: "POST",
+        path: "/webhooks/project/pr-review",
+        headers: {
+          "x-github-event": "pull_request"
+        },
+        receivedAt: "2026-03-30T09:01:00.000Z",
+        deliveryId: "delivery-123"
+      }
+    });
+
+    expect(event.request.receivedAt).toEqual(new Date("2026-03-30T09:01:00.000Z"));
+    expect(event.request.deliveryId).toBe("delivery-123");
+  });
+});
+
+describe("runContextSchema", () => {
+  it("carries trigger and event details into execution context", () => {
+    const context = runContextSchema.parse({
+      externalInput: {
+        kind: "webhook",
+        trigger: {
+          id: "550e8400-e29b-41d4-a716-446655440102",
+          repeatableRunId: "550e8400-e29b-41d4-a716-446655440101",
+          name: "PR opened webhook",
+          kind: "webhook"
+        },
+        event: {
+          sourceType: "webhook",
+          eventId: "delivery-123",
+          eventName: "pull_request",
+          action: "opened",
+          payload: {
+            pull_request: {
+              number: 42
+            }
+          },
+          request: {
+            method: "POST",
+            path: "/webhooks/project/pr-review",
+            receivedAt: "2026-03-30T09:01:00.000Z"
+          }
+        },
+        receivedAt: "2026-03-30T09:01:01.000Z"
+      },
+      values: {
+        initiator: "automation"
+      }
+    });
+
+    expect(context.externalInput?.event.sourceType).toBe("webhook");
+    expect(context.externalInput?.trigger.kind).toBe("webhook");
+    expect(context.values).toEqual({
+      initiator: "automation"
+    });
   });
 });
 

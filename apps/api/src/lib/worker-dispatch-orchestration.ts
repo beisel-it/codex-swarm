@@ -415,11 +415,7 @@ export async function runManagedWorkerDispatch(
       ? buildWorkerTaskExecutionPrompt({
         repositoryName: repository.name,
         runGoal: runDetail.goal,
-        runContext: {
-          kind: runDetail.context.kind,
-          projectName: runDetail.context.projectName,
-          jobName: runDetail.context.jobName
-        },
+        runContext: runDetail.context,
         taskTitle: task.title,
         taskRole: task.role,
         taskDescription: [task.description, assignment.prompt].filter(Boolean).join("\n\nOperator brief:\n"),

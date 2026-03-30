@@ -1,106 +1,71 @@
-# Codex Swarm Execution Plan
+# Swarm Plan
 
 ## Goal
+Projects should be able to plan repeatable runs that are able to react to modular external events - the first and DOD implementation will be triggering repeatable pre-configured runs that are executed when a webhook is received
 
-Build Codex Swarm through the roadmap in executable phases, starting with the delivered M0/M1 foundation and advancing through M2+ roadmap milestones.
+The target design should be extensible later with further external inputs and should allow passing the received event to the run context
 
-## Current Phase
+An __EXAMPLE__ User story:
 
-### Post-M10 TUI
+As a user of codex-swarm I would love it if codex-swarm could run preconfigured runs for a project on a received webhook. This will allow me to create a PR / Issue Review Run that triggers automatically when a new issue or PR is openend
 
-Post-M10 work is now active on a codex-swarm terminal UI:
+__FUTURE__ extension but current __NON GOAL__: we could extend this into service connections wrapped per upstream service that contain per service signals and pre defined configuration how to handle them. (these are only examples and are CLEARLY NON_GOAL - ready made connection to atlassian, gitlab, github, ms.......)
 
-- confirm the real clawteam terminal-board implementation and extract the usable interaction model
-- ship a codex-swarm-specific TUI with live board, run, review, and operator views
-- package the TUI as a first-class operator entrypoint instead of a one-off demo
-- verify the TUI through explicit operator acceptance and regression checks
+## Summary
+Implement repeatable webhook-triggered runs by adding extensible trigger configuration, inbound webhook handling, run-context event propagation, execution wiring, UI/API management, and operational documentation while keeping upstream service-specific integrations out of scope.
 
-### M2
+## Tasks
 
-M2 implementation is complete:
+1. Define extensible external trigger architecture
+   Role: tech-lead
+   Description: Design the first-class model for repeatable project runs that can be triggered by modular external events, with webhook reception as the initial implementation. Specify how trigger definitions reference preconfigured run templates, how inbound event payloads are normalized into run context, and how the design remains extensible for future non-webhook input sources without introducing service-specific connectors in this milestone.
+   Acceptance Criteria:
+   - Architecture defines entities and lifecycle for reusable run configuration, external trigger definitions, and inbound event context propagation.
+   - Webhook is explicitly scoped as the first trigger type while future trigger/input types can be added without breaking the core model.
+   - Run context contract includes a structured place for the received event payload and trigger metadata.
+   - Non-goals exclude upstream vendor-specific service connection implementations in this milestone.
 
-- approvals and reject-feedback workflows
-- validation history and artifact-backed reports
-- restart recovery/session reconciliation spike
-- board UI review/detail surfaces
-- observability primitives
+2. Add shared contracts for trigger configuration and event context
+   Role: backend-developer
+   Description: Implement shared contract types and validation schemas for repeatable run definitions, webhook trigger configuration, inbound event envelopes, and the run context shape that carries received external event data through orchestration.
+   Acceptance Criteria:
+   - Shared contracts validate trigger configuration, webhook metadata, and event-to-run context payloads.
+   - Contracts are usable by API, worker, and frontend without duplicating schema definitions.
+   - Run context schema supports passing the received event and trigger metadata into execution.
+   - Schema design is additive and leaves room for future external input types.
 
-### M3
+3. Implement webhook ingestion and run triggering API flow
+   Role: backend-developer
+   Description: Add API support for receiving configured webhooks, validating the trigger configuration, storing audit information, and enqueueing the corresponding repeatable run with the normalized event attached to run context.
+   Acceptance Criteria:
+   - API exposes a webhook ingestion path that resolves a configured repeatable run trigger.
+   - Inbound requests are validated against configured trigger definitions before a run is created.
+   - Triggered runs persist enough audit information to trace webhook receipt to run creation.
+   - The enqueued run includes normalized event data in the run context passed to orchestration.
 
-M3 implementation is complete:
+4. Propagate external event context through worker execution
+   Role: backend-developer
+   Description: Update worker and orchestration execution paths so triggered runs receive the external event context consistently, making it available to repeatable run logic and downstream agents without special-casing webhook semantics inside the core execution loop.
+   Acceptance Criteria:
+   - Worker execution loads and forwards external event context from the triggered run record into runtime context.
+   - Repeatable run execution can read structured trigger metadata and original/normalized event payloads.
+   - Execution changes do not regress manually started runs that have no external event context.
+   - Core execution remains generic enough to support future trigger sources beyond webhooks.
 
-- repo onboarding and PR handoff
-- board PR/reflection surfaces
-- productivity packs, role packs, and repo templates
-- governance-lite controls
-- quality hardening and cleanup verification
+5. Add project-facing configuration surfaces for repeatable webhook runs
+   Role: frontend-developer
+   Description: Implement frontend support to create, inspect, and manage repeatable run configurations and webhook trigger definitions so users can configure automatic runs for cases like PR or issue review without editing raw backend records.
+   Acceptance Criteria:
+   - UI lets users associate a repeatable run configuration with a webhook trigger for a project.
+   - UI surfaces the trigger status and enough detail to understand what event data will be passed to the run.
+   - Validation errors and misconfiguration states from API contracts are shown clearly.
+   - Frontend uses shared contracts/endpoints rather than introducing divergent trigger models.
 
-### M4
-
-M4 implementation is complete:
-
-- distributed worker fleet model
-- Redis-backed dispatch and remote bootstrap
-- sticky placement and failure recovery across nodes
-- node health and utilization visibility
-- multi-node verification
-
-### M5
-
-M5 implementation is complete:
-
-- identity and workspace isolation
-- RBAC, policy packs, approval delegation, and sensitive defaults
-- audit export, retention, and admin reporting
-- governance UI and multi-user verification
-
-### M6
-
-M6 implementation is complete:
-
-- SLOs, support boundaries, and observability envelope
-- backup, restore, and disaster recovery evidence
-- migration and upgrade safety
-- cost, usage, and performance envelope
-- admin/developer/operator docs and reference deployments
-- GA release-candidate validation
-
-### M7
-
-M7 parity review is complete:
-
-- each roadmap entry was verified as parity, better, superseded, or gap
-- documented gaps were converted into explicit backlog items or resolved with shipped fixes
-- roadmap and architecture wording was tightened where supportability had been overstated
-
-### M8
-
-M8 implementation is complete:
-
-- codex-swarm-specific external-operator Codex skill library
-- board/inbox/task-control skills
-- diagnostics and recovery skills
-- agent and skill authoring guidance
-- acceptance examples proving Codex can manage codex-swarm from the outside
-
-### M9
-
-M9 end-to-end validation is complete:
-
-- codex-swarm was used to run a real designer-plus-developer product scenario in an isolated workdir
-- the run produced design artifacts, implementation output, screenshots, validations, and an audit export
-- M9 surfaced and fixed product bugs in artifact persistence and audit-export compatibility
-
-## Dependency Order
-
-1. Complete roadmap phase refinement for the active milestone.
-2. Activate the concrete delivery tracks for that milestone.
-3. Close milestone implementation before opening the next roadmap refinement gate.
-4. Preserve a clean dependency chain from M3 through M9.
-
-## Execution Rules
-
-- Shared contracts live in one package and are consumed by API, worker, and web.
-- Each completed task must end with a git commit before the task is marked complete.
-- Blocked tasks should stay blocked until their prerequisites land in the repository.
-- Do not treat a roadmap phase as finished until its exit criteria are actually met in code and verification, not only in task metadata.
+6. Verify end-to-end behavior and document operator workflow
+   Role: technical-writer
+   Description: Produce end-to-end verification coverage and operational documentation for configuring a repeatable webhook-triggered run, receiving a webhook, and observing the resulting run with attached event context. Document current scope and explicit non-goals for future service-specific integrations.
+   Acceptance Criteria:
+   - Verification covers configured webhook receipt leading to creation and execution of the intended repeatable run.
+   - Documentation explains how event payload and trigger metadata are available in run context.
+   - Operational docs describe setup, expected behavior, and debugging/audit points for webhook-triggered runs.
+   - Docs clearly state that service-specific integrations and connection packs are future work and not part of this delivery.

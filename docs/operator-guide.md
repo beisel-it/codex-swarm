@@ -26,6 +26,11 @@ For day-to-day work, an external Codex operator should combine:
 2. codex-swarm coordination commands through `clawteam` for board, inbox, and task state
 3. API and ops commands for health, metrics, backups, restore, and diagnostics
 
+For repeatable webhook-triggered runs, use the dedicated runbook in
+[Webhook-Triggered Repeatable Runs](./operations/webhook-triggered-runs.md) and
+the checked-in verification record in
+[Webhook-Triggered Repeatable Runs Verification](./qa/webhook-triggered-runs-verification.md).
+
 ## Skill-to-flow map
 
 Use this map when an external Codex session needs to decide which checked-in

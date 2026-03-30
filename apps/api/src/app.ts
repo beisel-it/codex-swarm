@@ -19,12 +19,14 @@ import { messageRoutes } from "./routes/messages.js";
 import { metricsRoutes } from "./routes/metrics.js";
 import { projectRoutes } from "./routes/projects.js";
 import { repositoryRoutes } from "./routes/repositories.js";
+import { repeatableRunRoutes } from "./routes/repeatable-runs.js";
 import { runRoutes } from "./routes/runs.js";
 import { sessionRoutes } from "./routes/sessions.js";
 import { taskRoutes } from "./routes/tasks.js";
 import { teamTemplateRoutes } from "./routes/team-templates.js";
 import { tuiRoutes } from "./routes/tui.js";
 import { validationRoutes } from "./routes/validations.js";
+import { webhookRoutes } from "./routes/webhooks.js";
 import { workerDispatchAssignmentRoutes } from "./routes/worker-dispatch-assignments.js";
 import { workerNodeRoutes } from "./routes/worker-nodes.js";
 import type { ControlPlaneService } from "./services/control-plane-service.js";
@@ -194,6 +196,7 @@ export async function buildApp(options: BuildAppOptions = {}) {
   await app.register(identityRoutes, { prefix: "/api/v1" });
   await app.register(projectRoutes, { prefix: "/api/v1" });
   await app.register(repositoryRoutes, { prefix: "/api/v1" });
+  await app.register(repeatableRunRoutes, { prefix: "/api/v1" });
   await app.register(runRoutes, { prefix: "/api/v1" });
   await app.register(sessionRoutes, { prefix: "/api/v1" });
   await app.register(taskRoutes, { prefix: "/api/v1" });
@@ -209,6 +212,7 @@ export async function buildApp(options: BuildAppOptions = {}) {
   await app.register(cleanupJobRoutes, { prefix: "/api/v1" });
   await app.register(eventRoutes, { prefix: "/api/v1" });
   await app.register(metricsRoutes, { prefix: "/api/v1" });
+  await app.register(webhookRoutes, { prefix: "/api/v1" });
 
   return app;
 }

@@ -10,6 +10,9 @@ import {
   idParamSchema,
   projectCreateSchema,
   projectUpdateSchema,
+  repeatableRunDefinitionCreateSchema,
+  repeatableRunStatuses,
+  repeatableRunTriggerCreateSchema,
   runBudgetCheckpointSchema,
   repositoryCreateSchema,
   repositoryUpdateSchema,
@@ -120,6 +123,36 @@ export const workerDispatchSessionAttachSchema = z.object({
 });
 export const sessionTranscriptEntrySchema = contractSessionTranscriptEntrySchema;
 export const sessionTranscriptAppendSchema = contractSessionTranscriptAppendSchema;
+export const repeatableRunDefinitionUpdateSchema = z.object({
+  repositoryId: z.uuid().optional(),
+  name: z.string().min(1).optional(),
+  description: z.string().min(1).nullable().optional(),
+  status: z.enum(repeatableRunStatuses).optional(),
+  execution: repeatableRunDefinitionCreateSchema.shape.execution.optional()
+}).refine((value) => Object.keys(value).length > 0, {
+  message: "at least one repeatable run field must be updated"
+});
+export const repeatableRunTriggerUpdateSchema = z.object({
+  repeatableRunId: z.uuid().optional(),
+  name: z.string().min(1).optional(),
+  description: z.string().min(1).nullable().optional(),
+  enabled: z.boolean().optional(),
+  config: repeatableRunTriggerCreateSchema.options[0].shape.config.optional()
+}).refine((value) => Object.keys(value).length > 0, {
+  message: "at least one repeatable trigger field must be updated"
+});
+export const repeatableRunListQuerySchema = z.object({
+  repositoryId: z.uuid().optional()
+});
+export const repeatableRunTriggerListQuerySchema = z.object({
+  repositoryId: z.uuid().optional(),
+  repeatableRunId: z.uuid().optional()
+});
+export const externalEventReceiptListQuerySchema = z.object({
+  repositoryId: z.uuid().optional(),
+  repeatableRunId: z.uuid().optional(),
+  repeatableRunTriggerId: z.uuid().optional()
+});
 export {
   agentCreateSchema,
   approvalsListQuerySchema,
@@ -128,6 +161,8 @@ export {
   idParamSchema,
   projectCreateSchema,
   projectUpdateSchema,
+  repeatableRunDefinitionCreateSchema,
+  repeatableRunTriggerCreateSchema,
   runBudgetCheckpointSchema,
   repositoryCreateSchema,
   repositoryUpdateSchema,

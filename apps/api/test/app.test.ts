@@ -46,7 +46,9 @@ const defaultRunContext = {
   projectName: null,
   projectDescription: null,
   jobId: null,
-  jobName: null
+  jobName: null,
+  externalInput: null,
+  values: {}
 } as const;
 
 const controlPlane = {
@@ -486,10 +488,30 @@ class FakeVerticalSliceControlPlane {
       pullRequestApprovalId: null,
       handoffStatus: "pending",
       completedAt: null,
-      context: input.context ?? defaultRunContext,
+      context: input.context ?? {
+        kind: "ad_hoc",
+        projectId: null,
+        projectSlug: null,
+        projectName: null,
+        projectDescription: null,
+        jobId: null,
+        jobName: null,
+        externalInput: null,
+        values: {}
+      },
       metadata: {
         ...(input.metadata ?? {}),
-        runContext: input.context ?? defaultRunContext
+        runContext: input.context ?? {
+          kind: "ad_hoc",
+          projectId: null,
+          projectSlug: null,
+          projectName: null,
+          projectDescription: null,
+          jobId: null,
+          jobName: null,
+          externalInput: null,
+          values: {}
+        }
       },
       createdBy,
       createdAt: new Date("2026-03-28T00:00:00.000Z"),
@@ -6404,7 +6426,51 @@ describe("buildApp", () => {
           repositoryId: ids.repository,
           goal: "Drive automatic reslicing through leader coordination",
           concurrencyCap: 4,
-          metadata: {}
+          metadata: {},
+          context: {
+            externalInput: {
+              kind: "webhook",
+              trigger: {
+                id: crypto.randomUUID(),
+                repeatableRunId: crypto.randomUUID(),
+                name: "PR opened",
+                kind: "webhook",
+                metadata: {
+                  provider: "github",
+                  installationId: 7
+                }
+              },
+              event: {
+                sourceType: "webhook",
+                eventId: "evt-pr-opened",
+                eventName: "pull_request.opened",
+                source: "github",
+                payload: {
+                  action: "opened",
+                  repository: {
+                    full_name: "beisel-it/codex-swarm"
+                  }
+                },
+                receivedAt: new Date().toISOString(),
+                request: {
+                  method: "POST",
+                  path: "/webhooks/project/pr-review",
+                  headers: {
+                    "x-github-event": "pull_request"
+                  },
+                  query: {},
+                  receivedAt: new Date().toISOString()
+                }
+              },
+              receivedAt: new Date().toISOString(),
+              metadata: {
+                receiptId: "receipt-reslice"
+              }
+            },
+            values: {
+              repeatableRunName: "PR review"
+            }
+          }
         }
       });
 
@@ -6618,6 +6684,9 @@ describe("buildApp", () => {
 
       expect(prompts[0]).toContain("If the task is too large, ask for slicing");
       expect(prompts[0]).toContain("Frontend will need a smaller API-ready slice.");
+      expect(prompts[0]).toContain("Run context:");
+      expect(prompts[0]).toContain("\"eventName\": \"pull_request.opened\"");
+      expect(prompts[0]).toContain("\"receiptId\": \"receipt-reslice\"");
 
       const messagesResponse = await app.inject({
         method: "GET",

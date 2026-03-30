@@ -13,6 +13,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@codex-swarm/contracts": "workspace:*",
     "@fontsource/iosevka": "^5.2.5",
     "@fontsource/iosevka-aile": "^5.2.5",
     "@fontsource/iosevka-etoile": "^5.2.5",
