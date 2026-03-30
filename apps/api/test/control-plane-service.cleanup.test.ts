@@ -245,6 +245,8 @@ describe("ControlPlaneService.runCleanupJob", () => {
     const workspaceRoot = await mkdtemp(join(tmpdir(), "codex-swarm-cleanup-job-"));
     const staleWorktree = join(workspaceRoot, "agent-stale");
     const archiveWorktree = join(workspaceRoot, "agent-archive");
+    const previousIsolationSetting = process.env.CODEX_SWARM_ENABLE_WORKSPACE_ISOLATION;
+    process.env.CODEX_SWARM_ENABLE_WORKSPACE_ISOLATION = "true";
 
     try {
       await mkdir(staleWorktree, { recursive: true });
@@ -312,6 +314,11 @@ describe("ControlPlaneService.runCleanupJob", () => {
       await expect(readFile(join(staleWorktree, "README.md"), "utf8")).rejects.toThrow();
       await expect(readFile(join(archiveWorktree, "README.md"), "utf8")).rejects.toThrow();
     } finally {
+      if (previousIsolationSetting === undefined) {
+        delete process.env.CODEX_SWARM_ENABLE_WORKSPACE_ISOLATION;
+      } else {
+        process.env.CODEX_SWARM_ENABLE_WORKSPACE_ISOLATION = previousIsolationSetting;
+      }
       await rm(workspaceRoot, { recursive: true, force: true });
     }
   });

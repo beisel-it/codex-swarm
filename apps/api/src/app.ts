@@ -17,6 +17,7 @@ import { identityRoutes } from "./routes/identity.js";
 import { ObservabilityService } from "./lib/observability.js";
 import { messageRoutes } from "./routes/messages.js";
 import { metricsRoutes } from "./routes/metrics.js";
+import { projectRoutes } from "./routes/projects.js";
 import { repositoryRoutes } from "./routes/repositories.js";
 import { runRoutes } from "./routes/runs.js";
 import { sessionRoutes } from "./routes/sessions.js";
@@ -191,6 +192,7 @@ export async function buildApp(options: BuildAppOptions = {}) {
   await app.register(healthRoutes);
   await app.register(adminRoutes, { prefix: "/api/v1" });
   await app.register(identityRoutes, { prefix: "/api/v1" });
+  await app.register(projectRoutes, { prefix: "/api/v1" });
   await app.register(repositoryRoutes, { prefix: "/api/v1" });
   await app.register(runRoutes, { prefix: "/api/v1" });
   await app.register(sessionRoutes, { prefix: "/api/v1" });

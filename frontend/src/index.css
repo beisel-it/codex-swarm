@@ -649,6 +649,9 @@ code {
 }
 
 .panel-overview,
+.panel-project-workspace,
+.panel-project-runs,
+.panel-ad-hoc,
 .panel-fleet,
 .panel-provider,
 .panel-board-signals,
@@ -948,6 +951,41 @@ code {
   min-width: 78px;
 }
 
+.project-checkbox-list {
+  display: grid;
+  gap: 8px;
+}
+
+.project-checkbox {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: var(--theme-card-fill-muted);
+  border: 1px solid var(--theme-border-soft);
+}
+
+.project-checkbox input {
+  margin-top: 3px;
+}
+
+.project-checkbox span {
+  display: grid;
+  gap: 2px;
+}
+
+.project-checkbox em {
+  font-style: normal;
+  color: var(--muted);
+  font-size: 0.76rem;
+}
+
+.project-inventory-item.is-selected {
+  border-color: var(--theme-accent-border);
+  box-shadow: 0 0 0 1px var(--theme-accent-fill-soft);
+}
+
 .table-action {
   min-height: 28px;
   padding: 0 9px;
@@ -1213,6 +1251,30 @@ code {
   border-radius: 6px;
   border: 1px solid var(--theme-border-soft);
   background: var(--theme-grid-line);
+}
+
+.project-workspace-grid,
+.project-run-grid {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.project-run-card {
+  display: grid;
+  gap: 10px;
+  cursor: default;
+}
+
+.project-run-card:hover,
+.project-run-card:focus-visible {
+  transform: none;
+}
+
+.project-run-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
 .template-preview-header {
@@ -2209,6 +2271,9 @@ code {
   }
 
   .panel-overview,
+  .panel-project-workspace,
+  .panel-project-runs,
+  .panel-ad-hoc,
   .panel-fleet,
   .panel-provider,
   .panel-board-signals,
@@ -2263,6 +2328,8 @@ code {
   }
 
   .overview-grid,
+  .project-workspace-grid,
+  .project-run-grid,
   .signal-band,
   .run-summary-grid,
   .detail-grid,
@@ -2307,6 +2374,9 @@ code {
   }
 
   .panel-overview,
+  .panel-project-workspace,
+  .panel-project-runs,
+  .panel-ad-hoc,
   .panel-detail,
   .panel-provider-detail,
   .panel-placement,

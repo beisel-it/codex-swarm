@@ -10,6 +10,16 @@ const access = {
   teamName: "Team 001"
 } as const;
 
+const defaultRunContext = {
+  kind: "ad_hoc",
+  projectId: null,
+  projectSlug: null,
+  projectName: null,
+  projectDescription: null,
+  jobId: null,
+  jobName: null
+} as const;
+
 describe("ControlPlaneService TUI aggregates", () => {
   it("builds a single overview payload for runs, review state, and fleet health", async () => {
     const now = new Date("2026-03-29T08:00:00.000Z");
@@ -65,6 +75,7 @@ describe("ControlPlaneService TUI aggregates", () => {
         pullRequestApprovalId: null,
         handoffStatus: "pending",
         completedAt: null,
+        context: defaultRunContext,
         metadata: {},
         createdBy: "backend-dev",
         createdAt: now,
@@ -173,6 +184,7 @@ describe("ControlPlaneService TUI aggregates", () => {
       pullRequestApprovalId: null,
       handoffStatus: "pending",
       completedAt: null,
+      context: defaultRunContext,
       metadata: {},
       createdBy: "backend-dev",
       createdAt: now,
@@ -353,6 +365,7 @@ describe("ControlPlaneService TUI aggregates", () => {
       pullRequestApprovalId: null,
       handoffStatus: "pending",
       completedAt: null,
+      context: defaultRunContext,
       metadata: {},
       createdBy: "backend-dev",
       createdAt: now,

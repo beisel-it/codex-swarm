@@ -13,7 +13,10 @@ export interface WorktreePathInput {
   runId: string;
   agentId: string;
   taskId?: string;
+  mode?: WorkspaceProvisioningMode;
 }
+
+export type WorkspaceProvisioningMode = "shared" | "isolated";
 
 export interface CodexServerConfig {
   cwd: string;
@@ -141,6 +144,7 @@ export interface RepositoryMaterializationInput {
   destinationPath: string;
   branch?: string;
   cloneDepth?: number;
+  reuseExisting?: boolean;
   spawnImpl?: (
     command: string,
     args: readonly string[],
@@ -209,6 +213,22 @@ async function ensureDestinationMissing(destinationPath: string) {
   }
 
   throw new Error(`repository destination already exists: ${destinationPath}`);
+}
+
+async function destinationExists(destinationPath: string) {
+  try {
+    return await lstat(destinationPath);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return null;
+    }
+
+    throw error;
+  }
+}
+
+export function resolveWorkspaceProvisioningMode(env: NodeJS.ProcessEnv = process.env): WorkspaceProvisioningMode {
+  return env.CODEX_SWARM_ENABLE_WORKSPACE_ISOLATION?.trim() === "true" ? "isolated" : "shared";
 }
 
 async function runCommand(
@@ -292,11 +312,36 @@ export async function materializePlanArtifact(input: PlanMaterializationInput) {
 
 export async function materializeRepositoryWorkspace(input: RepositoryMaterializationInput): Promise<MaterializedRepositoryWorkspace> {
   await mkdir(dirname(input.destinationPath), { recursive: true });
-  await ensureDestinationMissing(input.destinationPath);
+  const existingDestination = await destinationExists(input.destinationPath);
+  const allowReuse = input.reuseExisting ?? false;
+
+  if (existingDestination && !allowReuse) {
+    await ensureDestinationMissing(input.destinationPath);
+  }
 
   const sourcePath = input.repository.localPath ? resolve(input.repository.localPath) : null;
 
   if (sourcePath) {
+    if (existingDestination && allowReuse) {
+      if (!existingDestination.isSymbolicLink()) {
+        throw new Error(`shared repository mount is not a symlink: ${input.destinationPath}`);
+      }
+
+      const linkedPath = await readlink(input.destinationPath);
+
+      if (resolve(dirname(input.destinationPath), linkedPath) !== sourcePath) {
+        throw new Error(`repository local-path mount target mismatch for ${input.destinationPath}`);
+      }
+
+      return {
+        path: input.destinationPath,
+        mode: "local_path_mount",
+        branch: null,
+        repositoryUrl: input.repository.url,
+        sourcePath
+      };
+    }
+
     const sourceStats = await lstat(sourcePath);
 
     if (!sourceStats.isDirectory() && !sourceStats.isSymbolicLink()) {
@@ -322,6 +367,21 @@ export async function materializeRepositoryWorkspace(input: RepositoryMaterializ
 
   const branch = input.branch ?? input.repository.defaultBranch;
   const cloneDepth = input.cloneDepth ?? 1;
+
+  if (existingDestination && allowReuse) {
+    if (!existingDestination.isDirectory()) {
+      throw new Error(`shared repository workspace is not a directory: ${input.destinationPath}`);
+    }
+
+    return {
+      path: input.destinationPath,
+      mode: "git_clone",
+      branch,
+      repositoryUrl: input.repository.url,
+      sourcePath: null
+    };
+  }
+
   await runCommand(
     "git",
     [
@@ -400,12 +460,19 @@ export async function cleanupWorktreePaths(paths: string[]): Promise<WorktreeCle
 }
 
 export function createWorktreePath(input: WorktreePathInput) {
+  const mode = input.mode ?? "shared";
   const segments = [
     input.rootDir,
     sanitizePathSegment(input.repositorySlug),
-    sanitizePathSegment(input.runId),
-    sanitizePathSegment(input.agentId)
+    sanitizePathSegment(input.runId)
   ];
+
+  if (mode === "shared") {
+    segments.push("shared");
+    return segments.join("/");
+  }
+
+  segments.push(sanitizePathSegment(input.agentId));
 
   if (input.taskId) {
     segments.push(sanitizePathSegment(input.taskId));

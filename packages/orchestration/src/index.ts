@@ -201,6 +201,11 @@ export function buildLeaderPlanningPrompt(goal: string) {
 export function buildWorkerTaskExecutionPrompt(input: {
   repositoryName: string;
   runGoal: string;
+  runContext?: {
+    kind: "project" | "ad_hoc";
+    projectName?: string | null;
+    jobName?: string | null;
+  };
   taskTitle: string;
   taskRole: string;
   taskDescription: string;
@@ -218,10 +223,14 @@ export function buildWorkerTaskExecutionPrompt(input: {
       .map((message) => `- ${message.sender}: ${message.body}`)
       .join("\n")
     : "- No inbound agent messages.";
+  const runContextLine = input.runContext?.kind === "project"
+    ? `Run context: Project${input.runContext.projectName ? ` ${input.runContext.projectName}` : ""}${input.runContext.jobName ? ` / Job ${input.runContext.jobName}` : ""}`
+    : "Run context: Ad-Hoc job";
 
   return [
     `Repository: ${input.repositoryName}`,
     `Run goal: ${input.runGoal}`,
+    runContextLine,
     `Task: ${input.taskTitle}`,
     `Role: ${input.taskRole}`,
     "",

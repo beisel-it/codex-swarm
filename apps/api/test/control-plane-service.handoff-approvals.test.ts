@@ -114,6 +114,12 @@ describe("ControlPlaneService handoff approval enforcement", () => {
     });
 
     (service as any).assertRunExists = async () => db.runRecord;
+    (service as any).assertRepositoryExists = async () => ({
+      id: db.runRecord.repositoryId,
+      workspaceId: db.runRecord.workspaceId,
+      teamId: db.runRecord.teamId,
+      projectId: null
+    });
     (service as any).listApprovals = async () => [
       {
         id: "11111111-1111-4111-8111-111111111111",
@@ -166,6 +172,7 @@ describe("ControlPlaneService handoff approval enforcement", () => {
       id: db.runRecord.repositoryId,
       workspaceId: db.runRecord.workspaceId,
       teamId: db.runRecord.teamId,
+      projectId: null,
       name: "codex-swarm",
       defaultBranch: "main",
       provider: "github",

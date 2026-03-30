@@ -19,6 +19,7 @@ import {
   type CodexToolExecutor,
   executeTaskValidationTemplate,
   materializeRepositoryWorkspace,
+  resolveWorkspaceProvisioningMode,
   SessionRegistry
 } from "@codex-swarm/worker";
 
@@ -388,10 +389,12 @@ export async function runManagedWorkerDispatch(
   }
 
   const effectiveBranchName = runDetail.branchName ?? assignment.branchName ?? repository.defaultBranch;
+  const workspaceProvisioningMode = resolveWorkspaceProvisioningMode();
   const workspace = await materializeRepositoryWorkspace({
     repository,
     destinationPath: assignment.worktreePath,
-    branch: effectiveBranchName
+    branch: effectiveBranchName,
+    reuseExisting: workspaceProvisioningMode === "shared"
   });
   const supervisor = new CodexServerSupervisor({
     config: {
@@ -412,6 +415,11 @@ export async function runManagedWorkerDispatch(
       ? buildWorkerTaskExecutionPrompt({
         repositoryName: repository.name,
         runGoal: runDetail.goal,
+        runContext: {
+          kind: runDetail.context.kind,
+          projectName: runDetail.context.projectName,
+          jobName: runDetail.context.jobName
+        },
         taskTitle: task.title,
         taskRole: task.role,
         taskDescription: [task.description, assignment.prompt].filter(Boolean).join("\n\nOperator brief:\n"),
@@ -596,7 +604,9 @@ export async function runManagedWorkerDispatch(
       supervisorStatus
     };
   } catch (error) {
-    await cleanupWorktreePaths([workspace.path]);
+    if (workspaceProvisioningMode === "isolated") {
+      await cleanupWorktreePaths([workspace.path]);
+    }
     const reason = error instanceof Error ? error.message : String(error);
     const updated = await failAssignment(input.request, assignment, input.nodeId, reason);
 

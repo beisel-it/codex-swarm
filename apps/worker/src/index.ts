@@ -11,7 +11,8 @@ import {
   buildSessionRecoveryPlan,
   materializeRepositoryWorkspace,
   materializePlanArtifact,
-  createWorktreePath
+  createWorktreePath,
+  resolveWorkspaceProvisioningMode
 } from "./runtime.js";
 import {
   buildRedisDispatchQueueKeys,
@@ -55,6 +56,7 @@ export {
   evaluateWorkerRuntimeDependencies,
   materializeRepositoryWorkspace,
   materializePlanArtifact,
+  resolveWorkspaceProvisioningMode,
   RedisDispatchQueue,
   SessionRegistry,
   serializeDispatchAssignment,
@@ -129,7 +131,8 @@ if (process.argv[1] && import.meta.url.endsWith(process.argv[1])) {
       rootDir: ".swarm/worktrees",
       repositorySlug: "codex-swarm",
       runId: "run-001",
-      agentId: "worker-001"
+      agentId: "worker-001",
+      mode: resolveWorkspaceProvisioningMode()
     });
 
     const registry = new SessionRegistry();
