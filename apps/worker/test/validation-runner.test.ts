@@ -59,7 +59,27 @@ const runDetail: RunDetail = {
     }
   ],
   agents: [],
-  sessions: []
+  sessions: [],
+  taskDag: {
+    nodes: [
+      {
+        taskId: "33333333-3333-4333-8333-333333333333",
+        title: "Run validation",
+        role: "backend-dev",
+        status: "in_progress",
+        parentTaskId: null,
+        dependencyIds: [],
+        dependentTaskIds: [],
+        blockedByTaskIds: [],
+        isRoot: true,
+        isBlocked: false
+      }
+    ],
+    edges: [],
+    rootTaskIds: ["33333333-3333-4333-8333-333333333333"],
+    blockedTaskIds: [],
+    unblockPaths: []
+  }
 };
 
 describe("validation runner", () => {

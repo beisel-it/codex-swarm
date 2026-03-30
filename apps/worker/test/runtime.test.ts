@@ -424,7 +424,14 @@ describe("worker runtime helpers", () => {
         completedAt: null,
         tasks: [],
         agents: [],
-        sessions: []
+        sessions: [],
+        taskDag: {
+          nodes: [],
+          edges: [],
+          rootTaskIds: [],
+          blockedTaskIds: [],
+          unblockPaths: []
+        }
       };
       const repository: Repository = {
         id: "55555555-5555-4555-8555-555555555555",
