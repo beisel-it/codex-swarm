@@ -137,7 +137,7 @@ export const repeatableRunTriggerUpdateSchema = z.object({
   name: z.string().min(1).optional(),
   description: z.string().min(1).nullable().optional(),
   enabled: z.boolean().optional(),
-  config: repeatableRunTriggerCreateSchema.options[0].shape.config.optional()
+  config: repeatableRunTriggerCreateSchema.options[0].shape.config.partial().optional()
 }).refine((value) => Object.keys(value).length > 0, {
   message: "at least one repeatable trigger field must be updated"
 });

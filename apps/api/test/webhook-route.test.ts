@@ -41,7 +41,7 @@ describe("webhookRoutes", () => {
             payload: {},
             request: {
               method: "POST",
-              path: "/webhooks/project/pr-review",
+              path: "/webhooks/triggers/22222222-2222-4222-8222-222222222222",
               receivedAt: new Date("2026-03-30T10:00:00.000Z")
             },
             metadata: {}
@@ -93,7 +93,7 @@ describe("webhookRoutes", () => {
 
     const response = await app.inject({
       method: "POST",
-      url: "/api/v1/webhooks/project/pr-review",
+      url: "/api/v1/webhooks/triggers/22222222-2222-4222-8222-222222222222",
       payload: {
         action: "opened"
       }
@@ -101,7 +101,7 @@ describe("webhookRoutes", () => {
 
     expect(response.statusCode).toBe(202);
     expect(controlPlane.ingestWebhook).toHaveBeenCalledWith(expect.objectContaining({
-      endpointPath: "/webhooks/project/pr-review",
+      endpointPath: "/webhooks/triggers/22222222-2222-4222-8222-222222222222",
       method: "POST"
     }));
     expect(response.json()).toEqual({

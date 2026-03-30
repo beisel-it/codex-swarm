@@ -295,7 +295,6 @@ describe("repeatableRunTriggerCreateSchema", () => {
       name: "PR opened webhook",
       kind: "webhook",
       config: {
-        endpointPath: "/webhooks/project/pr-review",
         eventNameHeader: "x-github-event",
         filters: {
           eventNames: ["pull_request"],

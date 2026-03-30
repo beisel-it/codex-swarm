@@ -184,12 +184,10 @@ export const webhookTriggerFilterSchema = z.object({
   eventNames: z.array(z.string().min(1)).default([]),
   actions: z.array(z.string().min(1)).default([]),
   branches: z.array(z.string().min(1)).default([]),
-  path: z.string().min(1).nullable().default(null),
   metadata: jsonRecordSchema.default({})
 });
 
-export const webhookTriggerConfigSchema = z.object({
-  endpointPath: z.string().min(1),
+export const webhookTriggerConfigInputSchema = z.object({
   secretRef: z.string().min(1).nullable().default(null),
   signatureHeader: z.string().min(1).nullable().default(null),
   eventNameHeader: z.string().min(1).nullable().default(null),
@@ -200,10 +198,13 @@ export const webhookTriggerConfigSchema = z.object({
     eventNames: [],
     actions: [],
     branches: [],
-    path: null,
     metadata: {}
   }),
   metadata: jsonRecordSchema.default({})
+});
+
+export const webhookTriggerConfigSchema = webhookTriggerConfigInputSchema.extend({
+  endpointPath: z.string().min(1)
 });
 
 export const repeatableRunTriggerCreateSchema = z.discriminatedUnion("kind", [
@@ -213,7 +214,7 @@ export const repeatableRunTriggerCreateSchema = z.discriminatedUnion("kind", [
     description: z.string().min(1).nullable().default(null),
     enabled: z.boolean().default(true),
     kind: z.literal("webhook"),
-    config: webhookTriggerConfigSchema
+    config: webhookTriggerConfigInputSchema
   })
 ]);
 
@@ -1570,6 +1571,7 @@ export type RepeatableRunTriggerCreateInput = z.infer<typeof repeatableRunTrigge
 export type RepeatableRunTrigger = z.infer<typeof repeatableRunTriggerSchema>;
 export type ExternalEventReceipt = z.infer<typeof externalEventReceiptSchema>;
 export type WebhookTriggerFilter = z.infer<typeof webhookTriggerFilterSchema>;
+export type WebhookTriggerConfigInput = z.infer<typeof webhookTriggerConfigInputSchema>;
 export type WebhookTriggerConfig = z.infer<typeof webhookTriggerConfigSchema>;
 export type WebhookRequestMetadata = z.infer<typeof webhookRequestMetadataSchema>;
 export type InboundWebhookEventEnvelope = z.infer<typeof inboundWebhookEventEnvelopeSchema>;

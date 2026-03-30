@@ -19,6 +19,10 @@
 - runs and repeatable runs now carry explicit handoff configuration plus handoff execution state, allowing opt-in automatic branch publish and GitHub PR creation after task completion without conflating implementation success with handoff success
 - the API now performs automatic handoff reconciliation through a provider adapter, records `run.auto_handoff_*` control-plane events, and persists separate failure reasons when branch publish or PR creation fails
 - the frontend run editor and repeatable run configuration surfaces now expose auto-handoff settings, and run detail messaging now distinguishes manual state, in-progress auto handoff, and failed auto handoff
+- the frontend shell has been recut around route-driven `Projects`, `Ad-Hoc Runs`, and `Settings` globals, with `Overview`, `Board`, `Lifecycle`, and `Review` moved into compact run-context workspaces and list/table-first layouts replacing the prior card-wall navigation mix
+- the Projects workspace now reads project inventory from the API as the source of truth, removes the old seed/local fallback that could invent phantom projects, and persists repository-to-project assignment when creating a project from the UI
+- frontend runtime config loading is now hardened for preview deployments: the app consumes `window.__CODEX_SWARM_CONFIG__` on initial load, can refresh from `runtime-config.json` with a `runtime-config.js` fallback, and the runtime-config writer now sources tailnet env defaults so manual preview/build starts no longer silently ship stale API tokens
+- project automation webhook setup now uses server-generated immutable endpoint paths, keeps the persisted trigger model generic, and exposes GitHub-specific affordances only as an opt-in UI preset with collapsed optional filter/security sections instead of a flat GitHub-biased form
 
 ## Current Validation
 
@@ -29,3 +33,4 @@
 - `corepack pnpm --dir frontend typecheck` passed on `main`
 - `corepack pnpm --dir packages/contracts test -- run-handoff.test.ts index.test.ts` passed
 - `corepack pnpm --dir apps/api test -- control-plane-service.auto-handoff.test.ts config.test.ts` passed
+- `corepack pnpm ci:typecheck`, `corepack pnpm ci:build`, and `corepack pnpm ci:test` passed after the webhook automation re-cut

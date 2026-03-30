@@ -27,7 +27,21 @@ function createTaskRow(overrides: Partial<Record<string, unknown>> = {}) {
   };
 }
 
-function createRunDetail() {
+function createRunDetail(): {
+  publishedBranch: string | null;
+  branchPublishApprovalId: string | null;
+  handoffStatus: string;
+  pullRequestUrl: string | null;
+  pullRequestNumber: number | null;
+  pullRequestStatus: string | null;
+  pullRequestApprovalId: string | null;
+  handoffExecution: {
+    state: string;
+    failureReason: string | null;
+    attemptedAt: Date | null;
+    completedAt: Date | null;
+  };
+} & Record<string, unknown> {
   return {
     id: "run-1",
     repositoryId: "repo-1",
@@ -192,8 +206,12 @@ describe("ControlPlaneService auto handoff", () => {
       headBranch: "runs/auto-handoff",
       title: "Provider handoff: Ship automatic provider handoff"
     }));
-    expect(createGitHubPullRequest.mock.calls[0]?.[0].body).toContain("Prepare provider handoff, Collect validation evidence");
-    expect(createGitHubPullRequest.mock.calls[0]?.[0].body).toContain("1 passed, 0 failed");
+    const prCalls = createGitHubPullRequest.mock.calls as unknown as Array<[{
+      body: string;
+    }]>;
+    const prInput = prCalls[0]?.[0];
+    expect(prInput?.body ?? "").toContain("Prepare provider handoff, Collect validation evidence");
+    expect(prInput?.body ?? "").toContain("1 passed, 0 failed");
     expect(createRunPullRequestHandoff).toHaveBeenCalledWith("run-1", expect.objectContaining({
       createdBy: "system:auto-handoff",
       approvalId: "merge-approval",

@@ -1306,14 +1306,16 @@ export class ControlPlaneService {
 
   async createRepeatableRunTrigger(input: RepeatableRunTriggerCreate, access?: AccessBoundary) {
     const definition = await this.assertRepeatableRunDefinitionExists(input.repeatableRunId, access);
-
-    if (input.kind === "webhook") {
-      await this.assertWebhookEndpointAvailable(input.config.endpointPath);
-    }
-
+    const triggerId = crypto.randomUUID();
     const now = this.clock.now();
+    const config = input.kind === "webhook"
+      ? {
+        ...input.config,
+        endpointPath: this.buildWebhookEndpointPath(triggerId)
+      }
+      : input.config;
     const [trigger] = await this.db.insert(repeatableRunTriggers).values({
-      id: crypto.randomUUID(),
+      id: triggerId,
       repeatableRunId: definition.id,
       workspaceId: definition.workspaceId,
       teamId: definition.teamId,
@@ -1321,7 +1323,7 @@ export class ControlPlaneService {
       description: input.description ?? null,
       enabled: input.enabled,
       kind: input.kind,
-      config: input.config,
+      config,
       createdAt: now,
       updatedAt: now
     }).returning();
@@ -1334,11 +1336,18 @@ export class ControlPlaneService {
     const definition = input.repeatableRunId
       ? await this.assertRepeatableRunDefinitionExists(input.repeatableRunId, access)
       : await this.assertRepeatableRunDefinitionExists(existing.repeatableRunId, access);
-    const nextConfig = input.config ?? existing.config;
-
-    if (existing.kind === "webhook") {
-      await this.assertWebhookEndpointAvailable(nextConfig.endpointPath, existing.id);
-    }
+    const nextConfig = input.config
+      ? {
+        ...existing.config,
+        ...input.config,
+        endpointPath: existing.config.endpointPath,
+        filters: {
+          ...existing.config.filters,
+          ...(input.config.filters ?? {})
+        },
+        metadata: input.config.metadata ?? existing.config.metadata
+      }
+      : existing.config;
 
     const now = this.clock.now();
     const [trigger] = await this.db.update(repeatableRunTriggers).set({
@@ -4951,19 +4960,8 @@ export class ControlPlaneService {
     return this.mapRepeatableRunTrigger(trigger);
   }
 
-  private async assertWebhookEndpointAvailable(endpointPath: string, excludingTriggerId?: string) {
-    const rows = await this.db.select().from(repeatableRunTriggers).orderBy(asc(repeatableRunTriggers.createdAt));
-    const conflictingTrigger = rows
-      .map((row) => this.mapRepeatableRunTrigger(row))
-      .find((trigger) =>
-        trigger.kind === "webhook"
-        && trigger.config.endpointPath === endpointPath
-        && trigger.id !== excludingTriggerId
-      );
-
-    if (conflictingTrigger) {
-      throw new HttpError(409, `webhook endpoint path ${endpointPath} is already assigned to trigger ${conflictingTrigger.name}`);
-    }
+  private buildWebhookEndpointPath(triggerId: string) {
+    return `/webhooks/triggers/${triggerId}`;
   }
 
   private validateWebhookTriggerRequest(
@@ -5020,10 +5018,6 @@ export class ControlPlaneService {
 
     if (trigger.config.filters.branches.length > 0 && !trigger.config.filters.branches.includes(branch ?? "")) {
       return `branch ${branch ?? "unknown"} is not accepted`;
-    }
-
-    if (trigger.config.filters.path && trigger.config.filters.path !== input.endpointPath) {
-      return `path ${input.endpointPath} does not match trigger filter`;
     }
 
     if (Object.keys(trigger.config.filters.metadata).length > 0) {

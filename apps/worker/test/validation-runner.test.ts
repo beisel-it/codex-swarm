@@ -28,7 +28,33 @@ const runDetail: RunDetail = {
   pullRequestStatus: null,
   pullRequestApprovalId: null,
   handoffStatus: "pending",
+  handoff: {
+    mode: "manual",
+    provider: null,
+    baseBranch: null,
+    autoPublishBranch: false,
+    autoCreatePullRequest: false,
+    titleTemplate: null,
+    bodyTemplate: null
+  },
+  handoffExecution: {
+    state: "idle",
+    failureReason: null,
+    attemptedAt: null,
+    completedAt: null
+  },
   metadata: {},
+  context: {
+    kind: "ad_hoc",
+    projectId: null,
+    projectSlug: null,
+    projectName: null,
+    projectDescription: null,
+    jobId: null,
+    jobName: null,
+    externalInput: null,
+    values: {}
+  },
   completedAt: null,
   createdBy: "tech-lead",
   createdAt: new Date("2026-03-29T00:00:00.000Z"),

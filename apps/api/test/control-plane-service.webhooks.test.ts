@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { externalEventReceipts } from "../src/db/schema.js";
+import { externalEventReceipts, repeatableRunTriggers } from "../src/db/schema.js";
 import { ControlPlaneService } from "../src/services/control-plane-service.js";
 
 function extractTargetId(condition: { queryChunks: Array<{ value?: string[] } | { value?: string }> }) {
@@ -69,6 +69,52 @@ class FakeWebhookDb {
   }
 }
 
+class FakeTriggerDb {
+  readonly triggerStore: any[] = [];
+
+  insert(table: unknown) {
+    return {
+      values: (values: Record<string, unknown>) => ({
+        returning: async () => {
+          if (table !== repeatableRunTriggers) {
+            throw new Error("unexpected insert table");
+          }
+
+          const record = {
+            ...values
+          };
+          this.triggerStore.push(record);
+          return [record];
+        }
+      })
+    };
+  }
+
+  update(table: unknown) {
+    return {
+      set: (values: Record<string, unknown>) => ({
+        where: (condition: { queryChunks: Array<{ value?: string[] } | { value?: string }> }) => ({
+          returning: async () => {
+            if (table !== repeatableRunTriggers) {
+              throw new Error("unexpected update table");
+            }
+
+            const id = extractTargetId(condition);
+            const record = this.triggerStore.find((candidate) => candidate.id === id);
+
+            if (!record) {
+              throw new Error(`unknown trigger ${id}`);
+            }
+
+            Object.assign(record, values);
+            return [record];
+          }
+        })
+      })
+    };
+  }
+}
+
 afterEach(() => {
   delete process.env.TEST_WEBHOOK_SECRET;
   vi.restoreAllMocks();
@@ -118,7 +164,7 @@ describe("ControlPlaneService webhook ingestion", () => {
       enabled: true,
       kind: "webhook",
       config: {
-        endpointPath: "/webhooks/project/pr-review",
+        endpointPath: "/webhooks/triggers/11111111-1111-4111-8111-111111111111",
         secretRef: "TEST_WEBHOOK_SECRET",
         signatureHeader: "x-webhook-secret",
         eventNameHeader: "x-event-name",
@@ -129,7 +175,6 @@ describe("ControlPlaneService webhook ingestion", () => {
           eventNames: ["pull_request"],
           actions: ["opened"],
           branches: ["main"],
-          path: null,
           metadata: {}
         },
         metadata: {
@@ -172,7 +217,7 @@ describe("ControlPlaneService webhook ingestion", () => {
     vi.spyOn(service, "createRun").mockImplementation(createRun as never);
 
     const result = await service.ingestWebhook({
-      endpointPath: "/webhooks/project/pr-review",
+      endpointPath: "/webhooks/triggers/11111111-1111-4111-8111-111111111111",
       method: "POST",
       headers: {
         "x-webhook-secret": "top-secret",
@@ -236,7 +281,7 @@ describe("ControlPlaneService webhook ingestion", () => {
       enabled: true,
       kind: "webhook",
       config: {
-        endpointPath: "/webhooks/project/pr-review",
+        endpointPath: "/webhooks/triggers/11111111-1111-4111-8111-111111111111",
         secretRef: null,
         signatureHeader: null,
         eventNameHeader: "x-event-name",
@@ -247,7 +292,6 @@ describe("ControlPlaneService webhook ingestion", () => {
           eventNames: ["pull_request"],
           actions: ["opened"],
           branches: [],
-          path: null,
           metadata: {}
         },
         metadata: {}
@@ -286,7 +330,7 @@ describe("ControlPlaneService webhook ingestion", () => {
     const createRun = vi.spyOn(service, "createRun");
 
     const result = await service.ingestWebhook({
-      endpointPath: "/webhooks/project/pr-review",
+      endpointPath: "/webhooks/triggers/11111111-1111-4111-8111-111111111111",
       method: "POST",
       headers: {
         "x-event-name": "pull_request",
@@ -305,5 +349,133 @@ describe("ControlPlaneService webhook ingestion", () => {
     expect(result.receipt.status).toBe("rejected");
     expect(result.receipt.rejectionReason).toContain("action");
     expect(db.receiptStore).toHaveLength(1);
+  });
+});
+
+describe("ControlPlaneService repeatable run triggers", () => {
+  it("generates a stable endpoint path on create", async () => {
+    const db = new FakeTriggerDb();
+    const service = new ControlPlaneService(db as never, {
+      now: () => new Date("2026-03-30T10:00:00.000Z")
+    });
+
+    vi.spyOn(service as any, "assertRepeatableRunDefinitionExists").mockResolvedValue({
+      id: "22222222-2222-4222-8222-222222222222",
+      repositoryId: "33333333-3333-4333-8333-333333333333",
+      workspaceId: "workspace-1",
+      teamId: "team-1",
+      name: "Issue review",
+      description: null,
+      status: "active",
+      execution: {
+        goal: "Review the new PR",
+        branchName: null,
+        planArtifactPath: null,
+        budgetTokens: null,
+        budgetCostUsd: null,
+        concurrencyCap: 1,
+        policyProfile: "standard",
+        metadata: {}
+      },
+      createdAt: new Date("2026-03-30T09:55:00.000Z"),
+      updatedAt: new Date("2026-03-30T09:55:00.000Z")
+    });
+    vi.spyOn(crypto, "randomUUID").mockReturnValue("11111111-1111-4111-8111-111111111111");
+
+    const trigger = await service.createRepeatableRunTrigger({
+      repeatableRunId: "22222222-2222-4222-8222-222222222222",
+      name: "PR opened webhook",
+      description: null,
+      enabled: true,
+      kind: "webhook",
+      config: {
+        secretRef: null,
+        signatureHeader: null,
+        eventNameHeader: "x-github-event",
+        deliveryIdHeader: "x-github-delivery",
+        allowedMethods: ["POST"],
+        maxPayloadBytes: 4096,
+        filters: {
+          eventNames: ["pull_request"],
+          actions: ["opened"],
+          branches: [],
+          metadata: {}
+        },
+        metadata: {}
+      }
+    });
+
+    expect(trigger.config.endpointPath).toBe("/webhooks/triggers/11111111-1111-4111-8111-111111111111");
+    expect(db.triggerStore[0]?.config.endpointPath).toBe("/webhooks/triggers/11111111-1111-4111-8111-111111111111");
+  });
+
+  it("keeps the generated endpoint path stable on update", async () => {
+    const db = new FakeTriggerDb();
+    db.triggerStore.push({
+      id: "11111111-1111-4111-8111-111111111111",
+      repeatableRunId: "22222222-2222-4222-8222-222222222222",
+      workspaceId: "workspace-1",
+      teamId: "team-1",
+      name: "PR opened webhook",
+      description: null,
+      enabled: true,
+      kind: "webhook",
+      config: {
+        endpointPath: "/webhooks/triggers/11111111-1111-4111-8111-111111111111",
+        secretRef: null,
+        signatureHeader: null,
+        eventNameHeader: "x-github-event",
+        deliveryIdHeader: "x-github-delivery",
+        allowedMethods: ["POST"],
+        maxPayloadBytes: 1048576,
+        filters: {
+          eventNames: [],
+          actions: [],
+          branches: [],
+          metadata: {}
+        },
+        metadata: {}
+      },
+      createdAt: new Date("2026-03-30T09:55:00.000Z"),
+      updatedAt: new Date("2026-03-30T09:55:00.000Z")
+    });
+
+    const service = new ControlPlaneService(db as never, {
+      now: () => new Date("2026-03-30T10:00:00.000Z")
+    });
+
+    vi.spyOn(service as any, "assertRepeatableRunTriggerExists").mockResolvedValue(db.triggerStore[0]);
+    vi.spyOn(service as any, "assertRepeatableRunDefinitionExists").mockResolvedValue({
+      id: "22222222-2222-4222-8222-222222222222",
+      repositoryId: "33333333-3333-4333-8333-333333333333",
+      workspaceId: "workspace-1",
+      teamId: "team-1",
+      name: "Issue review",
+      description: null,
+      status: "active",
+      execution: {
+        goal: "Review the new PR",
+        branchName: null,
+        planArtifactPath: null,
+        budgetTokens: null,
+        budgetCostUsd: null,
+        concurrencyCap: 1,
+        policyProfile: "standard",
+        metadata: {}
+      },
+      createdAt: new Date("2026-03-30T09:55:00.000Z"),
+      updatedAt: new Date("2026-03-30T09:55:00.000Z")
+    });
+
+    const trigger = await service.updateRepeatableRunTrigger("11111111-1111-4111-8111-111111111111", {
+      name: "PR opened updated",
+      config: {
+        eventNameHeader: "x-event-name"
+      }
+    });
+
+    expect(trigger.name).toBe("PR opened updated");
+    expect(trigger.config.endpointPath).toBe("/webhooks/triggers/11111111-1111-4111-8111-111111111111");
+    expect(trigger.config.eventNameHeader).toBe("x-event-name");
   });
 });

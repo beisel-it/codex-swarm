@@ -10,6 +10,11 @@ import type {
 type RepositoryOption = {
   id: string
   name: string
+  provider?: 'github' | 'gitlab' | 'local' | 'other'
+}
+
+type RepeatableRunTriggerUpdateInput = Partial<Omit<RepeatableRunTriggerCreateInput, 'kind'>> & {
+  config?: Partial<RepeatableRunTriggerCreateInput['config']>
 }
 
 type RepeatableRunsPanelProps = {
@@ -25,12 +30,16 @@ type RepeatableRunsPanelProps = {
   onUpdateDefinition: (definitionId: string, input: Partial<RepeatableRunDefinitionCreateInput>) => Promise<void>
   onDeleteDefinition: (definition: RepeatableRunDefinition) => Promise<void>
   onCreateTrigger: (input: RepeatableRunTriggerCreateInput) => Promise<void>
-  onUpdateTrigger: (
-    triggerId: string,
-    input: Partial<Omit<RepeatableRunTriggerCreateInput, 'kind'>>,
-  ) => Promise<void>
+  onUpdateTrigger: (triggerId: string, input: RepeatableRunTriggerUpdateInput) => Promise<void>
   onDeleteTrigger: (trigger: RepeatableRunTrigger) => Promise<void>
 }
+
+type WebhookPreset = 'generic' | 'github'
+
+const DEFAULT_MAX_PAYLOAD_BYTES = 1024 * 1024
+const GITHUB_EVENT_HEADER = 'x-github-event'
+const GITHUB_DELIVERY_HEADER = 'x-github-delivery'
+const GENERATED_ENDPOINT_PLACEHOLDER = '/webhooks/triggers/<assigned on create>'
 
 function parseCsvList(value: string) {
   return value
@@ -81,6 +90,39 @@ function describeEventContext(trigger: RepeatableRunTrigger) {
   ]
 }
 
+function inferPreset(repository: RepositoryOption | null, trigger?: RepeatableRunTrigger | null): WebhookPreset {
+  if (repository?.provider === 'github') {
+    return 'github'
+  }
+
+  if (trigger?.kind === 'webhook') {
+    if (trigger.config.eventNameHeader === GITHUB_EVENT_HEADER || trigger.config.deliveryIdHeader === GITHUB_DELIVERY_HEADER) {
+      return 'github'
+    }
+  }
+
+  return 'generic'
+}
+
+function buildEmptyTriggerConfig() {
+  return {
+    secretRef: '',
+    signatureHeader: '',
+    eventNameHeader: '',
+    deliveryIdHeader: '',
+    maxPayloadBytes: String(DEFAULT_MAX_PAYLOAD_BYTES),
+    allowPost: true,
+    allowPut: false,
+    filterEventNames: '',
+    filterActions: '',
+    filterBranches: '',
+    enableRequestMatching: false,
+    enableSecurity: false,
+    enableEventMatching: false,
+    enableDeliveryMetadata: false,
+  }
+}
+
 export function RepeatableRunsPanel({
   repositories,
   selectedRepositoryId,
@@ -112,17 +154,23 @@ export function RepeatableRunsPanel({
   const [triggerName, setTriggerName] = useState('')
   const [triggerDescription, setTriggerDescription] = useState('')
   const [triggerEnabled, setTriggerEnabled] = useState(true)
-  const [endpointPath, setEndpointPath] = useState('/webhooks/review')
+  const [triggerPreset, setTriggerPreset] = useState<WebhookPreset>('generic')
+  const [resolvedEndpointPath, setResolvedEndpointPath] = useState('')
   const [secretRef, setSecretRef] = useState('')
   const [signatureHeader, setSignatureHeader] = useState('')
   const [eventNameHeader, setEventNameHeader] = useState('')
   const [deliveryIdHeader, setDeliveryIdHeader] = useState('')
-  const [maxPayloadBytes, setMaxPayloadBytes] = useState('1048576')
+  const [maxPayloadBytes, setMaxPayloadBytes] = useState(String(DEFAULT_MAX_PAYLOAD_BYTES))
   const [allowPost, setAllowPost] = useState(true)
   const [allowPut, setAllowPut] = useState(false)
   const [filterEventNames, setFilterEventNames] = useState('')
   const [filterActions, setFilterActions] = useState('')
   const [filterBranches, setFilterBranches] = useState('')
+  const [enableRequestMatching, setEnableRequestMatching] = useState(false)
+  const [enableSecurity, setEnableSecurity] = useState(false)
+  const [enableEventMatching, setEnableEventMatching] = useState(false)
+  const [enableDeliveryMetadata, setEnableDeliveryMetadata] = useState(false)
+  const [endpointCopied, setEndpointCopied] = useState(false)
 
   const scopedDefinitions = useMemo(
     () => definitions.filter((definition) => definition.repositoryId === selectedRepositoryId),
@@ -139,6 +187,13 @@ export function RepeatableRunsPanel({
     return receipts.filter((receipt) => triggerIds.has(receipt.repeatableRunTriggerId))
   }, [receipts, scopedTriggers])
 
+  const effectiveTriggerRepeatableRunId = triggerRepeatableRunId || scopedDefinitions[0]?.id || ''
+  const selectedRepository = repositories.find((repository) => repository.id === selectedRepositoryId) ?? null
+  const effectiveTriggerPreset = editingTriggerId || triggerName || triggerDescription || triggerRepeatableRunId
+    ? triggerPreset
+    : inferPreset(selectedRepository)
+  const displayedEndpointPath = resolvedEndpointPath || GENERATED_ENDPOINT_PLACEHOLDER
+
   useEffect(() => {
     if (!selectedRepositoryId && repositories[0]?.id) {
       onSelectedRepositoryIdChange(repositories[0].id)
@@ -146,10 +201,13 @@ export function RepeatableRunsPanel({
   }, [onSelectedRepositoryIdChange, repositories, selectedRepositoryId])
 
   useEffect(() => {
-    if (!triggerRepeatableRunId && scopedDefinitions[0]?.id) {
-      setTriggerRepeatableRunId(scopedDefinitions[0].id)
+    if (!endpointCopied) {
+      return
     }
-  }, [scopedDefinitions, triggerRepeatableRunId])
+
+    const timeout = window.setTimeout(() => setEndpointCopied(false), 1200)
+    return () => window.clearTimeout(timeout)
+  }, [endpointCopied])
 
   function resetDefinitionForm() {
     setEditingDefinitionId('')
@@ -164,22 +222,31 @@ export function RepeatableRunsPanel({
   }
 
   function resetTriggerForm(nextRepeatableRunId?: string) {
+    const empty = buildEmptyTriggerConfig()
+    const preset = inferPreset(selectedRepository)
+
     setEditingTriggerId('')
     setTriggerRepeatableRunId(nextRepeatableRunId ?? scopedDefinitions[0]?.id ?? '')
     setTriggerName('')
     setTriggerDescription('')
     setTriggerEnabled(true)
-    setEndpointPath('/webhooks/review')
-    setSecretRef('')
-    setSignatureHeader('')
-    setEventNameHeader('')
-    setDeliveryIdHeader('')
-    setMaxPayloadBytes('1048576')
-    setAllowPost(true)
-    setAllowPut(false)
-    setFilterEventNames('')
-    setFilterActions('')
-    setFilterBranches('')
+    setTriggerPreset(preset)
+    setResolvedEndpointPath('')
+    setSecretRef(empty.secretRef)
+    setSignatureHeader(empty.signatureHeader)
+    setEventNameHeader(preset === 'github' ? GITHUB_EVENT_HEADER : empty.eventNameHeader)
+    setDeliveryIdHeader(preset === 'github' ? GITHUB_DELIVERY_HEADER : empty.deliveryIdHeader)
+    setMaxPayloadBytes(empty.maxPayloadBytes)
+    setAllowPost(empty.allowPost)
+    setAllowPut(empty.allowPut)
+    setFilterEventNames(empty.filterEventNames)
+    setFilterActions(empty.filterActions)
+    setFilterBranches(empty.filterBranches)
+    setEnableRequestMatching(empty.enableRequestMatching)
+    setEnableSecurity(empty.enableSecurity)
+    setEnableEventMatching(empty.enableEventMatching)
+    setEnableDeliveryMetadata(empty.enableDeliveryMetadata)
+    setEndpointCopied(false)
   }
 
   async function handleDefinitionSubmit() {
@@ -222,8 +289,17 @@ export function RepeatableRunsPanel({
     resetDefinitionForm()
   }
 
+  async function handleCopyEndpoint() {
+    if (displayedEndpointPath === GENERATED_ENDPOINT_PLACEHOLDER || !navigator.clipboard) {
+      return
+    }
+
+    await navigator.clipboard.writeText(displayedEndpointPath)
+    setEndpointCopied(true)
+  }
+
   async function handleTriggerSubmit() {
-    if (!triggerRepeatableRunId || !triggerName.trim() || !endpointPath.trim()) {
+    if (!effectiveTriggerRepeatableRunId || !triggerName.trim()) {
       return
     }
 
@@ -236,24 +312,26 @@ export function RepeatableRunsPanel({
     }
 
     const payload: RepeatableRunTriggerCreateInput = {
-      repeatableRunId: triggerRepeatableRunId,
+      repeatableRunId: effectiveTriggerRepeatableRunId,
       name: triggerName.trim(),
       description: triggerDescription.trim() || null,
       enabled: triggerEnabled,
       kind: 'webhook',
       config: {
-        endpointPath: endpointPath.trim(),
-        secretRef: secretRef.trim() || null,
-        signatureHeader: signatureHeader.trim() || null,
-        eventNameHeader: eventNameHeader.trim() || null,
-        deliveryIdHeader: deliveryIdHeader.trim() || null,
-        allowedMethods: allowedMethods.length > 0 ? allowedMethods : ['POST'],
-        maxPayloadBytes: Math.max(1, Number.parseInt(maxPayloadBytes, 10) || 1048576),
+        secretRef: enableSecurity ? secretRef.trim() || null : null,
+        signatureHeader: enableSecurity ? signatureHeader.trim() || null : null,
+        eventNameHeader: enableEventMatching ? eventNameHeader.trim() || null : null,
+        deliveryIdHeader: enableDeliveryMetadata ? deliveryIdHeader.trim() || null : null,
+        allowedMethods: enableRequestMatching
+          ? (allowedMethods.length > 0 ? allowedMethods : ['POST'])
+          : ['POST'],
+        maxPayloadBytes: enableRequestMatching
+          ? Math.max(1, Number.parseInt(maxPayloadBytes, 10) || DEFAULT_MAX_PAYLOAD_BYTES)
+          : DEFAULT_MAX_PAYLOAD_BYTES,
         filters: {
-          eventNames: parseCsvList(filterEventNames),
-          actions: parseCsvList(filterActions),
-          branches: parseCsvList(filterBranches),
-          path: endpointPath.trim(),
+          eventNames: enableEventMatching ? parseCsvList(filterEventNames) : [],
+          actions: enableEventMatching ? parseCsvList(filterActions) : [],
+          branches: enableEventMatching ? parseCsvList(filterBranches) : [],
           metadata: {},
         },
         metadata: {},
@@ -266,7 +344,58 @@ export function RepeatableRunsPanel({
       await onCreateTrigger(payload)
     }
 
-    resetTriggerForm(triggerRepeatableRunId)
+    resetTriggerForm(effectiveTriggerRepeatableRunId)
+  }
+
+  function toggleRequestMatching(enabled: boolean) {
+    setEnableRequestMatching(enabled)
+    if (!enabled) {
+      setAllowPost(true)
+      setAllowPut(false)
+      setMaxPayloadBytes(String(DEFAULT_MAX_PAYLOAD_BYTES))
+    }
+  }
+
+  function toggleSecurity(enabled: boolean) {
+    setEnableSecurity(enabled)
+    if (!enabled) {
+      setSecretRef('')
+      setSignatureHeader('')
+    }
+  }
+
+  function toggleEventMatching(enabled: boolean) {
+    setEnableEventMatching(enabled)
+    if (!enabled) {
+      setFilterEventNames('')
+      setFilterActions('')
+      setFilterBranches('')
+      setEventNameHeader('')
+    } else if (effectiveTriggerPreset === 'github' && !eventNameHeader) {
+      setEventNameHeader(GITHUB_EVENT_HEADER)
+    }
+  }
+
+  function toggleDeliveryMetadata(enabled: boolean) {
+    setEnableDeliveryMetadata(enabled)
+    if (!enabled) {
+      setDeliveryIdHeader('')
+    } else if (effectiveTriggerPreset === 'github' && !deliveryIdHeader) {
+      setDeliveryIdHeader(GITHUB_DELIVERY_HEADER)
+    }
+  }
+
+  function applyTriggerPreset(nextPreset: WebhookPreset) {
+    setTriggerPreset(nextPreset)
+
+    if (nextPreset === 'github') {
+      if (!eventNameHeader) {
+        setEventNameHeader(GITHUB_EVENT_HEADER)
+      }
+      if (!deliveryIdHeader) {
+        setDeliveryIdHeader(GITHUB_DELIVERY_HEADER)
+      }
+    }
   }
 
   return (
@@ -279,7 +408,7 @@ export function RepeatableRunsPanel({
       </div>
 
       <label className="control-field">
-        <span>Project</span>
+        <span>Repository</span>
         <select value={selectedRepositoryId} onChange={(event) => onSelectedRepositoryIdChange(event.target.value)}>
           <option value="">Select repository</option>
           {repositories.map((repository) => (
@@ -390,7 +519,6 @@ export function RepeatableRunsPanel({
                       onClick={() => {
                         resetTriggerForm(definition.id)
                         setTriggerName(`${definition.name} webhook`)
-                        setEndpointPath(`/webhooks/${definition.name.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`)
                       }}
                     >
                       Add trigger
@@ -422,9 +550,30 @@ export function RepeatableRunsPanel({
                 </button>
               ) : null}
             </div>
+
+            <div className="repeatable-run-preset-row">
+              <span className="repeatable-run-preset-label">Webhook shape</span>
+              <div className="repeatable-run-pill-row">
+                <button
+                  type="button"
+                  className={`ghost-pill ${effectiveTriggerPreset === 'generic' ? 'is-active' : ''}`}
+                  onClick={() => applyTriggerPreset('generic')}
+                >
+                  Generic webhook
+                </button>
+                <button
+                  type="button"
+                  className={`ghost-pill ${effectiveTriggerPreset === 'github' ? 'is-active' : ''}`}
+                  onClick={() => applyTriggerPreset('github')}
+                >
+                  GitHub webhook
+                </button>
+              </div>
+            </div>
+
             <label className="control-field">
               <span>Repeatable run</span>
-              <select value={triggerRepeatableRunId} onChange={(event) => setTriggerRepeatableRunId(event.target.value)}>
+              <select value={effectiveTriggerRepeatableRunId} onChange={(event) => setTriggerRepeatableRunId(event.target.value)}>
                 <option value="">Select repeatable run</option>
                 {scopedDefinitions.map((definition) => (
                   <option key={definition.id} value={definition.id}>
@@ -441,65 +590,166 @@ export function RepeatableRunsPanel({
               <span>Description</span>
               <textarea rows={3} value={triggerDescription} onChange={(event) => setTriggerDescription(event.target.value)} />
             </label>
-            <label className="control-field">
-              <span>Endpoint path</span>
-              <input value={endpointPath} onChange={(event) => setEndpointPath(event.target.value)} />
+
+            <div className="repeatable-run-generated-endpoint">
+              <div className="repeatable-run-section-header">
+                <div>
+                  <strong>Endpoint</strong>
+                  <p>The system assigns a unique inbound path. You only need to copy it into the upstream webhook configuration.</p>
+                </div>
+                <button
+                  type="button"
+                  className="table-action"
+                  onClick={() => void handleCopyEndpoint()}
+                  disabled={displayedEndpointPath === GENERATED_ENDPOINT_PLACEHOLDER}
+                >
+                  {endpointCopied ? 'Copied' : 'Copy'}
+                </button>
+              </div>
+              <div className="repeatable-run-code-block">
+                <code>{displayedEndpointPath}</code>
+              </div>
+            </div>
+
+            <div className="repeatable-run-optional-tools">
+              <strong>Optional controls</strong>
+              <p>
+                {effectiveTriggerPreset === 'github'
+                  ? 'GitHub preset suggests event matching and delivery metadata, but both stay optional.'
+                  : 'Enable only the constraints you actually need.'}
+              </p>
+              <div className="repeatable-run-pill-grid">
+                <button
+                  type="button"
+                  className={`ghost-pill ${enableRequestMatching ? 'is-active' : ''}`}
+                  onClick={() => toggleRequestMatching(!enableRequestMatching)}
+                >
+                  Request matching
+                </button>
+                <button
+                  type="button"
+                  className={`ghost-pill ${enableSecurity ? 'is-active' : ''}`}
+                  onClick={() => toggleSecurity(!enableSecurity)}
+                >
+                  Security
+                </button>
+                <button
+                  type="button"
+                  className={`ghost-pill ${enableEventMatching ? 'is-active' : ''}`}
+                  onClick={() => toggleEventMatching(!enableEventMatching)}
+                >
+                  Event matching
+                </button>
+                <button
+                  type="button"
+                  className={`ghost-pill ${enableDeliveryMetadata ? 'is-active' : ''}`}
+                  onClick={() => toggleDeliveryMetadata(!enableDeliveryMetadata)}
+                >
+                  Delivery metadata
+                </button>
+              </div>
+            </div>
+
+            {enableRequestMatching ? (
+              <section className="repeatable-run-subsection">
+                <div className="repeatable-run-section-header">
+                  <strong>Request matching</strong>
+                </div>
+                <div className="repeatable-run-toggle-row">
+                  <label className="repeatable-run-checkbox">
+                    <input type="checkbox" checked={allowPost} onChange={(event) => setAllowPost(event.target.checked)} />
+                    <span>POST</span>
+                  </label>
+                  <label className="repeatable-run-checkbox">
+                    <input type="checkbox" checked={allowPut} onChange={(event) => setAllowPut(event.target.checked)} />
+                    <span>PUT</span>
+                  </label>
+                </div>
+                <label className="control-field">
+                  <span>Max payload bytes</span>
+                  <input type="number" min={1} value={maxPayloadBytes} onChange={(event) => setMaxPayloadBytes(event.target.value)} />
+                </label>
+              </section>
+            ) : null}
+
+            {enableSecurity ? (
+              <section className="repeatable-run-subsection">
+                <div className="repeatable-run-section-header">
+                  <strong>Security</strong>
+                </div>
+                <div className="repeatable-run-grid">
+                  <label className="control-field">
+                    <span>Secret env ref</span>
+                    <input value={secretRef} onChange={(event) => setSecretRef(event.target.value)} placeholder="WEBHOOK_SHARED_SECRET" />
+                  </label>
+                  <label className="control-field">
+                    <span>Signature header</span>
+                    <input value={signatureHeader} onChange={(event) => setSignatureHeader(event.target.value)} placeholder="x-codex-signature" />
+                  </label>
+                </div>
+              </section>
+            ) : null}
+
+            {enableEventMatching ? (
+              <section className="repeatable-run-subsection">
+                <div className="repeatable-run-section-header">
+                  <strong>Event matching</strong>
+                </div>
+                <label className="control-field">
+                  <span>Event name header</span>
+                  <input
+                    value={eventNameHeader}
+                    onChange={(event) => setEventNameHeader(event.target.value)}
+                    placeholder={effectiveTriggerPreset === 'github' ? GITHUB_EVENT_HEADER : 'x-event-name'}
+                  />
+                </label>
+                <div className="repeatable-run-grid">
+                  <label className="control-field">
+                    <span>Accepted events</span>
+                    <input
+                      value={filterEventNames}
+                      onChange={(event) => setFilterEventNames(event.target.value)}
+                      placeholder={effectiveTriggerPreset === 'github' ? 'pull_request, issues' : 'build.completed, deployment.finished'}
+                    />
+                  </label>
+                  <label className="control-field">
+                    <span>Accepted actions</span>
+                    <input
+                      value={filterActions}
+                      onChange={(event) => setFilterActions(event.target.value)}
+                      placeholder={effectiveTriggerPreset === 'github' ? 'opened, reopened' : 'created, updated'}
+                    />
+                  </label>
+                </div>
+                <label className="control-field">
+                  <span>Accepted branches</span>
+                  <input value={filterBranches} onChange={(event) => setFilterBranches(event.target.value)} placeholder="main, release/*" />
+                </label>
+              </section>
+            ) : null}
+
+            {enableDeliveryMetadata ? (
+              <section className="repeatable-run-subsection">
+                <div className="repeatable-run-section-header">
+                  <strong>Delivery metadata</strong>
+                </div>
+                <label className="control-field">
+                  <span>Delivery ID header</span>
+                  <input
+                    value={deliveryIdHeader}
+                    onChange={(event) => setDeliveryIdHeader(event.target.value)}
+                    placeholder={effectiveTriggerPreset === 'github' ? GITHUB_DELIVERY_HEADER : 'x-delivery-id'}
+                  />
+                </label>
+              </section>
+            ) : null}
+
+            <label className="repeatable-run-checkbox">
+              <input type="checkbox" checked={triggerEnabled} onChange={(event) => setTriggerEnabled(event.target.checked)} />
+              <span>Enabled</span>
             </label>
-            <div className="repeatable-run-grid">
-              <label className="control-field">
-                <span>Secret env ref</span>
-                <input value={secretRef} onChange={(event) => setSecretRef(event.target.value)} placeholder="WEBHOOK_SHARED_SECRET" />
-              </label>
-              <label className="control-field">
-                <span>Signature header</span>
-                <input value={signatureHeader} onChange={(event) => setSignatureHeader(event.target.value)} placeholder="x-codex-signature" />
-              </label>
-            </div>
-            <div className="repeatable-run-grid">
-              <label className="control-field">
-                <span>Event name header</span>
-                <input value={eventNameHeader} onChange={(event) => setEventNameHeader(event.target.value)} placeholder="x-github-event" />
-              </label>
-              <label className="control-field">
-                <span>Delivery ID header</span>
-                <input value={deliveryIdHeader} onChange={(event) => setDeliveryIdHeader(event.target.value)} placeholder="x-github-delivery" />
-              </label>
-            </div>
-            <div className="repeatable-run-grid">
-              <label className="control-field">
-                <span>Accepted events</span>
-                <input value={filterEventNames} onChange={(event) => setFilterEventNames(event.target.value)} placeholder="pull_request, issues" />
-              </label>
-              <label className="control-field">
-                <span>Accepted actions</span>
-                <input value={filterActions} onChange={(event) => setFilterActions(event.target.value)} placeholder="opened, reopened" />
-              </label>
-            </div>
-            <div className="repeatable-run-grid">
-              <label className="control-field">
-                <span>Accepted branches</span>
-                <input value={filterBranches} onChange={(event) => setFilterBranches(event.target.value)} placeholder="main, release/*" />
-              </label>
-              <label className="control-field">
-                <span>Max payload bytes</span>
-                <input type="number" min={1} value={maxPayloadBytes} onChange={(event) => setMaxPayloadBytes(event.target.value)} />
-              </label>
-            </div>
-            <div className="repeatable-run-toggle-row">
-              <label className="repeatable-run-checkbox">
-                <input type="checkbox" checked={triggerEnabled} onChange={(event) => setTriggerEnabled(event.target.checked)} />
-                <span>Enabled</span>
-              </label>
-              <label className="repeatable-run-checkbox">
-                <input type="checkbox" checked={allowPost} onChange={(event) => setAllowPost(event.target.checked)} />
-                <span>POST</span>
-              </label>
-              <label className="repeatable-run-checkbox">
-                <input type="checkbox" checked={allowPut} onChange={(event) => setAllowPut(event.target.checked)} />
-                <span>PUT</span>
-              </label>
-            </div>
-            <button type="button" className="action-button" onClick={() => void handleTriggerSubmit()} disabled={actionPending || !triggerRepeatableRunId}>
+
+            <button type="button" className="action-button" onClick={() => void handleTriggerSubmit()} disabled={actionPending || !effectiveTriggerRepeatableRunId}>
               {editingTriggerId ? 'Save webhook trigger' : 'Create webhook trigger'}
             </button>
           </div>
@@ -557,12 +807,14 @@ export function RepeatableRunsPanel({
                       type="button"
                       className="table-action"
                       onClick={() => {
+                        const preset = inferPreset(selectedRepository, trigger)
                         setEditingTriggerId(trigger.id)
                         setTriggerRepeatableRunId(trigger.repeatableRunId)
                         setTriggerName(trigger.name)
                         setTriggerDescription(trigger.description ?? '')
                         setTriggerEnabled(trigger.enabled)
-                        setEndpointPath(trigger.config.endpointPath)
+                        setTriggerPreset(preset)
+                        setResolvedEndpointPath(trigger.config.endpointPath)
                         setSecretRef(trigger.config.secretRef ?? '')
                         setSignatureHeader(trigger.config.signatureHeader ?? '')
                         setEventNameHeader(trigger.config.eventNameHeader ?? '')
@@ -573,6 +825,20 @@ export function RepeatableRunsPanel({
                         setFilterEventNames(trigger.config.filters.eventNames.join(', '))
                         setFilterActions(trigger.config.filters.actions.join(', '))
                         setFilterBranches(trigger.config.filters.branches.join(', '))
+                        setEnableRequestMatching(
+                          trigger.config.maxPayloadBytes !== DEFAULT_MAX_PAYLOAD_BYTES
+                            || trigger.config.allowedMethods.length !== 1
+                            || !trigger.config.allowedMethods.includes('POST'),
+                        )
+                        setEnableSecurity(Boolean(trigger.config.secretRef || trigger.config.signatureHeader))
+                        setEnableEventMatching(Boolean(
+                          trigger.config.eventNameHeader
+                            || trigger.config.filters.eventNames.length > 0
+                            || trigger.config.filters.actions.length > 0
+                            || trigger.config.filters.branches.length > 0,
+                        ))
+                        setEnableDeliveryMetadata(Boolean(trigger.config.deliveryIdHeader))
+                        setEndpointCopied(false)
                       }}
                     >
                       Edit
