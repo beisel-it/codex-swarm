@@ -39,6 +39,7 @@ describe("repository-provider inspection", () => {
     await runGit(["branch", "release"], workingPath);
     await runGit(["remote", "add", "origin", originPath], workingPath);
     await runGit(["push", "--all", "origin"], workingPath);
+    await runGit(["symbolic-ref", "HEAD", "refs/heads/main"], originPath);
 
     const inspection = await inspectRepositoryProvider({
       provider: "github",
