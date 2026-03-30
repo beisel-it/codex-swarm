@@ -24,6 +24,7 @@
 - frontend runtime config loading is now hardened for preview deployments: the app consumes `window.__CODEX_SWARM_CONFIG__` on initial load, can refresh from `runtime-config.json` with a `runtime-config.js` fallback, and the runtime-config writer now sources tailnet env defaults so manual preview/build starts no longer silently ship stale API tokens
 - project automation webhook setup now uses server-generated immutable endpoint paths, keeps the persisted trigger model generic, and exposes GitHub-specific affordances only as an opt-in UI preset with collapsed optional filter/security sections instead of a flat GitHub-biased form
 - the public README screenshot set now uses current staging captures and the shipped route structure, replacing the old mobile-heavy board/run-detail/admin shot list with desktop-only Projects, Project Runs, Project Automation, Ad-Hoc Runs, Run Board, Run Lifecycle, and Settings surfaces
+- GitHub Actions CI now checks out the repository before invoking the local `setup-workspace` composite action, aligning the pipeline with how local actions are resolved on runners instead of failing before any real gate executes
 
 ## Current Validation
 
@@ -35,3 +36,4 @@
 - `corepack pnpm --dir packages/contracts test -- run-handoff.test.ts index.test.ts` passed
 - `corepack pnpm --dir apps/api test -- control-plane-service.auto-handoff.test.ts config.test.ts` passed
 - `corepack pnpm ci:typecheck`, `corepack pnpm ci:build`, and `corepack pnpm ci:test` passed after the webhook automation re-cut
+- `corepack pnpm ci:lint`, `corepack pnpm ci:typecheck`, `corepack pnpm ci:test`, and `corepack pnpm ci:build` passed after the CI workflow checkout-order fix
