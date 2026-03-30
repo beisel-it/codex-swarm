@@ -6229,7 +6229,7 @@ describe("buildApp", () => {
     }
   });
 
-  it("preserves the assignment profile during managed worker dispatch", async () => {
+  it("uses the configured worker runtime profile instead of the assignment profile", async () => {
     vi.stubEnv("CODEX_SWARM_WORKER_PROFILE", "fallback-profile");
 
     const verticalSlice = new FakeVerticalSliceControlPlane();
@@ -6288,7 +6288,7 @@ describe("buildApp", () => {
         headers,
         payload: {
           repositoryId: ids.repository,
-          goal: "Exercise assignment profile preservation",
+          goal: "Exercise worker runtime profile selection",
           concurrencyCap: 1,
           metadata: {}
         }
@@ -6327,11 +6327,11 @@ describe("buildApp", () => {
         payload: {
           runId: ids.run,
           title: "Managed worker dispatch profile task",
-          description: "Ensure the assignment profile survives dispatch orchestration",
+          description: "Ensure worker dispatch uses the configured runtime profile",
           role: "design-engineer",
           priority: 1,
           dependencyIds: [],
-          acceptanceCriteria: ["worker dispatch preserves the assignment profile"]
+          acceptanceCriteria: ["worker dispatch uses the configured runtime profile"]
         }
       });
 
@@ -6392,7 +6392,7 @@ describe("buildApp", () => {
       expect(result).toMatchObject({
         status: "completed"
       });
-      expect(seenProfile).toBe("design-engineer");
+      expect(seenProfile).toBe("fallback-profile");
     } finally {
       await rm(repoRoot, { recursive: true, force: true });
       await app.close();

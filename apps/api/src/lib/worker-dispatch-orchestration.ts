@@ -92,8 +92,12 @@ function resolveCodexExecutionProfile() {
   return getOptionalEnv("CODEX_SWARM_WORKER_PROFILE") ?? "default";
 }
 
-function resolveAssignmentExecutionProfile(profile: string | null | undefined) {
-  return profile?.trim() ? profile : resolveCodexExecutionProfile();
+function resolveAssignmentExecutionProfile(_profile: string | null | undefined) {
+  // Project-team profiles identify the intended swarm role, not a guaranteed
+  // local Codex CLI profile on the worker host. Worker execution must use the
+  // configured runtime profile instead of forwarding role names like
+  // "leader" or "design-researcher" into `codex exec -p ...`.
+  return resolveCodexExecutionProfile();
 }
 
 function toSessionRecord(session: Session, worktreePath: string) {
