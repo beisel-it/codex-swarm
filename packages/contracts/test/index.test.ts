@@ -408,6 +408,21 @@ describe("runDetailSchema", () => {
       pullRequestStatus: null,
       pullRequestApprovalId: null,
       handoffStatus: "pending",
+      handoff: {
+        mode: "manual",
+        provider: null,
+        baseBranch: null,
+        autoPublishBranch: false,
+        autoCreatePullRequest: false,
+        titleTemplate: null,
+        bodyTemplate: null
+      },
+      handoffExecution: {
+        state: "idle",
+        failureReason: null,
+        attemptedAt: null,
+        completedAt: null
+      },
       completedAt: null,
       metadata: {},
       createdBy: "leader",
@@ -609,6 +624,21 @@ describe("runsByJobScopeSchema", () => {
           pullRequestStatus: null,
           pullRequestApprovalId: null,
           handoffStatus: "pending",
+          handoff: {
+            mode: "manual",
+            provider: null,
+            baseBranch: null,
+            autoPublishBranch: false,
+            autoCreatePullRequest: false,
+            titleTemplate: null,
+            bodyTemplate: null
+          },
+          handoffExecution: {
+            state: "idle",
+            failureReason: null,
+            attemptedAt: null,
+            completedAt: null
+          },
           completedAt: null,
           metadata: {},
           jobScope: {

@@ -200,6 +200,15 @@ export function RepeatableRunsPanel({
         budgetCostUsd: null,
         concurrencyCap: Math.max(1, Number.parseInt(definitionConcurrencyCap, 10) || 1),
         policyProfile: definitionPolicyProfile.trim() || null,
+        handoff: {
+          mode: 'manual',
+          provider: null,
+          baseBranch: null,
+          autoPublishBranch: false,
+          autoCreatePullRequest: false,
+          titleTemplate: null,
+          bodyTemplate: null,
+        },
         metadata: {},
       },
     }

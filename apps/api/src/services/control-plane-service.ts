@@ -1,3 +1,5 @@
+import { access } from "node:fs/promises";
+
 import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import {
   controlPlaneEventSchema,
@@ -41,6 +43,8 @@ import {
   type RunsByJobScope,
   type RunUpdateInput,
   type RunContext,
+  type RunHandoffConfig,
+  type RunHandoffExecution,
   type TuiAlert,
   type TuiOverview,
   type TuiOverviewRun,
@@ -71,7 +75,9 @@ import {
   inboundWebhookEventEnvelopeSchema,
   repeatableRunDefinitionSchema,
   repeatableRunTriggerSchema,
-  runContextSchema
+  runContextSchema,
+  runHandoffConfigSchema,
+  runHandoffExecutionSchema
 } from "@codex-swarm/contracts";
 import { formatRunExecutionContext, resolveInitialTaskStatus } from "@codex-swarm/orchestration";
 import {
@@ -104,6 +110,7 @@ import {
 } from "../db/schema.js";
 import type { Clock } from "../lib/clock.js";
 import { HttpError } from "../lib/http-error.js";
+import type { ProviderHandoffAdapter } from "../lib/provider-handoff.js";
 import { inspectRepositoryProvider } from "../lib/repository-provider.js";
 import type {
   agentSessionCreateSchema,
@@ -126,10 +133,6 @@ type RepeatableRunTriggerCreate = RepeatableRunTriggerCreateInput;
 type RepeatableRunTriggerUpdate = z.infer<typeof repeatableRunTriggerUpdateSchema>;
 type ProjectCreate = ProjectCreateInput;
 type ProjectUpdate = ProjectUpdateInput;
-type RepeatableRunDefinitionCreate = RepeatableRunDefinitionCreateInput;
-type RepeatableRunDefinitionUpdate = z.infer<typeof repeatableRunDefinitionUpdateSchema>;
-type RepeatableRunTriggerCreate = RepeatableRunTriggerCreateInput;
-type RepeatableRunTriggerUpdate = z.infer<typeof repeatableRunTriggerUpdateSchema>;
 type RunCreate = RunCreateInput;
 type RunUpdate = RunUpdateInput;
 type RunStatusUpdate = RunStatusUpdateInput;
@@ -171,6 +174,23 @@ type AgentRecord = typeof agents.$inferSelect;
 type SessionRecord = typeof sessions.$inferSelect;
 type RepeatableRunDefinitionRecord = typeof repeatableRunDefinitions.$inferSelect;
 type RepeatableRunTriggerRecord = typeof repeatableRunTriggers.$inferSelect;
+
+const defaultRunHandoffConfig: RunHandoffConfig = {
+  mode: "manual",
+  provider: null,
+  baseBranch: null,
+  autoPublishBranch: false,
+  autoCreatePullRequest: false,
+  titleTemplate: null,
+  bodyTemplate: null
+};
+
+const defaultRunHandoffExecution: RunHandoffExecution = {
+  state: "idle",
+  failureReason: null,
+  attemptedAt: null,
+  completedAt: null
+};
 
 export interface IngestWebhookInput {
   endpointPath: string;
@@ -679,7 +699,7 @@ function normalizeStoredRunContext(metadata: Record<string, unknown> | null | un
     ? "project"
     : "ad_hoc";
 
-  return {
+  const parsed = runContextSchema.safeParse({
     kind,
     projectId,
     projectSlug,
@@ -691,7 +711,9 @@ function normalizeStoredRunContext(metadata: Record<string, unknown> | null | un
     values: typeof record.values === "object" && record.values && !Array.isArray(record.values)
       ? record.values as Record<string, unknown>
       : {}
-  };
+  });
+
+  return parsed.success ? parsed.data : createDefaultRunContext();
 }
 
 function resolveRunContext(
@@ -700,7 +722,7 @@ function resolveRunContext(
   fallbackMetadata: Record<string, unknown> | null | undefined = undefined
 ): Run["context"] {
   if (context) {
-    return {
+    return runContextSchema.parse({
       kind: context.kind ?? "ad_hoc",
       projectId: context.projectId ?? null,
       projectSlug: context.projectSlug ?? null,
@@ -710,7 +732,7 @@ function resolveRunContext(
       jobName: context.jobName ?? null,
       externalInput: context.externalInput ?? null,
       values: context.values ?? {}
-    };
+    });
   }
 
   if (metadata) {
@@ -732,6 +754,61 @@ function withRunContextMetadata(
     ...(metadata ?? {}),
     runContext: context
   };
+}
+
+function normalizeStoredRunHandoffConfig(
+  handoffConfig: Record<string, unknown> | null | undefined
+): RunHandoffConfig {
+  const parsed = runHandoffConfigSchema.safeParse(handoffConfig ?? defaultRunHandoffConfig);
+  return parsed.success ? parsed.data : defaultRunHandoffConfig;
+}
+
+function resolveRunHandoffConfig(
+  handoff: RunCreate["handoff"] | RunUpdate["handoff"] | undefined,
+  existingConfig: Record<string, unknown> | null | undefined = undefined
+): RunHandoffConfig {
+  if (handoff) {
+    return runHandoffConfigSchema.parse(handoff);
+  }
+
+  return normalizeStoredRunHandoffConfig(existingConfig);
+}
+
+function normalizeStoredRunHandoffExecution(
+  handoffExecution: Record<string, unknown> | null | undefined
+): RunHandoffExecution {
+  const parsed = runHandoffExecutionSchema.safeParse(handoffExecution ?? defaultRunHandoffExecution);
+  return parsed.success ? parsed.data : defaultRunHandoffExecution;
+}
+
+function summarizeCompletedTasks(tasksToSummarize: Task[]) {
+  const completedTasks = tasksToSummarize
+    .filter((task) => task.status === "completed")
+    .map((task) => task.title.trim())
+    .filter((title) => title.length > 0);
+
+  return completedTasks.length > 0 ? completedTasks.join(", ") : "No completed tasks recorded";
+}
+
+function summarizeValidationResults(validationsToSummarize: ValidationHistoryEntry[]) {
+  if (validationsToSummarize.length === 0) {
+    return "No validations recorded";
+  }
+
+  const passed = validationsToSummarize.filter((validation) => validation.status === "passed").length;
+  const failed = validationsToSummarize.filter((validation) => validation.status === "failed").length;
+  return `${passed} passed, ${failed} failed`;
+}
+
+function renderHandoffTemplate(
+  template: string | null | undefined,
+  values: Record<string, string>
+) {
+  if (!template) {
+    return null;
+  }
+
+  return template.replace(/\{([a-z_]+)\}/g, (_match, token) => values[token] ?? "");
 }
 
 function getArtifactStorageMetadata(metadata: Record<string, unknown>) {
@@ -846,7 +923,10 @@ function readWebhookBranch(payload: unknown) {
 export class ControlPlaneService {
   constructor(
     private readonly db: AppDb,
-    private readonly clock: Clock
+    private readonly clock: Clock,
+    private readonly dependencies: {
+      providerHandoff?: ProviderHandoffAdapter;
+    } = {}
   ) {}
 
   async listRepositories(access?: AccessBoundary) {
@@ -1437,6 +1517,7 @@ export class ControlPlaneService {
       ? 1
       : input.concurrencyCap;
     const context = resolveRunContext(input.context, input.metadata);
+    const handoff = resolveRunHandoffConfig(input.handoff);
 
     const [run] = await this.db.insert(runs).values({
       id,
@@ -1460,6 +1541,8 @@ export class ControlPlaneService {
       pullRequestStatus: null,
       pullRequestApprovalId: null,
       handoffStatus: "pending",
+      handoffConfig: handoff,
+      handoffExecution: defaultRunHandoffExecution,
       completedAt: null,
       context: input.context,
       metadata: withRunContextMetadata(input.metadata, context),
@@ -1564,6 +1647,13 @@ export class ControlPlaneService {
 
     try {
       const runContext: RunContext = {
+        kind: "ad_hoc",
+        projectId: null,
+        projectSlug: null,
+        projectName: null,
+        projectDescription: null,
+        jobId: null,
+        jobName: null,
         externalInput: {
           kind: "webhook",
           trigger: {
@@ -1601,6 +1691,7 @@ export class ControlPlaneService {
         budgetCostUsd: repeatableRun.execution.budgetCostUsd ?? undefined,
         concurrencyCap: repeatableRun.execution.concurrencyCap,
         policyProfile: repeatableRun.execution.policyProfile ?? undefined,
+        handoff: repeatableRun.execution.handoff,
         metadata: {
           ...repeatableRun.execution.metadata,
           repeatableRun: {
@@ -1652,7 +1743,14 @@ export class ControlPlaneService {
     }).where(eq(runs.id, runId)).returning();
 
     const repository = await this.assertRepositoryExists(existingRun.repositoryId, access);
-    return this.mapRun(expectPersistedRecord(run, "run"), repository.projectId ?? null);
+    const mappedRun = this.mapRun(expectPersistedRecord(run, "run"), repository.projectId ?? null);
+
+    if (mappedRun.status === "completed") {
+      await this.maybeExecuteAutoHandoff(mappedRun.id, access);
+      return this.getRun(mappedRun.id, access);
+    }
+
+    return mappedRun;
   }
 
   async updateRun(runId: string, input: RunUpdate, access?: AccessBoundary) {
@@ -1662,6 +1760,7 @@ export class ControlPlaneService {
     }
     const now = this.clock.now();
     const context = resolveRunContext(input.context, input.metadata, existingRun.metadata);
+    const handoff = resolveRunHandoffConfig(input.handoff, existingRun.handoffConfig);
 
     const [run] = await this.db.update(runs).set({
       projectId: input.projectId === undefined ? existingRun.projectId : input.projectId,
@@ -1675,6 +1774,7 @@ export class ControlPlaneService {
           : dollarsToCents(input.budgetCostUsd),
       concurrencyCap: input.concurrencyCap ?? existingRun.concurrencyCap,
       policyProfile: input.policyProfile === undefined ? existingRun.policyProfile : input.policyProfile,
+      handoffConfig: handoff,
       context: input.context === undefined ? existingRun.context : input.context,
       metadata: input.metadata === undefined
         ? withRunContextMetadata(existingRun.metadata, context)
@@ -4153,6 +4253,10 @@ export class ControlPlaneService {
         updatedAt: now
       }).where(eq(runs.id, runId));
     }
+
+    if (nextStatus === "completed") {
+      await this.maybeExecuteAutoHandoff(runId);
+    }
   }
 
   async reconcileRunExecutionState(runId: string, access?: AccessBoundary) {
@@ -4178,6 +4282,11 @@ export class ControlPlaneService {
             : runDetail.status;
 
     if (nextStatus === runDetail.status) {
+      if (runDetail.status === "completed") {
+        await this.maybeExecuteAutoHandoff(runId, access);
+        return this.getRun(runId, access);
+      }
+
       return runDetail;
     }
 
@@ -4188,7 +4297,286 @@ export class ControlPlaneService {
     }).where(eq(runs.id, runId)).returning();
 
     const repository = await this.assertRepositoryExists(runDetail.repositoryId, access);
-    return this.mapRun(expectPersistedRecord(updatedRun, "run"), repository.projectId ?? null);
+    const mappedRun = this.mapRun(expectPersistedRecord(updatedRun, "run"), repository.projectId ?? null);
+
+    if (mappedRun.status === "completed") {
+      await this.maybeExecuteAutoHandoff(runId, access);
+      return this.getRun(runId, access);
+    }
+
+    return mappedRun;
+  }
+
+  private async recordControlPlaneEvent(
+    definition: { eventType: ControlPlaneEvent["eventType"]; entityType: ControlPlaneEvent["entityType"] },
+    input: {
+      runId?: string | null;
+      entityId: string;
+      status: string;
+      summary: string;
+      metadata?: Record<string, unknown>;
+    }
+  ) {
+    const now = this.clock.now();
+    await this.db.insert(controlPlaneEvents).values({
+      id: crypto.randomUUID(),
+      runId: input.runId ?? null,
+      taskId: null,
+      agentId: null,
+      traceId: crypto.randomUUID(),
+      eventType: definition.eventType,
+      entityType: definition.entityType,
+      entityId: input.entityId,
+      status: input.status,
+      summary: input.summary,
+      actor: null,
+      metadata: input.metadata ?? {},
+      createdAt: now
+    });
+  }
+
+  private async updateRunHandoffExecutionState(
+    runId: string,
+    execution: Partial<RunHandoffExecution>
+  ) {
+    const existingRun = await this.assertRunExists(runId);
+    const nextExecution: RunHandoffExecution = {
+      ...normalizeStoredRunHandoffExecution(existingRun.handoffExecution),
+      ...execution
+    };
+
+    await this.db.update(runs).set({
+      handoffExecution: nextExecution,
+      updatedAt: this.clock.now()
+    }).where(eq(runs.id, runId));
+  }
+
+  private async resolveRunWorkspacePath(runId: string, repository: { localPath: string | null }) {
+    const assignmentRows = await this.db.select().from(workerDispatchAssignments)
+      .where(eq(workerDispatchAssignments.runId, runId))
+      .orderBy(sql`${workerDispatchAssignments.updatedAt} desc`);
+
+    for (const assignment of assignmentRows) {
+      try {
+        await access(assignment.worktreePath);
+        return assignment.worktreePath;
+      } catch {
+        continue;
+      }
+    }
+
+    if (repository.localPath) {
+      await access(repository.localPath);
+      return repository.localPath;
+    }
+
+    throw new Error("auto handoff requires an accessible workspace path");
+  }
+
+  private async listRunValidations(runId: string, access?: AccessBoundary) {
+    return this.listValidations({ runId }, access);
+  }
+
+  private async pickApprovedHandoffApprovalId(
+    runId: string,
+    kind: Approval["kind"],
+    access?: AccessBoundary
+  ) {
+    const approvalsForRun = await this.listApprovals(runId, access);
+
+    const approved = approvalsForRun
+      .filter((approval) => approval.kind === kind && approval.status === "approved")
+      .sort((left, right) => right.updatedAt.getTime() - left.updatedAt.getTime());
+
+    return approved[0]?.id;
+  }
+
+  private buildAutoHandoffPullRequestContent(
+    runDetail: Run,
+    runTasks: Task[],
+    repository: {
+      defaultBranch: string;
+    },
+    handoff: RunHandoffConfig
+  ) {
+    const baseBranch = handoff.baseBranch ?? repository.defaultBranch;
+    const branchName = runDetail.publishedBranch ?? runDetail.branchName ?? repository.defaultBranch;
+    const completedTasks = summarizeCompletedTasks(runTasks);
+
+    return this.listRunValidations(runDetail.id).then((validations) => {
+      const validationSummary = summarizeValidationResults(validations);
+      const templateValues = {
+        run_goal: runDetail.goal,
+        branch_name: branchName,
+        base_branch: baseBranch,
+        completed_tasks: completedTasks,
+        validation_summary: validationSummary
+      };
+
+      const title = renderHandoffTemplate(handoff.titleTemplate, templateValues)
+        ?? runDetail.goal;
+      const body = renderHandoffTemplate(handoff.bodyTemplate, templateValues)
+        ?? [
+          `## Summary`,
+          runDetail.goal,
+          ``,
+          `## Completed Tasks`,
+          completedTasks.split(", ").map((taskTitle) => `- ${taskTitle}`).join("\n"),
+          ``,
+          `## Validation`,
+          `- ${validationSummary}`
+        ].join("\n");
+
+      return {
+        baseBranch,
+        branchName,
+        title,
+        body
+      };
+    });
+  }
+
+  async maybeExecuteAutoHandoff(runId: string, access?: AccessBoundary) {
+    const runRecord = await this.assertRunExists(runId, access);
+    const repository = await this.assertRepositoryExists(runRecord.repositoryId, access);
+    const runDetail = this.mapRun(runRecord, repository.projectId ?? null);
+    const runTasks = (await this.db.select().from(tasks).where(eq(tasks.runId, runId)).orderBy(asc(tasks.createdAt)))
+      .map((task): Task => ({
+        ...task,
+        status: task.status as Task["status"]
+      }));
+    const handoff = runDetail.handoff;
+    const handoffExecution = runDetail.handoffExecution;
+
+    if (runDetail.status !== "completed" || handoff.mode !== "auto") {
+      return runDetail;
+    }
+
+    if (handoffExecution.state === "completed" || handoffExecution.state === "in_progress" || handoffExecution.state === "failed") {
+      return runDetail;
+    }
+
+    if (handoff.provider !== "github") {
+      await this.updateRunHandoffExecutionState(runId, {
+        state: "failed",
+        failureReason: "auto handoff currently supports github only",
+        attemptedAt: this.clock.now(),
+        completedAt: null
+      });
+      return this.getRun(runId, access);
+    }
+
+    const adapter = this.dependencies.providerHandoff;
+
+    if (!adapter) {
+      await this.updateRunHandoffExecutionState(runId, {
+        state: "failed",
+        failureReason: "provider handoff adapter is not configured",
+        attemptedAt: this.clock.now(),
+        completedAt: null
+      });
+      return this.getRun(runId, access);
+    }
+
+    const attemptedAt = this.clock.now();
+    await this.updateRunHandoffExecutionState(runId, {
+      state: "in_progress",
+      failureReason: null,
+      attemptedAt,
+      completedAt: null
+    });
+    await this.recordControlPlaneEvent({
+      eventType: "run.auto_handoff_started",
+      entityType: "run"
+    }, {
+      runId,
+      entityId: runId,
+      status: "in_progress",
+      summary: "Automatic handoff started"
+    });
+
+    try {
+      const workspacePath = await this.resolveRunWorkspacePath(runId, repository);
+      const { baseBranch, branchName, title, body } = await this.buildAutoHandoffPullRequestContent(runDetail, runTasks, repository, handoff);
+      const patchApprovalId = await this.pickApprovedHandoffApprovalId(runId, "patch", access);
+      const mergeApprovalId = await this.pickApprovedHandoffApprovalId(runId, "merge", access);
+
+      if (handoff.autoPublishBranch && !runDetail.publishedBranch) {
+        await adapter.publishBranch({
+          workspacePath,
+          branchName,
+          remoteName: "origin"
+        });
+        await this.publishRunBranch(runId, {
+          branchName,
+          publishedBy: "system:auto-handoff",
+          remoteName: "origin",
+          ...(patchApprovalId ? { approvalId: patchApprovalId } : {})
+        }, access);
+      }
+
+      if (handoff.autoCreatePullRequest && !runDetail.pullRequestUrl) {
+        const pullRequest = await adapter.createGitHubPullRequest({
+          workspacePath,
+          baseBranch,
+          headBranch: branchName,
+          title,
+          body
+        });
+
+        await this.createRunPullRequestHandoff(runId, {
+          title,
+          body,
+          createdBy: "system:auto-handoff",
+          provider: "github",
+          baseBranch,
+          headBranch: branchName,
+          url: pullRequest.url,
+          ...(pullRequest.number ? { number: pullRequest.number } : {}),
+          status: pullRequest.status,
+          ...(mergeApprovalId ? { approvalId: mergeApprovalId } : {})
+        }, access);
+      }
+
+      const completedAt = this.clock.now();
+      await this.updateRunHandoffExecutionState(runId, {
+        state: "completed",
+        failureReason: null,
+        attemptedAt,
+        completedAt
+      });
+      await this.recordControlPlaneEvent({
+        eventType: "run.auto_handoff_completed",
+        entityType: "run"
+      }, {
+        runId,
+        entityId: runId,
+        status: "completed",
+        summary: "Automatic handoff completed"
+      });
+    } catch (error) {
+      const failureReason = error instanceof Error ? error.message : String(error);
+      await this.updateRunHandoffExecutionState(runId, {
+        state: "failed",
+        failureReason,
+        attemptedAt,
+        completedAt: null
+      });
+      await this.recordControlPlaneEvent({
+        eventType: "run.auto_handoff_failed",
+        entityType: "run"
+      }, {
+        runId,
+        entityId: runId,
+        status: "failed",
+        summary: "Automatic handoff failed",
+        metadata: {
+          reason: failureReason
+        }
+      });
+    }
+
+    return this.getRun(runId, access);
   }
 
   private mapSession(session: typeof sessions.$inferSelect): Session {
@@ -4676,6 +5064,8 @@ export class ControlPlaneService {
 
   private mapRun(run: typeof runs.$inferSelect, repositoryProjectId: string | null = null): Run {
     const context = normalizeStoredRunContext(run.metadata);
+    const handoff = normalizeStoredRunHandoffConfig(run.handoffConfig);
+    const handoffExecution = normalizeStoredRunHandoffExecution(run.handoffExecution);
     const runProjectId = run.projectId ?? null;
     return {
       ...run,
@@ -4686,6 +5076,8 @@ export class ControlPlaneService {
       pullRequestStatus: run.pullRequestStatus as Run["pullRequestStatus"],
       pullRequestApprovalId: run.pullRequestApprovalId ?? null,
       handoffStatus: run.handoffStatus as Run["handoffStatus"],
+      handoff,
+      handoffExecution,
       context,
       jobScope: this.resolveRunJobScope(runProjectId, repositoryProjectId)
     };

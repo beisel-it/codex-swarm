@@ -73,6 +73,8 @@ const statements = [
     pull_request_status text,
     pull_request_approval_id text,
     handoff_status text not null default 'pending',
+    handoff_config jsonb not null default '{"mode":"manual","provider":null,"baseBranch":null,"autoPublishBranch":false,"autoCreatePullRequest":false,"titleTemplate":null,"bodyTemplate":null}'::jsonb,
+    handoff_execution jsonb not null default '{"state":"idle","failureReason":null,"attemptedAt":null,"completedAt":null}'::jsonb,
     completed_at timestamptz,
     metadata jsonb not null default '{}'::jsonb,
     context jsonb not null default '{"externalInput":null,"values":{}}'::jsonb,
@@ -357,6 +359,8 @@ async function main() {
   await db.execute(sql.raw("alter table runs add column if not exists pull_request_status text"));
   await db.execute(sql.raw("alter table runs add column if not exists pull_request_approval_id text references approvals(id)"));
   await db.execute(sql.raw("alter table runs add column if not exists handoff_status text not null default 'pending'"));
+  await db.execute(sql.raw("alter table runs add column if not exists handoff_config jsonb not null default '{\"mode\":\"manual\",\"provider\":null,\"baseBranch\":null,\"autoPublishBranch\":false,\"autoCreatePullRequest\":false,\"titleTemplate\":null,\"bodyTemplate\":null}'::jsonb"));
+  await db.execute(sql.raw("alter table runs add column if not exists handoff_execution jsonb not null default '{\"state\":\"idle\",\"failureReason\":null,\"attemptedAt\":null,\"completedAt\":null}'::jsonb"));
   await db.execute(sql.raw("alter table runs add column if not exists completed_at timestamptz"));
   await db.execute(sql.raw("alter table runs add column if not exists context jsonb not null default '{\"externalInput\":null,\"values\":{}}'::jsonb"));
   await db.execute(sql.raw(`create table if not exists repeatable_run_definitions (

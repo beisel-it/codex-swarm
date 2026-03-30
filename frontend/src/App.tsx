@@ -16,7 +16,6 @@ import type {
 import { buildAgentTranscriptTargets, chooseTranscriptSessionId } from './agent-observability'
 import { RepeatableRunsPanel } from './repeatable-runs-panel'
 import { buildSeedProjects, deriveAdHocWorkspace, deriveProjectSummaries, type ProjectRecord } from './projects'
-import { RepeatableRunsPanel } from './repeatable-runs-panel'
 import { useTheme } from './theme'
 
 type ViewMode = 'projects' | 'board' | 'detail' | 'review' | 'admin'
@@ -24,6 +23,8 @@ type RepositoryProvider = 'github' | 'gitlab' | 'local' | 'other'
 type RepositoryTrustLevel = 'trusted' | 'sandboxed' | 'restricted'
 type PullRequestStatus = 'draft' | 'open' | 'merged' | 'closed'
 type HandoffStatus = 'pending' | 'branch_published' | 'pr_open' | 'manual_handoff' | 'merged' | 'closed'
+type RunHandoffMode = 'manual' | 'auto'
+type HandoffExecutionState = 'idle' | 'pending' | 'in_progress' | 'failed' | 'completed'
 type WorkerNodeStatus = 'online' | 'degraded' | 'offline'
 type WorkerNodeDrainState = 'active' | 'draining' | 'drained'
 type WorkerSessionState = 'pending' | 'active' | 'stopped' | 'failed' | 'stale' | 'archived'
@@ -263,6 +264,21 @@ type Run = {
   pullRequestNumber: number | null
   pullRequestStatus: PullRequestStatus | null
   handoffStatus: HandoffStatus
+  handoff: {
+    mode: RunHandoffMode
+    provider: 'github' | null
+    baseBranch: string | null
+    autoPublishBranch: boolean
+    autoCreatePullRequest: boolean
+    titleTemplate: string | null
+    bodyTemplate: string | null
+  }
+  handoffExecution: {
+    state: HandoffExecutionState
+    failureReason: string | null
+    attemptedAt: string | null
+    completedAt: string | null
+  }
   completedAt?: string | null
   createdBy: string
   createdAt: string
@@ -780,6 +796,21 @@ const mockAuditExport: RunAuditExport = {
     pullRequestNumber: null,
     pullRequestStatus: null,
     handoffStatus: 'pending',
+    handoff: {
+      mode: 'manual',
+      provider: null,
+      baseBranch: null,
+      autoPublishBranch: false,
+      autoCreatePullRequest: false,
+      titleTemplate: null,
+      bodyTemplate: null,
+    },
+    handoffExecution: {
+      state: 'idle',
+      failureReason: null,
+      attemptedAt: null,
+      completedAt: null,
+    },
     completedAt: null,
     createdBy: 'tech-lead',
     createdAt: '2026-03-28T10:00:00.000Z',
@@ -1049,6 +1080,21 @@ const mockData: SwarmData = {
       pullRequestNumber: 42,
       pullRequestStatus: 'open',
       handoffStatus: 'pr_open',
+      handoff: {
+        mode: 'auto',
+        provider: 'github',
+        baseBranch: 'main',
+        autoPublishBranch: true,
+        autoCreatePullRequest: true,
+        titleTemplate: 'Provider handoff: {run_goal}',
+        bodyTemplate: 'Completed tasks: {completed_tasks}',
+      },
+      handoffExecution: {
+        state: 'completed',
+        failureReason: null,
+        attemptedAt: '2026-03-28T20:46:00.000Z',
+        completedAt: '2026-03-28T20:48:00.000Z',
+      },
       completedAt: null,
       createdBy: 'tech-lead',
       createdAt: '2026-03-28T08:15:00.000Z',
@@ -1072,6 +1118,21 @@ const mockData: SwarmData = {
       pullRequestNumber: null,
       pullRequestStatus: null,
       handoffStatus: 'pending',
+      handoff: {
+        mode: 'manual',
+        provider: null,
+        baseBranch: null,
+        autoPublishBranch: false,
+        autoCreatePullRequest: false,
+        titleTemplate: null,
+        bodyTemplate: null,
+      },
+      handoffExecution: {
+        state: 'idle',
+        failureReason: null,
+        attemptedAt: null,
+        completedAt: null,
+      },
       completedAt: null,
       createdBy: 'tech-lead',
       createdAt: '2026-03-27T14:10:00.000Z',
@@ -2409,6 +2470,7 @@ async function createRun(input: {
   goal: string
   branchName?: string
   concurrencyCap?: number
+  handoff?: Run['handoff']
   metadata?: Record<string, unknown>
 }): Promise<Run> {
   return requestJson<Run>('/api/v1/runs', {
@@ -2423,6 +2485,7 @@ async function updateRun(
     goal?: string
     branchName?: string | null
     concurrencyCap?: number
+    handoff?: Run['handoff']
     metadata?: Record<string, unknown>
   },
 ): Promise<Run> {
@@ -2737,6 +2800,16 @@ function describeRepositoryOnboarding(repository: Repository | null) {
 }
 
 function describeHandoff(run: Run) {
+  if (run.handoffExecution.state === 'failed') {
+    return run.handoffExecution.failureReason
+      ? `Auto handoff failed: ${run.handoffExecution.failureReason}`
+      : 'Auto handoff failed before the PR was created.'
+  }
+
+  if (run.handoffExecution.state === 'in_progress') {
+    return 'Automatic handoff is currently publishing the branch or creating the pull request.'
+  }
+
   if (run.pullRequestUrl) {
     return `PR #${run.pullRequestNumber ?? 'pending'} is ${formatLabel(run.pullRequestStatus ?? 'open')}.`
   }
@@ -2924,6 +2997,12 @@ function App() {
   const [runDraftGoal, setRunDraftGoal] = useState(defaultTeamTemplates[0]?.suggestedGoal ?? 'Ship the next iteration through codex-swarm.')
   const [runDraftBranchName, setRunDraftBranchName] = useState('main')
   const [runDraftConcurrencyCap, setRunDraftConcurrencyCap] = useState(String(defaultTeamTemplates[0]?.suggestedConcurrencyCap ?? 1))
+  const [runDraftHandoffMode, setRunDraftHandoffMode] = useState<RunHandoffMode>('manual')
+  const [runDraftHandoffBaseBranch, setRunDraftHandoffBaseBranch] = useState('')
+  const [runDraftAutoPublishBranch, setRunDraftAutoPublishBranch] = useState(true)
+  const [runDraftAutoCreatePullRequest, setRunDraftAutoCreatePullRequest] = useState(true)
+  const [runDraftHandoffTitleTemplate, setRunDraftHandoffTitleTemplate] = useState('Provider handoff: {run_goal}')
+  const [runDraftHandoffBodyTemplate, setRunDraftHandoffBodyTemplate] = useState('## Summary\n{run_goal}\n\n## Completed Tasks\n{completed_tasks}\n\n## Validation\n{validation_summary}')
   const [editingRunId, setEditingRunId] = useState<string | null>(null)
   const [taskDraftTitle, setTaskDraftTitle] = useState('')
   const [taskDraftDescription, setTaskDraftDescription] = useState('')
@@ -3744,6 +3823,32 @@ function App() {
     setErrorText('')
   }
 
+  function buildRunHandoffDraft(): Run['handoff'] {
+    return {
+      mode: runDraftHandoffMode,
+      provider: runDraftHandoffMode === 'auto' ? 'github' : null,
+      baseBranch: runDraftHandoffBaseBranch.trim() || null,
+      autoPublishBranch: runDraftHandoffMode === 'auto' ? runDraftAutoPublishBranch : false,
+      autoCreatePullRequest: runDraftHandoffMode === 'auto' ? runDraftAutoCreatePullRequest : false,
+      titleTemplate: runDraftHandoffMode === 'auto' ? (runDraftHandoffTitleTemplate.trim() || null) : null,
+      bodyTemplate: runDraftHandoffMode === 'auto' ? (runDraftHandoffBodyTemplate.trim() || null) : null,
+    }
+  }
+
+  function resetRunDraft() {
+    setEditingRunId(null)
+    setSelectedTeamTemplateId(teamTemplates[0]?.id ?? '')
+    setRunDraftGoal(teamTemplates[0]?.suggestedGoal ?? 'Ship the next iteration through codex-swarm.')
+    setRunDraftBranchName('main')
+    setRunDraftConcurrencyCap(String(teamTemplates[0]?.suggestedConcurrencyCap ?? 1))
+    setRunDraftHandoffMode('manual')
+    setRunDraftHandoffBaseBranch('')
+    setRunDraftAutoPublishBranch(true)
+    setRunDraftAutoCreatePullRequest(true)
+    setRunDraftHandoffTitleTemplate('Provider handoff: {run_goal}')
+    setRunDraftHandoffBodyTemplate('## Summary\n{run_goal}\n\n## Completed Tasks\n{completed_tasks}\n\n## Validation\n{validation_summary}')
+  }
+
   async function handleCreateRun(autoStart: boolean) {
     if (!runDraftRepositoryId || !runDraftGoal.trim()) {
       setErrorText('Repository and run goal are required.')
@@ -3761,6 +3866,7 @@ function App() {
             goal: runDraftGoal.trim(),
             branchName: runDraftBranchName.trim() || null,
             concurrencyCap: parsedConcurrencyCap,
+            handoff: buildRunHandoffDraft(),
             metadata,
           })
         : await createRun({
@@ -3768,6 +3874,7 @@ function App() {
             goal: runDraftGoal.trim(),
             branchName: runDraftBranchName.trim() || undefined,
             concurrencyCap: parsedConcurrencyCap,
+            handoff: buildRunHandoffDraft(),
             metadata,
           })
 
@@ -3775,7 +3882,7 @@ function App() {
         await startRun(run.id)
       }
 
-      setEditingRunId(null)
+      resetRunDraft()
       await refreshSwarmData(run.id)
     } catch (error) {
       setErrorText(error instanceof Error ? error.message : `Unable to ${editingRunId ? 'update' : 'create'} run`)
@@ -3878,6 +3985,12 @@ function App() {
     setRunDraftGoal(run.goal)
     setRunDraftBranchName(run.branchName ?? '')
     setRunDraftConcurrencyCap(String(run.concurrencyCap ?? 1))
+    setRunDraftHandoffMode(run.handoff.mode)
+    setRunDraftHandoffBaseBranch(run.handoff.baseBranch ?? '')
+    setRunDraftAutoPublishBranch(run.handoff.autoPublishBranch)
+    setRunDraftAutoCreatePullRequest(run.handoff.autoCreatePullRequest)
+    setRunDraftHandoffTitleTemplate(run.handoff.titleTemplate ?? 'Provider handoff: {run_goal}')
+    setRunDraftHandoffBodyTemplate(run.handoff.bodyTemplate ?? '## Summary\n{run_goal}\n\n## Completed Tasks\n{completed_tasks}\n\n## Validation\n{validation_summary}')
     setSelectedTeamTemplateId(getRunTemplateId(run) || (teamTemplates[0]?.id ?? ''))
     setShowRunControls(true)
     setRunFormNotice(`Editing ${run.goal}`)
@@ -4434,18 +4547,57 @@ function App() {
                       onChange={(event) => setRunDraftConcurrencyCap(event.target.value)}
                     />
                   </label>
+                  <label className="control-field">
+                    <span>Handoff mode</span>
+                    <select value={runDraftHandoffMode} onChange={(event) => setRunDraftHandoffMode(event.target.value as RunHandoffMode)}>
+                      <option value="manual">Manual</option>
+                      <option value="auto">Auto GitHub PR</option>
+                    </select>
+                  </label>
+                  {runDraftHandoffMode === 'auto' ? (
+                    <>
+                      <label className="control-field">
+                        <span>Base branch</span>
+                        <input value={runDraftHandoffBaseBranch} onChange={(event) => setRunDraftHandoffBaseBranch(event.target.value)} placeholder="main" />
+                      </label>
+                      <label className="project-checkbox">
+                        <input
+                          type="checkbox"
+                          checked={runDraftAutoPublishBranch}
+                          onChange={(event) => setRunDraftAutoPublishBranch(event.target.checked)}
+                        />
+                        <span>
+                          <strong>Auto publish branch</strong>
+                          <em>Push the branch before opening the PR</em>
+                        </span>
+                      </label>
+                      <label className="project-checkbox">
+                        <input
+                          type="checkbox"
+                          checked={runDraftAutoCreatePullRequest}
+                          onChange={(event) => setRunDraftAutoCreatePullRequest(event.target.checked)}
+                        />
+                        <span>
+                          <strong>Auto create PR</strong>
+                          <em>Use GitHub CLI on the host to open the pull request</em>
+                        </span>
+                      </label>
+                      <label className="control-field">
+                        <span>PR title template</span>
+                        <input value={runDraftHandoffTitleTemplate} onChange={(event) => setRunDraftHandoffTitleTemplate(event.target.value)} />
+                      </label>
+                      <label className="control-field">
+                        <span>PR body template</span>
+                        <textarea value={runDraftHandoffBodyTemplate} onChange={(event) => setRunDraftHandoffBodyTemplate(event.target.value)} rows={6} />
+                      </label>
+                    </>
+                  ) : null}
                   <div className="action-row">
                     {editingRunId ? (
                       <button
                         type="button"
                         className="action-button action-button-secondary"
-                        onClick={() => {
-                          setEditingRunId(null)
-                          setSelectedTeamTemplateId(teamTemplates[0]?.id ?? '')
-                          setRunDraftGoal(teamTemplates[0]?.suggestedGoal ?? 'Ship the next iteration through codex-swarm.')
-                          setRunDraftBranchName('main')
-                          setRunDraftConcurrencyCap(String(teamTemplates[0]?.suggestedConcurrencyCap ?? 1))
-                        }}
+                        onClick={() => resetRunDraft()}
                         disabled={actionPending}
                       >
                         Cancel

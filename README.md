@@ -133,7 +133,7 @@ This repo also ships the assets needed to operate codex-swarm from Codex:
 4. Use run detail to inspect placement, transcript history, artifacts, and recovery clues when a slice stalls or fails.
 5. Use review to resolve approvals against diff evidence, validation status, and artifact output.
 6. Use admin to confirm governance posture, approval provenance, retention state, and audit export evidence.
-7. Publish the branch and attach provider PR metadata or a manual handoff artifact when the run is ready for external review.
+7. Publish the branch and attach provider PR metadata or a manual handoff artifact when the run is ready for external review. Runs can also opt into automatic branch publish and GitHub PR creation at completion time.
 
 The end-to-end visual version of this flow is documented in [docs/operator-journey.md](./docs/operator-journey.md).
 
@@ -153,7 +153,11 @@ Important local environment values include:
 
 - `DATABASE_URL`
 - `DEV_AUTH_TOKEN`
+- `GIT_COMMAND`
+- `GITHUB_CLI_COMMAND`
 - artifact storage settings for your deployment mode
+
+Automatic GitHub handoff uses the local `git` and `gh` CLIs from the API host. `gh` must already be authenticated for the target repository if a run is configured with automatic handoff enabled.
 
 If you are running remote or shared-worker deployments, also set:
 

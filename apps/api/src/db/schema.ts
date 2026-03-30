@@ -71,6 +71,21 @@ export const runs = pgTable("runs", {
   pullRequestStatus: text("pull_request_status"),
   pullRequestApprovalId: text("pull_request_approval_id"),
   handoffStatus: text("handoff_status").notNull().default("pending"),
+  handoffConfig: jsonb("handoff_config").$type<Record<string, unknown>>().notNull().default({
+    mode: "manual",
+    provider: null,
+    baseBranch: null,
+    autoPublishBranch: false,
+    autoCreatePullRequest: false,
+    titleTemplate: null,
+    bodyTemplate: null
+  }),
+  handoffExecution: jsonb("handoff_execution").$type<Record<string, unknown>>().notNull().default({
+    state: "idle",
+    failureReason: null,
+    attemptedAt: null,
+    completedAt: null
+  }),
   completedAt: timestamp("completed_at", { withTimezone: true }),
   metadata: jsonb("metadata").$type<Record<string, unknown>>().notNull().default({}),
   context: jsonb("context").$type<Record<string, unknown>>().notNull().default({

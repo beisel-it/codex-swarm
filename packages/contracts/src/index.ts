@@ -12,6 +12,9 @@ export const repositoryProviders = ["github", "gitlab", "local", "other"] as con
 export const repositoryTrustLevels = ["trusted", "sandboxed", "restricted"] as const;
 export const pullRequestStatuses = ["draft", "open", "merged", "closed"] as const;
 export const handoffStatuses = ["pending", "branch_published", "pr_open", "manual_handoff", "merged", "closed"] as const;
+export const runHandoffModes = ["manual", "auto"] as const;
+export const autoHandoffProviders = ["github"] as const;
+export const handoffExecutionStates = ["idle", "pending", "in_progress", "failed", "completed"] as const;
 export const runContextKinds = ["project", "ad_hoc"] as const;
 export const workerSessionStates = ["pending", "active", "stopped", "failed", "stale", "archived"] as const;
 export const agentObservabilityModes = ["session", "transcript_visibility", "unavailable"] as const;
@@ -37,6 +40,9 @@ export const controlPlaneEventTypes = [
   "message.created",
   "repository.created",
   "run.audit_exported",
+  "run.auto_handoff_completed",
+  "run.auto_handoff_failed",
+  "run.auto_handoff_started",
   "run.branch_published",
   "run.completed",
   "run.created",
@@ -200,33 +206,6 @@ export const webhookTriggerConfigSchema = z.object({
   metadata: jsonRecordSchema.default({})
 });
 
-export const repeatableRunExecutionSchema = z.object({
-  goal: z.string().min(1),
-  branchName: z.string().min(1).nullable().default(null),
-  planArtifactPath: z.string().min(1).nullable().default(null),
-  budgetTokens: z.number().int().positive().nullable().default(null),
-  budgetCostUsd: z.number().nonnegative().nullable().default(null),
-  concurrencyCap: z.number().int().positive().default(1),
-  policyProfile: z.string().min(1).nullable().default(null),
-  metadata: jsonRecordSchema.default({})
-});
-
-export const repeatableRunDefinitionCreateSchema = z.object({
-  repositoryId: z.uuid(),
-  name: z.string().min(1),
-  description: z.string().min(1).nullable().default(null),
-  status: z.enum(repeatableRunStatuses).default("active"),
-  execution: repeatableRunExecutionSchema
-});
-
-export const repeatableRunDefinitionSchema = repeatableRunDefinitionCreateSchema.extend({
-  id: z.uuid(),
-  workspaceId: z.string().min(1),
-  teamId: z.string().min(1),
-  createdAt: z.date(),
-  updatedAt: z.date()
-});
-
 export const repeatableRunTriggerCreateSchema = z.discriminatedUnion("kind", [
   z.object({
     repeatableRunId: z.uuid(),
@@ -337,6 +316,115 @@ export const runContextSchema = z.object({
   }
 });
 
+const handoffTemplateTokenPattern = /\{([a-z_]+)\}/g;
+const allowedHandoffTemplateTokens = new Set([
+  "run_goal",
+  "branch_name",
+  "base_branch",
+  "completed_tasks",
+  "validation_summary"
+]);
+
+function validateHandoffTemplate(
+  value: string | null | undefined,
+  path: (string | number)[],
+  ctx: z.RefinementCtx
+) {
+  if (!value) {
+    return;
+  }
+
+  for (const match of value.matchAll(handoffTemplateTokenPattern)) {
+    const token = match[1];
+
+    if (!token || allowedHandoffTemplateTokens.has(token)) {
+      continue;
+    }
+
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path,
+      message: `unsupported handoff template token ${token}`
+    });
+  }
+}
+
+export const runHandoffConfigSchema = z.object({
+  mode: z.enum(runHandoffModes).default("manual"),
+  provider: z.enum(autoHandoffProviders).nullable().default(null),
+  baseBranch: z.string().min(1).nullable().default(null),
+  autoPublishBranch: z.boolean().default(false),
+  autoCreatePullRequest: z.boolean().default(false),
+  titleTemplate: z.string().min(1).nullable().default(null),
+  bodyTemplate: z.string().min(1).nullable().default(null)
+}).superRefine((value, ctx) => {
+  if (value.mode === "manual") {
+    return;
+  }
+
+  if (value.provider !== "github") {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["provider"],
+      message: "auto handoff currently supports github only"
+    });
+  }
+
+  if (!value.autoPublishBranch && !value.autoCreatePullRequest) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["autoCreatePullRequest"],
+      message: "auto handoff requires autoPublishBranch or autoCreatePullRequest"
+    });
+  }
+
+  validateHandoffTemplate(value.titleTemplate, ["titleTemplate"], ctx);
+  validateHandoffTemplate(value.bodyTemplate, ["bodyTemplate"], ctx);
+});
+
+export const runHandoffExecutionSchema = z.object({
+  state: z.enum(handoffExecutionStates).default("idle"),
+  failureReason: z.string().min(1).nullable().default(null),
+  attemptedAt: z.coerce.date().nullable().default(null),
+  completedAt: z.coerce.date().nullable().default(null)
+});
+
+export const repeatableRunExecutionSchema = z.object({
+  goal: z.string().min(1),
+  branchName: z.string().min(1).nullable().default(null),
+  planArtifactPath: z.string().min(1).nullable().default(null),
+  budgetTokens: z.number().int().positive().nullable().default(null),
+  budgetCostUsd: z.number().nonnegative().nullable().default(null),
+  concurrencyCap: z.number().int().positive().default(1),
+  policyProfile: z.string().min(1).nullable().default(null),
+  handoff: runHandoffConfigSchema.default({
+    mode: "manual",
+    provider: null,
+    baseBranch: null,
+    autoPublishBranch: false,
+    autoCreatePullRequest: false,
+    titleTemplate: null,
+    bodyTemplate: null
+  }),
+  metadata: jsonRecordSchema.default({})
+});
+
+export const repeatableRunDefinitionCreateSchema = z.object({
+  repositoryId: z.uuid(),
+  name: z.string().min(1),
+  description: z.string().min(1).nullable().default(null),
+  status: z.enum(repeatableRunStatuses).default("active"),
+  execution: repeatableRunExecutionSchema
+});
+
+export const repeatableRunDefinitionSchema = repeatableRunDefinitionCreateSchema.extend({
+  id: z.uuid(),
+  workspaceId: z.string().min(1),
+  teamId: z.string().min(1),
+  createdAt: z.date(),
+  updatedAt: z.date()
+});
+
 export const runCreateSchema = z.object({
   repositoryId: z.uuid(),
   projectId: z.uuid().nullable().optional(),
@@ -347,6 +435,15 @@ export const runCreateSchema = z.object({
   budgetCostUsd: z.number().nonnegative().optional(),
   concurrencyCap: z.number().int().positive().default(1),
   policyProfile: z.string().min(1).optional(),
+  handoff: runHandoffConfigSchema.default({
+    mode: "manual",
+    provider: null,
+    baseBranch: null,
+    autoPublishBranch: false,
+    autoCreatePullRequest: false,
+    titleTemplate: null,
+    bodyTemplate: null
+  }),
   context: runContextSchema.default({
     kind: "ad_hoc",
     projectId: null,
@@ -369,6 +466,7 @@ export const runUpdateSchema = z.object({
   budgetCostUsd: z.number().positive().nullable().optional(),
   concurrencyCap: z.number().int().positive().optional(),
   policyProfile: z.string().min(1).nullable().optional(),
+  handoff: runHandoffConfigSchema.optional(),
   context: runCreateSchema.shape.context.optional(),
   metadata: z.record(z.string(), z.unknown()).optional()
 }).refine((value) => Object.keys(value).length > 0, {
@@ -509,6 +607,8 @@ export const runSchema = runCreateSchema.extend({
   pullRequestStatus: z.enum(pullRequestStatuses).nullable(),
   pullRequestApprovalId: z.uuid().nullable(),
   handoffStatus: z.enum(handoffStatuses),
+  handoff: runHandoffConfigSchema,
+  handoffExecution: runHandoffExecutionSchema,
   completedAt: z.date().nullable(),
   context: runCreateSchema.shape.context,
   jobScope: runJobScopeSchema.optional(),
@@ -1476,6 +1576,8 @@ export type InboundWebhookEventEnvelope = z.infer<typeof inboundWebhookEventEnve
 export type InboundExternalEventEnvelope = z.infer<typeof inboundExternalEventEnvelopeSchema>;
 export type RunExternalInputContext = z.infer<typeof runExternalInputContextSchema>;
 export type RunContext = z.infer<typeof runContextSchema>;
+export type RunHandoffConfig = z.infer<typeof runHandoffConfigSchema>;
+export type RunHandoffExecution = z.infer<typeof runHandoffExecutionSchema>;
 export type RunCreateInput = z.input<typeof runCreateSchema>;
 export type RunUpdateInput = z.input<typeof runUpdateSchema>;
 export type RunStatusUpdateInput = z.infer<typeof runStatusUpdateSchema>;

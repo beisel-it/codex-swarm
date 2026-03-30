@@ -15,9 +15,11 @@ Users begin by selecting or onboarding a repository. Repository state includes:
 - governance/sensitivity defaults
 - publication and pull-request handoff state
 
-Codex Swarm currently supports a two-step review handoff: publish the run branch
-and then attach provider PR metadata or a manual handoff artifact. The product
-tracks that handoff state explicitly in the run and review surfaces.
+Codex Swarm supports a two-step review handoff: publish the run branch and then
+attach provider PR metadata or a manual handoff artifact. Runs can also opt
+into automatic GitHub handoff, which publishes the branch and opens the pull
+request after the run is complete. The product tracks handoff configuration,
+execution progress, and failure state explicitly in the run and review surfaces.
 
 ### 2. Create and monitor a run
 
