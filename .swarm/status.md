@@ -23,6 +23,7 @@
 - the Projects workspace now reads project inventory from the API as the source of truth, removes the old seed/local fallback that could invent phantom projects, and persists repository-to-project assignment when creating a project from the UI
 - frontend runtime config loading is now hardened for preview deployments: the app consumes `window.__CODEX_SWARM_CONFIG__` on initial load, can refresh from `runtime-config.json` with a `runtime-config.js` fallback, and the runtime-config writer now sources tailnet env defaults so manual preview/build starts no longer silently ship stale API tokens
 - project automation webhook setup now uses server-generated immutable endpoint paths, keeps the persisted trigger model generic, and exposes GitHub-specific affordances only as an opt-in UI preset with collapsed optional filter/security sections instead of a flat GitHub-biased form
+- the public README screenshot set now uses current staging captures and the shipped route structure, replacing the old mobile-heavy board/run-detail/admin shot list with desktop-only Projects, Project Runs, Project Automation, Ad-Hoc Runs, Run Board, Run Lifecycle, and Settings surfaces
 
 ## Current Validation
 

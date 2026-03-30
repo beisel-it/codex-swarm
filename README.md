@@ -40,7 +40,7 @@ Codex Swarm ships a working product and the operator materials needed to run it:
 
 - `apps/api`: control-plane API for repositories, runs, tasks, agents, sessions, approvals, validations, artifacts, worker fleet state, cleanup, governance, and audit export
 - `apps/worker`: worker runtime for worktree provisioning, Codex session supervision, validation execution, session recovery, and local or distributed dispatch
-- `frontend`: browser console for board triage, run detail, review, admin governance, fleet visibility, and publish handoff tracking
+- `frontend`: browser console for projects, ad-hoc runs, run board/lifecycle/review workspaces, automation setup, settings, and publish handoff tracking
 - `apps/tui`: terminal UI for operator workflows and capture support
 - `packages/contracts`: shared Zod schemas and API contract types
 - `packages/orchestration`: planning and orchestration helpers for dependency-safe execution
@@ -51,38 +51,60 @@ The control-plane contract direction is documented in [docs/architecture/control
 
 ## Major UI Surfaces
 
-### Board
+### Projects
 
-The board is the default operating surface. It combines run inventory, task lanes, approval pressure, validation signals, fleet health, and publish state in one place so operators can triage the next unblock path quickly.
+Projects are the primary organizational surface. Operators can scan configured workspaces, see recent activity, and move directly into project-specific repositories, runs, automation, and settings.
 
 <p align="center">
-  <img src="./docs/assets/screenshots/readme-board-desktop.png" alt="Desktop board view showing run inventory, task lanes, fleet signals, and publish state" width="78%">
-  <img src="./docs/assets/screenshots/readme-board-mobile.png" alt="Mobile board view showing the operator shell and active run board" width="18%">
+  <img src="./docs/assets/screenshots/readme-projects-desktop.png" alt="Projects view showing the operator shell and project inventory" width="88%">
 </p>
 
-### Run Detail
+### Project Runs
 
-Run detail is where operators inspect placement, sticky-node ownership, session recovery state, transcripts, artifacts, activity history, and repository handoff context before retrying work or escalating a runtime issue.
+Project runs keep historical and active delivery work inside project context instead of mixing run navigation with the global shell. This is where operators open the relevant run workspace or create a project-scoped run.
 
 <p align="center">
-  <img src="./docs/assets/screenshots/readme-run-detail-desktop.png" alt="Desktop run detail view showing placement diagnostics, activity, transcript context, and handoff state" width="78%">
-  <img src="./docs/assets/screenshots/readme-run-detail-mobile.png" alt="Mobile run detail view showing run context and session diagnostics" width="18%">
+  <img src="./docs/assets/screenshots/readme-project-runs-desktop.png" alt="Project runs view showing project-scoped run inventory and actions" width="88%">
 </p>
 
-### Review
+### Project Automation
 
-The review console ties approval decisions to current evidence. Approval requests, diff summaries, changed files, raw diff preview, validations, and artifacts are available in the same workspace so reviewers can approve or reject with the relevant context in view.
+Automation holds repeatable runs and webhook-trigger setup for a project. The webhook flow now keeps the core trigger model generic while offering preset-driven UI helpers for provider-shaped payloads such as GitHub.
 
 <p align="center">
-  <img src="./docs/assets/screenshots/readme-review-desktop.png" alt="Desktop review console showing approval context, diff summary, validations, and artifacts" width="78%">
+  <img src="./docs/assets/screenshots/readme-project-automation-desktop.png" alt="Project automation view showing repeatable runs and webhook trigger configuration" width="88%">
 </p>
 
-### Admin
+### Ad-Hoc Runs
 
-The admin surface exposes actor identity, workspace boundary, governance summaries, approval provenance, retention posture, secret-access boundaries, and audit export status for support, signoff, and policy-sensitive runs.
+Ad-hoc runs are isolated from project-owned delivery work. The surface stays intentionally compact and renders a lightweight empty state when no unassigned runs are present.
 
 <p align="center">
-  <img src="./docs/assets/screenshots/readme-admin-desktop.png" alt="Desktop admin view showing governance reporting, approval provenance, retention posture, and audit context" width="78%">
+  <img src="./docs/assets/screenshots/readme-adhoc-runs-desktop.png" alt="Ad-hoc runs view showing the compact empty state for runs without project ownership" width="88%">
+</p>
+
+### Run Board
+
+The run board is the primary work surface inside a selected run. It prioritizes the task board first, with blockers and diagnostics following as supporting context.
+
+<p align="center">
+  <img src="./docs/assets/screenshots/readme-run-board-desktop.png" alt="Run board view showing the compact run header, task board, blockers, and diagnostics" width="88%">
+</p>
+
+### Run Lifecycle
+
+Lifecycle is the operational deep-dive surface for a run. It collects placement, recovery, recent events, transcript context, and other runtime diagnostics without competing with the board for primary attention.
+
+<p align="center">
+  <img src="./docs/assets/screenshots/readme-run-lifecycle-desktop.png" alt="Run lifecycle view showing placement, recovery, and recent event diagnostics" width="88%">
+</p>
+
+### Settings
+
+Settings replaces the old global admin framing and keeps workspace, policy, and provider controls in one global area while leaving run-specific governance inside the run workspaces where it belongs.
+
+<p align="center">
+  <img src="./docs/assets/screenshots/readme-settings-desktop.png" alt="Settings view showing workspace identity, governance summary, and policy inventory" width="88%">
 </p>
 
 ## Core Capabilities
@@ -110,10 +132,10 @@ The worker runtime covers the difficult execution path:
 
 The shipped interfaces are organized around the real operating loop:
 
-- browser board triage for active and blocked runs
-- run-level diagnostics and transcript context
-- review and approval handling with diff evidence
-- governance, provenance, retention, and audit visibility
+- project and ad-hoc run inventory with contextual navigation
+- board-first run workspaces for active and blocked work
+- lifecycle diagnostics for placement, recovery, events, and transcript context
+- review handling plus governance, provenance, retention, and audit visibility
 - terminal workflows through `apps/tui` and the root `pnpm tui` helpers
 
 ### Checked-in operator pack
@@ -130,9 +152,9 @@ This repo also ships the assets needed to operate codex-swarm from Codex:
 1. Onboard or select a repository with provider, trust, and policy metadata.
 2. Create a run with a concrete goal, branch context, and dependency-safe task graph.
 3. Dispatch work across agents and worker nodes while the board tracks blockers, approvals, validations, and handoff state.
-4. Use run detail to inspect placement, transcript history, artifacts, and recovery clues when a slice stalls or fails.
+4. Use run lifecycle to inspect placement, transcript history, artifacts, and recovery clues when a slice stalls or fails.
 5. Use review to resolve approvals against diff evidence, validation status, and artifact output.
-6. Use admin to confirm governance posture, approval provenance, retention state, and audit export evidence.
+6. Use settings and run-scoped governance surfaces to confirm policy posture, approval provenance, retention state, and audit export evidence.
 7. Publish the branch and attach provider PR metadata or a manual handoff artifact when the run is ready for external review. Runs can also opt into automatic branch publish and GitHub PR creation at completion time.
 
 The end-to-end visual version of this flow is documented in [docs/operator-journey.md](./docs/operator-journey.md).
@@ -170,13 +192,7 @@ All `/api/v1/*` requests use:
 Authorization: Bearer <DEV_AUTH_TOKEN>
 ```
 
-For deterministic README-style frontend demos and screenshot capture, use:
-
-```bash
-corepack pnpm dev:frontend:readme-capture
-```
-
-The repeatable capture flow and preset URLs are documented in [docs/operations/frontend-readme-screenshot-capture.md](./docs/operations/frontend-readme-screenshot-capture.md).
+The current README screenshots are captured from the shared staging environment so the docs reflect real data and the shipped IA. The staging capture flow and approved surface list are documented in [docs/operations/frontend-readme-screenshot-capture.md](./docs/operations/frontend-readme-screenshot-capture.md).
 
 ## Verification
 
@@ -219,7 +235,7 @@ corepack pnpm ops:tailnet:status
 | `apps/api` | Control-plane API, persistence, governance, audit, scheduling, cleanup |
 | `apps/worker` | Worker runtime, worktree provisioning, Codex supervision, validation runner |
 | `apps/tui` | Terminal UI, run summaries, and capture-oriented operator views |
-| `frontend` | Browser board, run detail, review, admin, and fleet visibility UI |
+| `frontend` | Browser projects, ad-hoc runs, board/lifecycle/review workspaces, automation, and settings UI |
 | `packages/contracts` | Shared schemas and API contract types |
 | `packages/orchestration` | DAG and orchestration helpers |
 | `packages/database` | Shared database package and schema assets |
