@@ -568,11 +568,11 @@ async function refreshRuntimeConfig() {
 }
 
 async function buildRequestError(response: Response) {
-  let payload: unknown = null
+  let payload: unknown
   try {
     payload = await response.json()
   } catch {
-    payload = null
+    payload = undefined
   }
 
   if (payload && typeof payload === 'object' && 'error' in payload && typeof payload.error === 'string') {
