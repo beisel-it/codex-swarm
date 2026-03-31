@@ -1,4 +1,4 @@
-import { startTransition, useEffect, useMemo, useState, type FormEvent, type PointerEvent as ReactPointerEvent } from 'react'
+import { startTransition, useEffect, useMemo, useRef, useState, type FormEvent, type PointerEvent as ReactPointerEvent } from 'react'
 import type {
   ExternalEventReceipt,
   ProjectSummary as ContractProjectSummary,
@@ -293,9 +293,15 @@ type SessionTranscriptEntry = {
 type ControlPlaneEvent = {
   id: string
   runId: string | null
+  taskId?: string | null
+  agentId?: string | null
+  traceId?: string | null
   eventType: string
+  entityType: string
+  entityId?: string
   status: string
   summary: string
+  metadata?: Record<string, unknown>
   createdAt: string
 }
 
@@ -326,6 +332,20 @@ type SwarmData = {
   identity: IdentityContext | null
   governance: GovernanceAdminReport | null
   source: 'api' | 'mock'
+}
+
+type RunLiveRefreshRequest = {
+  runDetail?: boolean
+  approvals?: boolean
+  validations?: boolean
+  artifacts?: boolean
+  messages?: boolean
+  events?: boolean
+}
+
+type StreamEventFrame = {
+  event: string
+  data: string
 }
 
 type Route =
@@ -716,8 +736,153 @@ async function loadRunEvents(runId: string) {
   return requestJson<ControlPlaneEvent[]>(`/api/v1/events?runId=${encodeURIComponent(runId)}`).catch(() => [])
 }
 
+async function loadRunDetail(runId: string) {
+  return requestJson<RunDetail>(`/api/v1/runs/${encodeURIComponent(runId)}`)
+}
+
+async function loadRunApprovals(runId: string) {
+  return requestJson<Approval[]>(`/api/v1/approvals?runId=${encodeURIComponent(runId)}`).catch(() => [])
+}
+
+async function loadRunValidations(runId: string) {
+  return requestJson<Validation[]>(`/api/v1/validations?runId=${encodeURIComponent(runId)}`).catch(() => [])
+}
+
+async function loadRunArtifacts(runId: string) {
+  return requestJson<Artifact[]>(`/api/v1/artifacts?runId=${encodeURIComponent(runId)}`).catch(() => [])
+}
+
+async function loadRunMessages(runId: string) {
+  return requestJson<Message[]>(`/api/v1/messages?runId=${encodeURIComponent(runId)}`).catch(() => [])
+}
+
 async function loadSessionTranscript(sessionId: string) {
   return requestJson<SessionTranscriptEntry[]>(`/api/v1/sessions/${encodeURIComponent(sessionId)}/transcript`).catch(() => [])
+}
+
+function mergeRunLiveRefreshRequests(left: RunLiveRefreshRequest | null, right: RunLiveRefreshRequest) {
+  return {
+    runDetail: Boolean(left?.runDetail || right.runDetail),
+    approvals: Boolean(left?.approvals || right.approvals),
+    validations: Boolean(left?.validations || right.validations),
+    artifacts: Boolean(left?.artifacts || right.artifacts),
+    messages: Boolean(left?.messages || right.messages),
+    events: Boolean(left?.events || right.events),
+  }
+}
+
+function replaceRunScopedItems<T extends { runId: string }>(items: T[], runId: string, nextItems: T[]) {
+  return [...items.filter((item) => item.runId !== runId), ...nextItems]
+}
+
+function appendLiveRunEvent(items: ControlPlaneEvent[], nextItem: ControlPlaneEvent) {
+  if (items.some((item) => item.id === nextItem.id)) {
+    return items
+  }
+
+  return [...items, nextItem].sort((left, right) =>
+    new Date(left.createdAt).getTime() - new Date(right.createdAt).getTime())
+}
+
+function refreshRequestForControlPlaneEvent(event: ControlPlaneEvent): RunLiveRefreshRequest {
+  switch (event.entityType) {
+    case 'approval':
+      return { approvals: true }
+    case 'validation':
+      return { validations: true }
+    case 'artifact':
+      return { artifacts: true }
+    case 'message':
+      return { messages: true }
+    default:
+      return { runDetail: true }
+  }
+}
+
+function parseSseFrames(buffer: string) {
+  const normalized = buffer.replace(/\r\n/g, '\n')
+  const frameChunks = normalized.split('\n\n')
+  const rest = frameChunks.pop() ?? ''
+  const frames: StreamEventFrame[] = []
+
+  for (const frameChunk of frameChunks) {
+    if (!frameChunk.trim()) {
+      continue
+    }
+
+    let event = 'message'
+    const dataLines: string[] = []
+
+    for (const line of frameChunk.split('\n')) {
+      if (line.startsWith('event:')) {
+        event = line.slice('event:'.length).trim()
+      } else if (line.startsWith('data:')) {
+        dataLines.push(line.slice('data:'.length).trimStart())
+      }
+    }
+
+    if (dataLines.length === 0) {
+      continue
+    }
+
+    frames.push({
+      event,
+      data: dataLines.join('\n'),
+    })
+  }
+
+  return {
+    frames,
+    rest,
+  }
+}
+
+async function openRunStream(
+  runId: string,
+  signal: AbortSignal,
+  onFrame: (frame: StreamEventFrame) => void,
+  onOpen?: () => void,
+) {
+  const headers = new Headers()
+  if (API_TOKEN) {
+    headers.set('Authorization', `Bearer ${API_TOKEN}`)
+  }
+
+  const response = await fetch(buildApiUrl(`/api/v1/runs/${encodeURIComponent(runId)}/stream`), {
+    headers,
+    signal,
+    cache: 'no-store',
+  })
+
+  if (!response.ok) {
+    throw await buildRequestError(response)
+  }
+
+  if (!response.body) {
+    throw new Error('run stream did not return a readable body')
+  }
+
+  onOpen?.()
+
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+
+  while (true) {
+    const { value, done } = await reader.read()
+
+    if (done) {
+      break
+    }
+
+    buffer += decoder.decode(value, { stream: true })
+    const { frames, rest } = parseSseFrames(buffer)
+    buffer = rest
+
+    for (const frame of frames) {
+      onFrame(frame)
+    }
+  }
 }
 
 async function loadRepeatableRunDefinitions(repositoryId?: string) {
@@ -1076,6 +1241,15 @@ function App() {
   const [automationRepositoryId, setAutomationRepositoryId] = useState('')
   const [message, setMessage] = useState('')
   const [sidebarWidth, setSidebarWidth] = useState(readStoredSidebarWidth)
+  const [pendingRunStarts, setPendingRunStarts] = useState<string[]>([])
+  const liveRunRefreshStateRef = useRef<{
+    inFlight: boolean
+    pending: RunLiveRefreshRequest | null
+  }>({
+    inFlight: false,
+    pending: null,
+  })
+  const queueRunLiveRefreshRef = useRef<(runId: string, request: RunLiveRefreshRequest) => void>(() => undefined)
 
   useEffect(() => {
     function onPopState() {
@@ -1174,6 +1348,8 @@ function App() {
   const selectedRun = route.kind === 'run'
     ? data.runs.find((run) => run.id === route.runId) ?? null
     : null
+  const selectedRunId = selectedRun?.id ?? null
+  const isSelectedRunStartPending = selectedRun ? pendingRunStarts.includes(selectedRun.id) : false
   const selectedRepository = selectedRun
     ? data.repositories.find((repository) => repository.id === selectedRun.repositoryId) ?? null
     : null
@@ -1247,13 +1423,114 @@ function App() {
   )
 
   useEffect(() => {
-    if (!selectedRun) {
+    if (!selectedRunId) {
       setRunEvents([])
       return
     }
 
-    void loadRunEvents(selectedRun.id).then(setRunEvents)
-  }, [selectedRun])
+    void loadRunEvents(selectedRunId).then(setRunEvents)
+  }, [selectedRunId])
+
+  useEffect(() => {
+    if (route.kind !== 'run' || !selectedRunId) {
+      return
+    }
+
+    const runId = selectedRunId
+    const liveRefreshState = liveRunRefreshStateRef.current
+    let disposed = false
+    let reconnectTimer: number | null = null
+    let attempt = 0
+    let hasConnected = false
+    let activeController: AbortController | null = null
+
+    const scheduleReconnect = () => {
+      if (disposed) {
+        return
+      }
+
+      const delay = Math.min(10000, 1000 * 2 ** attempt)
+      attempt += 1
+
+      reconnectTimer = window.setTimeout(() => {
+        if (disposed) {
+          return
+        }
+
+        queueRunLiveRefreshRef.current(runId, {
+          runDetail: true,
+          approvals: true,
+          validations: true,
+          artifacts: true,
+          messages: true,
+          events: true,
+        })
+        void connect()
+      }, delay)
+    }
+
+    const connect = async () => {
+      activeController = new AbortController()
+
+      try {
+        await openRunStream(
+          runId,
+          activeController.signal,
+          (frame) => {
+            if (frame.event !== 'control_plane_event') {
+              return
+            }
+
+            try {
+              const nextEvent = JSON.parse(frame.data) as ControlPlaneEvent
+              setRunEvents((current) => appendLiveRunEvent(current, nextEvent))
+              queueRunLiveRefreshRef.current(runId, refreshRequestForControlPlaneEvent(nextEvent))
+            } catch (error) {
+              console.error('[run-stream] failed to parse control plane event', error)
+            }
+          },
+          () => {
+            attempt = 0
+
+            if (hasConnected) {
+              queueRunLiveRefreshRef.current(runId, {
+                runDetail: true,
+                approvals: true,
+                validations: true,
+                artifacts: true,
+                messages: true,
+                events: true,
+              })
+            }
+
+            hasConnected = true
+          },
+        )
+
+        if (!disposed && !activeController.signal.aborted) {
+          scheduleReconnect()
+        }
+      } catch (error) {
+        if (disposed || activeController.signal.aborted) {
+          return
+        }
+
+        console.error('[run-stream] connection failed', error)
+        scheduleReconnect()
+      }
+    }
+
+    void connect()
+
+    return () => {
+      disposed = true
+      activeController?.abort()
+      liveRefreshState.pending = null
+      if (reconnectTimer !== null) {
+        window.clearTimeout(reconnectTimer)
+      }
+    }
+  }, [route.kind, selectedRunId])
 
   useEffect(() => {
     const approval = runApprovals[0] ?? null
@@ -1341,6 +1618,18 @@ function App() {
     }
   }, [automationRepositoryId, route, selectedProject])
 
+  useEffect(() => {
+    if (pendingRunStarts.length === 0) {
+      return
+    }
+    const activePendingRunIds = new Set(
+      data.runs
+        .filter((run) => run.status === 'pending')
+        .map((run) => run.id),
+    )
+    setPendingRunStarts((current) => current.filter((runId) => activePendingRunIds.has(runId)))
+  }, [data.runs, pendingRunStarts.length])
+
   function navigate(to: string) {
     if (window.location.pathname === to) {
       return
@@ -1355,6 +1644,112 @@ function App() {
     setData(nextData)
     setLoading(false)
   }
+
+  async function refreshRunSlices(runId: string, request: RunLiveRefreshRequest) {
+    const [
+      nextRunDetail,
+      nextApprovals,
+      nextValidations,
+      nextArtifacts,
+      nextMessages,
+      nextEvents,
+    ] = await Promise.all([
+      request.runDetail ? loadRunDetail(runId) : Promise.resolve(null),
+      request.approvals ? loadRunApprovals(runId) : Promise.resolve(null),
+      request.validations ? loadRunValidations(runId) : Promise.resolve(null),
+      request.artifacts ? loadRunArtifacts(runId) : Promise.resolve(null),
+      request.messages ? loadRunMessages(runId) : Promise.resolve(null),
+      request.events ? loadRunEvents(runId) : Promise.resolve(null),
+    ])
+
+    setData((current) => {
+      let nextData = current
+
+      if (nextRunDetail) {
+        const { tasks, agents, sessions, taskDag, ...runSummary } = nextRunDetail
+        nextData = {
+          ...nextData,
+          runs: nextData.runs.map((run) => run.id === runId ? {
+            ...run,
+            ...runSummary,
+          } : run),
+          tasks: replaceRunScopedItems(nextData.tasks, runId, tasks),
+          agents: replaceRunScopedItems(nextData.agents, runId, agents),
+          sessions: replaceRunScopedItems(nextData.sessions, runId, sessions),
+          runTaskDags: {
+            ...nextData.runTaskDags,
+            [runId]: taskDag ?? null,
+          },
+        }
+      }
+
+      if (nextApprovals) {
+        nextData = {
+          ...nextData,
+          approvals: replaceRunScopedItems(nextData.approvals, runId, nextApprovals),
+        }
+      }
+
+      if (nextValidations) {
+        nextData = {
+          ...nextData,
+          validations: replaceRunScopedItems(nextData.validations, runId, nextValidations),
+        }
+      }
+
+      if (nextArtifacts) {
+        nextData = {
+          ...nextData,
+          artifacts: replaceRunScopedItems(nextData.artifacts, runId, nextArtifacts),
+        }
+      }
+
+      if (nextMessages) {
+        nextData = {
+          ...nextData,
+          messages: replaceRunScopedItems(nextData.messages, runId, nextMessages),
+        }
+      }
+
+      return nextData
+    })
+
+    if (nextEvents) {
+      setRunEvents(nextEvents)
+    }
+  }
+
+  function queueRunLiveRefresh(runId: string, request: RunLiveRefreshRequest) {
+    const refreshState = liveRunRefreshStateRef.current
+    refreshState.pending = mergeRunLiveRefreshRequests(refreshState.pending, request)
+
+    if (refreshState.inFlight) {
+      return
+    }
+
+    refreshState.inFlight = true
+
+    void (async () => {
+      try {
+        while (liveRunRefreshStateRef.current.pending) {
+          const nextRequest = liveRunRefreshStateRef.current.pending
+          liveRunRefreshStateRef.current.pending = null
+
+          if (!nextRequest) {
+            continue
+          }
+
+          await refreshRunSlices(runId, nextRequest)
+        }
+      } catch (error) {
+        console.error('[live-run-refresh] refresh failed', error)
+      } finally {
+        liveRunRefreshStateRef.current.inFlight = false
+      }
+    })()
+  }
+
+  queueRunLiveRefreshRef.current = queueRunLiveRefresh
 
   function flash(nextMessage: string) {
     setMessage(nextMessage)
@@ -1591,13 +1986,18 @@ function App() {
     if (!selectedRun) {
       return
     }
-    setBusy(true)
+    const runId = selectedRun.id
+    if (selectedRun.status !== 'pending' || pendingRunStarts.includes(runId)) {
+      return
+    }
+    setPendingRunStarts((current) => current.includes(runId) ? current : [...current, runId])
     try {
-      await startRun(selectedRun.id)
+      await startRun(runId)
       await refresh()
       flash('Run started')
-    } finally {
-      setBusy(false)
+    } catch (error) {
+      setPendingRunStarts((current) => current.filter((pendingRunId) => pendingRunId !== runId))
+      flash(error instanceof Error ? error.message : 'Unable to start run')
     }
   }
 
@@ -1935,7 +2335,9 @@ function App() {
                 </label>
               </div>
               <div className="sidebar-section">
-                <button type="button" className="action-button" onClick={() => navigate(`/projects/${selectedProject.project.id}/runs/new`)}>New Run</button>
+                <div className="sidebar-button-stack">
+                  <button type="button" className="sidebar-primary-action" onClick={() => navigate(`/projects/${selectedProject.project.id}/runs/new`)}>New Run</button>
+                </div>
               </div>
             </>
           )}
@@ -1973,7 +2375,9 @@ function App() {
                 </label>
               </div>
               <div className="sidebar-section">
-                <button type="button" className="action-button" onClick={() => navigate('/adhoc-runs/new')}>New Ad-Hoc Run</button>
+                <div className="sidebar-button-stack">
+                  <button type="button" className="sidebar-primary-action" onClick={() => navigate('/adhoc-runs/new')}>New Ad-Hoc Run</button>
+                </div>
               </div>
             </>
           )}
@@ -1982,10 +2386,18 @@ function App() {
             <>
               <div className="sidebar-section">
                 <h2>Run controls</h2>
-                <button type="button" className="action-button" onClick={() => void handleStartRun()} disabled={busy || selectedRun.status !== 'pending'}>
-                  Start Run
-                </button>
                 <div className="sidebar-button-stack">
+                  <button
+                    type="button"
+                    className="sidebar-primary-action"
+                    onClick={() => void handleStartRun()}
+                    disabled={busy || isSelectedRunStartPending || selectedRun.status !== 'pending'}
+                  >
+                    {isSelectedRunStartPending ? 'Starting soon…' : 'Start Run'}
+                  </button>
+                  {isSelectedRunStartPending ? (
+                    <span className="sidebar-action-note">Start requested. Waiting for the scheduler.</span>
+                  ) : null}
                   <button type="button" className={sidebarPillClassName(route.section === 'overview')} onClick={() => navigate(`/runs/${selectedRun.id}/overview`)}>Overview</button>
                   <button type="button" className={sidebarPillClassName(route.section === 'board')} onClick={() => navigate(`/runs/${selectedRun.id}/board`)}>Board</button>
                   <button type="button" className={sidebarPillClassName(route.section === 'lifecycle')} onClick={() => navigate(`/runs/${selectedRun.id}/lifecycle`)}>Lifecycle</button>
