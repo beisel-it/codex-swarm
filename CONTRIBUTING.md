@@ -8,6 +8,24 @@
   verified in-repo
 - treat release-facing docs as product surface, not afterthought
 
+## Commit conventions
+
+This repository uses Conventional Commits for human and automation-facing
+history.
+
+Prefer commit subjects like:
+
+- `feat: ...`
+- `fix: ...`
+- `docs: ...`
+- `chore: ...`
+- `refactor: ...`
+- `test: ...`
+
+Keep the subject imperative and concise. If a change affects published packages
+or release notes, pair the commit with a changeset instead of relying on the
+commit message alone to drive releases.
+
 ## Development
 
 ```bash
@@ -19,6 +37,8 @@ corepack pnpm ci:build
 ```
 
 ## Release-facing changes
+
+This repository currently uses Changesets for versioning and release PRs.
 
 If a change affects public installability, package boundaries, deployment,
 worker onboarding, or release notes, add a changeset:

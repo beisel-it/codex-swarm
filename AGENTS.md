@@ -88,6 +88,8 @@ Codex Swarm is a TypeScript monorepo for orchestrating multi-agent software deli
 
 - `LLMS.md`: machine-friendly repository map for models and tools that ingest structured repo context.
 - `README.md`: product overview, runtime shape, and operator entrypoints.
+- `CONTRIBUTING.md`: contributor workflow, commit conventions, and changeset expectations.
+- `RELEASING.md`: release automation, publication flow, and release boundary.
 - `docs/operator-guide.md`: external operator entrypoint.
 - `docs/operator-skill-library.md`: checked-in skill selection guide.
 - `docs/architecture/control-plane-api-contract.md`: control-plane contract direction.
