@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
-import { TaskDagGraphPanel, buildTaskDagRenderModel, type TaskDagTask } from './task-dag'
+import { TaskDagGraphPanel } from './task-dag'
+import { buildTaskDagRenderModel, type TaskDagTask } from './task-dag-model'
 
 const tasks: TaskDagTask[] = [
   {
