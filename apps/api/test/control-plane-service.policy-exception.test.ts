@@ -4,7 +4,9 @@ import { approvals, runs } from "../src/db/schema.js";
 import { HttpError } from "../src/lib/http-error.js";
 import { ControlPlaneService } from "../src/services/control-plane-service.js";
 
-function extractTargetId(condition: { queryChunks: Array<{ value?: string[] } | { value?: string }> }) {
+function extractTargetId(condition: {
+  queryChunks: Array<{ value?: string[] } | { value?: string }>;
+}) {
   const chunk = condition.queryChunks[3] as { value?: string };
 
   if (!chunk || typeof chunk.value !== "string") {
@@ -41,8 +43,8 @@ class FakePolicyExceptionDb {
       metadata: {},
       createdBy: "dev-user",
       createdAt: new Date("2026-03-28T12:00:00.000Z"),
-      updatedAt: new Date("2026-03-28T12:00:00.000Z")
-    }
+      updatedAt: new Date("2026-03-28T12:00:00.000Z"),
+    },
   ];
 
   readonly approvalStore = [
@@ -67,17 +69,17 @@ class FakePolicyExceptionDb {
           checkpointSource: "worker.dispatch",
           observed: {
             totalTokens: 120,
-            totalCostUsd: 0.5
+            totalCostUsd: 0.5,
           },
           threshold: {
             budgetTokens: 100,
-            budgetCostUsd: 0.25
-          }
+            budgetCostUsd: 0.25,
+          },
         },
         enforcement: {
           onApproval: "continue_run",
-          onRejection: "remain_blocked"
-        }
+          onRejection: "remain_blocked",
+        },
       },
       resolutionPayload: {},
       requestedBy: "system:budget-guard",
@@ -88,14 +90,16 @@ class FakePolicyExceptionDb {
       resolver: null,
       resolvedAt: null,
       createdAt: new Date("2026-03-28T12:01:00.000Z"),
-      updatedAt: new Date("2026-03-28T12:01:00.000Z")
-    }
+      updatedAt: new Date("2026-03-28T12:01:00.000Z"),
+    },
   ];
 
   select() {
     return {
       from: (table: unknown) => ({
-        where: async (condition: { queryChunks: Array<{ value?: string[] } | { value?: string }> }) => {
+        where: async (condition: {
+          queryChunks: Array<{ value?: string[] } | { value?: string }>;
+        }) => {
           const id = extractTargetId(condition);
 
           if (table === runs) {
@@ -103,12 +107,14 @@ class FakePolicyExceptionDb {
           }
 
           if (table === approvals) {
-            return this.approvalStore.filter((candidate) => candidate.id === id);
+            return this.approvalStore.filter(
+              (candidate) => candidate.id === id,
+            );
           }
 
           throw new Error("unexpected select table");
-        }
-      })
+        },
+      }),
     };
   }
 
@@ -117,48 +123,53 @@ class FakePolicyExceptionDb {
       set: (values: Record<string, unknown>) => ({
         where: () => ({
           returning: async () => {
-          if (table !== approvals) {
-            throw new Error("unexpected update table");
-          }
+            if (table !== approvals) {
+              throw new Error("unexpected update table");
+            }
 
-          const record = this.approvalStore[0];
+            const record = this.approvalStore[0];
 
-          if (!record) {
-            throw new Error("missing approval record");
-          }
+            if (!record) {
+              throw new Error("missing approval record");
+            }
 
-          Object.assign(record, values);
-          return [record];
-        }
-      })
-      })
+            Object.assign(record, values);
+            return [record];
+          },
+        }),
+      }),
     };
   }
 }
 
 describe("ControlPlaneService policy-exception approvals", () => {
   it("rejects policy-exception resolutions whose explicit outcome mismatches the status", async () => {
-    const service = new ControlPlaneService(new FakePolicyExceptionDb() as never, {
-      now: () => new Date("2026-03-28T12:05:00.000Z")
-    });
-
-    await expect(service.resolveApproval(
-      "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+    const service = new ControlPlaneService(
+      new FakePolicyExceptionDb() as never,
       {
-        status: "approved",
-        resolver: "reviewer-1",
-        resolutionPayload: {
-          outcome: "rejected_exception"
-        }
+        now: () => new Date("2026-03-28T12:05:00.000Z"),
       },
-      {
-        workspaceId: "acme",
-        workspaceName: "Acme",
-        teamId: "platform",
-        teamName: "Platform"
-      }
-    )).rejects.toMatchObject({
-      statusCode: 409
+    );
+
+    await expect(
+      service.resolveApproval(
+        "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        {
+          status: "approved",
+          resolver: "reviewer-1",
+          resolutionPayload: {
+            outcome: "rejected_exception",
+          },
+        },
+        {
+          workspaceId: "acme",
+          workspaceName: "Acme",
+          teamId: "platform",
+          teamName: "Platform",
+        },
+      ),
+    ).rejects.toMatchObject({
+      statusCode: 409,
     } satisfies Partial<HttpError>);
   });
 });

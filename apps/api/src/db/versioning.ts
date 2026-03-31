@@ -31,34 +31,36 @@ export const controlPlaneMetadataTableSql = `create table if not exists control_
 export function validateControlPlaneMetadata(
   metadata: ControlPlaneMetadata | null,
   expectedSchemaVersion: string,
-  expectedConfigVersion: string
+  expectedConfigVersion: string,
 ) {
   if (!metadata) {
     throw new Error(
-      "control-plane metadata is missing; run `corepack pnpm --dir apps/api db:migrate` before starting this build"
+      "control-plane metadata is missing; run `corepack pnpm --dir apps/api db:migrate` before starting this build",
     );
   }
 
   if (metadata.schemaVersion !== expectedSchemaVersion) {
     throw new Error(
       `control-plane schema version mismatch: expected ${expectedSchemaVersion}, found ${metadata.schemaVersion}; run ` +
-      "`corepack pnpm --dir apps/api db:migrate` before starting this build"
+        "`corepack pnpm --dir apps/api db:migrate` before starting this build",
     );
   }
 
   if (metadata.configVersion !== expectedConfigVersion) {
     throw new Error(
       `control-plane config version mismatch: expected ${expectedConfigVersion}, found ${metadata.configVersion}; ` +
-      "update the runtime configuration to the documented M6 version before starting this build"
+        "update the runtime configuration to the documented M6 version before starting this build",
     );
   }
 
   return metadata;
 }
 
-export async function readControlPlaneMetadata(queryable: Queryable): Promise<ControlPlaneMetadata | null> {
+export async function readControlPlaneMetadata(
+  queryable: Queryable,
+): Promise<ControlPlaneMetadata | null> {
   const tableResult = await queryable.query<{ metadata_table: string | null }>(
-    "select to_regclass('public.control_plane_metadata') as metadata_table"
+    "select to_regclass('public.control_plane_metadata') as metadata_table",
   );
 
   if (!tableResult.rows[0]?.metadata_table) {
@@ -70,7 +72,7 @@ export async function readControlPlaneMetadata(queryable: Queryable): Promise<Co
      from control_plane_metadata
      where id = $1
      limit 1`,
-    [CONTROL_PLANE_METADATA_ID]
+    [CONTROL_PLANE_METADATA_ID],
   );
   const row = result.rows[0];
 
@@ -81,16 +83,23 @@ export async function readControlPlaneMetadata(queryable: Queryable): Promise<Co
   return {
     schemaVersion: row.schema_version,
     configVersion: row.config_version,
-    upgradedAt: row.upgraded_at instanceof Date ? row.upgraded_at : new Date(row.upgraded_at),
-    notes: row.notes ?? null
+    upgradedAt:
+      row.upgraded_at instanceof Date
+        ? row.upgraded_at
+        : new Date(row.upgraded_at),
+    notes: row.notes ?? null,
   };
 }
 
 export async function ensureControlPlaneCompatibility(
   queryable: Queryable,
   expectedSchemaVersion: string,
-  expectedConfigVersion: string
+  expectedConfigVersion: string,
 ) {
   const metadata = await readControlPlaneMetadata(queryable);
-  return validateControlPlaneMetadata(metadata, expectedSchemaVersion, expectedConfigVersion);
+  return validateControlPlaneMetadata(
+    metadata,
+    expectedSchemaVersion,
+    expectedConfigVersion,
+  );
 }

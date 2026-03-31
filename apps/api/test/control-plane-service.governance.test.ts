@@ -1,10 +1,18 @@
 import { describe, expect, it } from "vitest";
 import type { ActorIdentity } from "@codex-swarm/contracts";
 
-import { approvals, artifacts, controlPlaneEvents, repositories, runs } from "../src/db/schema.js";
+import {
+  approvals,
+  artifacts,
+  controlPlaneEvents,
+  repositories,
+  runs,
+} from "../src/db/schema.js";
 import { ControlPlaneService } from "../src/services/control-plane-service.js";
 
-function extractTargetId(condition: { queryChunks: Array<{ value?: string[] } | { value?: string }> }) {
+function extractTargetId(condition: {
+  queryChunks: Array<{ value?: string[] } | { value?: string }>;
+}) {
   const chunk = condition.queryChunks[3] as { value?: string };
 
   if (!chunk || typeof chunk.value !== "string") {
@@ -21,7 +29,7 @@ class FakeWhereResult<T> implements PromiseLike<T[]> {
 
   then<TResult1 = T[], TResult2 = never>(
     onfulfilled?: ((value: T[]) => TResult1 | PromiseLike<TResult1>) | null,
-    onrejected?: ((reason: unknown) => TResult2 | PromiseLike<TResult2>) | null
+    onrejected?: ((reason: unknown) => TResult2 | PromiseLike<TResult2>) | null,
   ) {
     return Promise.resolve(this.rows).then(onfulfilled, onrejected);
   }
@@ -33,22 +41,25 @@ class FakeGovernanceDb {
     readonly runStore: Array<any>,
     readonly approvalStore: Array<any>,
     readonly artifactStore: Array<any>,
-    readonly eventStore: Array<any>
+    readonly eventStore: Array<any>,
   ) {}
 
   select() {
     return {
       from: (table: unknown) => ({
-        where: (_condition: unknown) => new FakeWhereResult(this.rowsFor(table)),
-        orderBy: async () => this.rowsFor(table)
-      })
+        where: (_condition: unknown) =>
+          new FakeWhereResult(this.rowsFor(table)),
+        orderBy: async () => this.rowsFor(table),
+      }),
     };
   }
 
   update(table: unknown) {
     return {
       set: (values: Record<string, unknown>) => ({
-        where: async (condition: { queryChunks: Array<{ value?: string[] } | { value?: string }> }) => {
+        where: async (condition: {
+          queryChunks: Array<{ value?: string[] } | { value?: string }>;
+        }) => {
           const id = extractTargetId(condition);
           const store = this.storeFor(table);
           const record = store.find((candidate) => candidate.id === id);
@@ -59,8 +70,8 @@ class FakeGovernanceDb {
 
           Object.assign(record, values);
           return [record];
-        }
-      })
+        },
+      }),
     };
   }
 
@@ -70,12 +81,12 @@ class FakeGovernanceDb {
         returning: async () => {
           const store = this.storeForInsert(table);
           const record = {
-            ...values
+            ...values,
           };
           store.push(record);
           return [record];
-        }
-      })
+        },
+      }),
     };
   }
 
@@ -136,13 +147,13 @@ class FakeRunInsertDb {
       values: (values: Record<string, unknown>) => ({
         returning: async () => {
           const record = {
-            ...values
+            ...values,
           };
 
           this.insertedRuns.push(record);
           return [record];
-        }
-      })
+        },
+      }),
     };
   }
 }
@@ -151,7 +162,7 @@ const access = {
   workspaceId: "workspace-001",
   workspaceName: "Workspace 001",
   teamId: "team-001",
-  teamName: "Team 001"
+  teamName: "Team 001",
 } as const;
 
 const actor: ActorIdentity = {
@@ -165,7 +176,7 @@ const actor: ActorIdentity = {
   workspaceName: access.workspaceName,
   teamId: access.teamId,
   teamName: access.teamName,
-  policyProfile: "standard"
+  policyProfile: "standard",
 };
 
 describe("ControlPlaneService governance state", () => {
@@ -185,7 +196,7 @@ describe("ControlPlaneService governance state", () => {
           trustLevel: "trusted",
           approvalProfile: "standard",
           createdAt: new Date("2026-03-01T12:00:00.000Z"),
-          updatedAt: new Date("2026-03-01T12:00:00.000Z")
+          updatedAt: new Date("2026-03-01T12:00:00.000Z"),
         },
         {
           id: "22222222-2222-4222-8222-222222222222",
@@ -199,8 +210,8 @@ describe("ControlPlaneService governance state", () => {
           trustLevel: "restricted",
           approvalProfile: "restricted",
           createdAt: new Date("2026-03-02T12:00:00.000Z"),
-          updatedAt: new Date("2026-03-02T12:00:00.000Z")
-        }
+          updatedAt: new Date("2026-03-02T12:00:00.000Z"),
+        },
       ],
       [
         {
@@ -226,7 +237,7 @@ describe("ControlPlaneService governance state", () => {
           metadata: {},
           createdBy: "qa-admin",
           createdAt: new Date("2026-03-20T10:00:00.000Z"),
-          updatedAt: new Date("2026-03-20T12:00:00.000Z")
+          updatedAt: new Date("2026-03-20T12:00:00.000Z"),
         },
         {
           id: "44444444-4444-4444-8444-444444444444",
@@ -251,8 +262,8 @@ describe("ControlPlaneService governance state", () => {
           metadata: {},
           createdBy: "qa-admin",
           createdAt: new Date("2026-03-27T10:00:00.000Z"),
-          updatedAt: new Date("2026-03-27T11:00:00.000Z")
-        }
+          updatedAt: new Date("2026-03-27T11:00:00.000Z"),
+        },
       ],
       [
         {
@@ -264,10 +275,10 @@ describe("ControlPlaneService governance state", () => {
           kind: "deploy",
           status: "approved",
           requestedPayload: {
-            scope: "sensitive promotion"
+            scope: "sensitive promotion",
           },
           resolutionPayload: {
-            feedback: "approved under change window"
+            feedback: "approved under change window",
           },
           requestedBy: "backend-dev",
           delegateActorId: "security-admin",
@@ -277,8 +288,8 @@ describe("ControlPlaneService governance state", () => {
           resolver: "security-admin",
           resolvedAt: new Date("2026-03-28T09:30:00.000Z"),
           createdAt: new Date("2026-03-28T09:00:00.000Z"),
-          updatedAt: new Date("2026-03-28T09:30:00.000Z")
-        }
+          updatedAt: new Date("2026-03-28T09:30:00.000Z"),
+        },
       ],
       [
         {
@@ -289,8 +300,8 @@ describe("ControlPlaneService governance state", () => {
           path: "artifacts/audit.txt",
           contentType: "text/plain",
           metadata: {},
-          createdAt: new Date("2026-03-25T12:00:00.000Z")
-        }
+          createdAt: new Date("2026-03-25T12:00:00.000Z"),
+        },
       ],
       [
         {
@@ -309,10 +320,10 @@ describe("ControlPlaneService governance state", () => {
             actorId: "backend-dev",
             principal: "backend-dev",
             role: "member",
-            roles: ["member"]
+            roles: ["member"],
           },
           metadata: {},
-          createdAt: new Date("2026-03-28T09:00:00.000Z")
+          createdAt: new Date("2026-03-28T09:00:00.000Z"),
         },
         {
           id: "88888888-8888-4888-8888-888888888888",
@@ -331,10 +342,10 @@ describe("ControlPlaneService governance state", () => {
             principal: "security-admin",
             role: "reviewer",
             roles: ["reviewer"],
-            policyProfile: "restricted"
+            policyProfile: "restricted",
           },
           metadata: {},
-          createdAt: new Date("2026-03-28T09:30:00.000Z")
+          createdAt: new Date("2026-03-28T09:30:00.000Z"),
         },
         {
           id: "99999999-9999-4999-8999-999999999999",
@@ -349,22 +360,19 @@ describe("ControlPlaneService governance state", () => {
           summary: "Old run event",
           actor: actor,
           metadata: {},
-          createdAt: new Date("2026-02-01T09:00:00.000Z")
-        }
-      ]
+          createdAt: new Date("2026-02-01T09:00:00.000Z"),
+        },
+      ],
     );
 
-    const service = new ControlPlaneService(
-      db as never,
-      { now: () => now }
-    );
+    const service = new ControlPlaneService(db as never, { now: () => now });
 
     const report = await service.getGovernanceAdminReport({
       requestedBy: actor,
       retentionPolicy: {
         runsDays: 30,
         artifactsDays: 10,
-        eventsDays: 20
+        eventsDays: 20,
       },
       secrets: {
         sourceMode: "external_manager",
@@ -373,9 +381,9 @@ describe("ControlPlaneService governance state", () => {
         allowedRepositoryTrustLevels: ["trusted"],
         sensitivePolicyProfiles: ["restricted"],
         credentialDistribution: ["broker secrets through vault"],
-        policyDrivenAccess: true
+        policyDrivenAccess: true,
       },
-      access
+      access,
     });
 
     expect(report.requestedBy.actorId).toBe("qa-admin");
@@ -383,7 +391,7 @@ describe("ControlPlaneService governance state", () => {
       total: 1,
       approved: 1,
       pending: 0,
-      rejected: 0
+      rejected: 0,
     });
     expect(report.approvals.history).toEqual([
       expect.objectContaining({
@@ -392,45 +400,45 @@ describe("ControlPlaneService governance state", () => {
         repositoryName: "sensitive-repo",
         requestedBy: "backend-dev",
         requestedByActor: expect.objectContaining({
-          actorId: "backend-dev"
+          actorId: "backend-dev",
         }),
         delegation: {
           delegateActorId: "security-admin",
           delegatedBy: "tech-lead",
           delegatedAt: new Date("2026-03-28T08:45:00.000Z"),
-          reason: "after-hours deployment coverage"
+          reason: "after-hours deployment coverage",
         },
         resolver: "security-admin",
         resolverActor: expect.objectContaining({
-          actorId: "security-admin"
+          actorId: "security-admin",
         }),
         resolvedByDelegate: true,
-        policyProfile: "restricted"
-      })
+        policyProfile: "restricted",
+      }),
     ]);
     expect(report.retention).toMatchObject({
       runs: { total: 2, expired: 0, retained: 2 },
       artifacts: { total: 1, expired: 0, retained: 1 },
-      events: { total: 3, expired: 1, retained: 2 }
+      events: { total: 3, expired: 1, retained: 2 },
     });
     expect(report.policies.repositoryProfiles).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ profile: "standard", repositoryCount: 1 }),
-        expect.objectContaining({ profile: "restricted", repositoryCount: 1 })
-      ])
+        expect.objectContaining({ profile: "restricted", repositoryCount: 1 }),
+      ]),
     );
     expect(report.policies.sensitiveRepositories).toEqual([
       {
         repositoryId: "22222222-2222-4222-8222-222222222222",
         repositoryName: "sensitive-repo",
         trustLevel: "restricted",
-        approvalProfile: "restricted"
-      }
+        approvalProfile: "restricted",
+      },
     ]);
     expect(report.secrets).toMatchObject({
       sourceMode: "external_manager",
       provider: "vault",
-      policyDrivenAccess: true
+      policyDrivenAccess: true,
     });
   });
 
@@ -462,36 +470,36 @@ describe("ControlPlaneService governance state", () => {
           metadata: {},
           createdBy: "backend-dev",
           createdAt: now,
-          updatedAt: now
-        }
+          updatedAt: now,
+        },
       ],
       [],
       [],
-      []
+      [],
     );
-    const service = new ControlPlaneService(
-      db as never,
-      { now: () => now }
-    );
+    const service = new ControlPlaneService(db as never, { now: () => now });
 
-    const approval = await service.createApproval({
-      runId: "33333333-3333-4333-8333-333333333333",
-      kind: "plan",
-      requestedBy: "backend-dev",
-      requestedPayload: {
-        summary: "Need reviewer coverage"
+    const approval = await service.createApproval(
+      {
+        runId: "33333333-3333-4333-8333-333333333333",
+        kind: "plan",
+        requestedBy: "backend-dev",
+        requestedPayload: {
+          summary: "Need reviewer coverage",
+        },
+        delegation: {
+          delegateActorId: "reviewer-2",
+          reason: "primary reviewer is offline",
+        },
       },
-      delegation: {
-        delegateActorId: "reviewer-2",
-        reason: "primary reviewer is offline"
-      }
-    }, access);
+      access,
+    );
 
     expect(approval.delegation).toEqual({
       delegateActorId: "reviewer-2",
       delegatedBy: "backend-dev",
       delegatedAt: now,
-      reason: "primary reviewer is offline"
+      reason: "primary reviewer is offline",
     });
     expect(db.approvalStore).toEqual([
       expect.objectContaining({
@@ -500,8 +508,8 @@ describe("ControlPlaneService governance state", () => {
         delegateActorId: "reviewer-2",
         delegatedBy: "backend-dev",
         delegatedAt: now,
-        delegationReason: "primary reviewer is offline"
-      })
+        delegationReason: "primary reviewer is offline",
+      }),
     ]);
   });
 
@@ -533,8 +541,8 @@ describe("ControlPlaneService governance state", () => {
           metadata: {},
           createdBy: "backend-dev",
           createdAt: new Date("2026-03-28T08:00:00.000Z"),
-          updatedAt: new Date("2026-03-28T09:30:00.000Z")
-        }
+          updatedAt: new Date("2026-03-28T09:30:00.000Z"),
+        },
       ],
       [],
       [],
@@ -555,10 +563,10 @@ describe("ControlPlaneService governance state", () => {
             actorId: "backend-dev",
             principal: "backend-dev",
             role: "member",
-            roles: ["member"]
+            roles: ["member"],
           },
           metadata: {},
-          createdAt: new Date("2026-03-28T09:00:00.000Z")
+          createdAt: new Date("2026-03-28T09:00:00.000Z"),
         },
         {
           id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
@@ -577,17 +585,14 @@ describe("ControlPlaneService governance state", () => {
             principal: "security-admin",
             role: "reviewer",
             roles: ["reviewer"],
-            policyProfile: "restricted"
+            policyProfile: "restricted",
           },
           metadata: {},
-          createdAt: new Date("2026-03-28T09:30:00.000Z")
-        }
-      ]
+          createdAt: new Date("2026-03-28T09:30:00.000Z"),
+        },
+      ],
     );
-    const service = new ControlPlaneService(
-      db as never,
-      { now: () => now }
-    );
+    const service = new ControlPlaneService(db as never, { now: () => now });
 
     (service as any).getRun = async () => ({
       id: "33333333-3333-4333-8333-333333333333",
@@ -629,9 +634,9 @@ describe("ControlPlaneService governance state", () => {
           staleReason: null,
           metadata: {},
           createdAt: new Date("2026-03-28T08:00:00.000Z"),
-          updatedAt: new Date("2026-03-28T08:00:00.000Z")
-        }
-      ]
+          updatedAt: new Date("2026-03-28T08:00:00.000Z"),
+        },
+      ],
     });
     (service as any).assertRunExists = async () => ({
       id: "33333333-3333-4333-8333-333333333333",
@@ -656,7 +661,7 @@ describe("ControlPlaneService governance state", () => {
       metadata: {},
       createdBy: "backend-dev",
       createdAt: new Date("2026-03-28T08:00:00.000Z"),
-      updatedAt: new Date("2026-03-28T09:30:00.000Z")
+      updatedAt: new Date("2026-03-28T09:30:00.000Z"),
     });
     (service as any).listApprovals = async () => [
       {
@@ -666,23 +671,23 @@ describe("ControlPlaneService governance state", () => {
         kind: "deploy",
         status: "approved",
         requestedPayload: {
-          scope: "production"
+          scope: "production",
         },
         resolutionPayload: {
-          feedback: "approved"
+          feedback: "approved",
         },
         requestedBy: "backend-dev",
         delegation: {
           delegateActorId: "security-admin",
           delegatedBy: "tech-lead",
           delegatedAt: new Date("2026-03-28T08:45:00.000Z"),
-          reason: "after-hours deployment coverage"
+          reason: "after-hours deployment coverage",
         },
         resolver: "security-admin",
         resolvedAt: new Date("2026-03-28T09:30:00.000Z"),
         createdAt: new Date("2026-03-28T09:00:00.000Z"),
-        updatedAt: new Date("2026-03-28T09:30:00.000Z")
-      }
+        updatedAt: new Date("2026-03-28T09:30:00.000Z"),
+      },
     ];
     (service as any).listValidations = async () => [];
     (service as any).listArtifacts = async () => [
@@ -694,8 +699,8 @@ describe("ControlPlaneService governance state", () => {
         path: "artifacts/audit.md",
         contentType: "text/markdown",
         metadata: {},
-        createdAt: new Date("2026-03-28T10:00:00.000Z")
-      }
+        createdAt: new Date("2026-03-28T10:00:00.000Z"),
+      },
     ];
     (service as any).listWorkerNodes = async () => [
       {
@@ -709,7 +714,7 @@ describe("ControlPlaneService governance state", () => {
         metadata: {},
         eligibleForScheduling: true,
         createdAt: now,
-        updatedAt: now
+        updatedAt: now,
       },
       {
         id: "node-2",
@@ -722,8 +727,8 @@ describe("ControlPlaneService governance state", () => {
         metadata: {},
         eligibleForScheduling: true,
         createdAt: now,
-        updatedAt: now
-      }
+        updatedAt: now,
+      },
     ];
     (service as any).assertRepositoryExists = async () => ({
       id: "11111111-1111-4111-8111-111111111111",
@@ -737,7 +742,7 @@ describe("ControlPlaneService governance state", () => {
       trustLevel: "trusted",
       approvalProfile: "restricted",
       createdAt: now,
-      updatedAt: now
+      updatedAt: now,
     });
 
     const auditExport = await service.exportRunAudit(
@@ -746,35 +751,35 @@ describe("ControlPlaneService governance state", () => {
       {
         runsDays: 30,
         artifactsDays: 30,
-        eventsDays: 30
+        eventsDays: 30,
       },
-      access
+      access,
     );
 
     expect(auditExport.workerNodes).toEqual([
       expect.objectContaining({
-        id: "node-1"
-      })
+        id: "node-1",
+      }),
     ]);
     expect(auditExport.provenance.exportedBy.actorId).toBe("qa-admin");
     expect(auditExport.provenance.approvals).toEqual([
       expect.objectContaining({
         approvalId: "55555555-5555-4555-8555-555555555555",
         requestedByActor: expect.objectContaining({
-          actorId: "backend-dev"
+          actorId: "backend-dev",
         }),
         delegation: {
           delegateActorId: "security-admin",
           delegatedBy: "tech-lead",
           delegatedAt: new Date("2026-03-28T08:45:00.000Z"),
-          reason: "after-hours deployment coverage"
+          reason: "after-hours deployment coverage",
         },
         resolverActor: expect.objectContaining({
-          actorId: "security-admin"
+          actorId: "security-admin",
         }),
         resolvedByDelegate: true,
-        policyProfile: "restricted"
-      })
+        policyProfile: "restricted",
+      }),
     ]);
     expect(auditExport.retention.policy.runsDays).toBe(30);
     expect(auditExport.events).toHaveLength(2);
@@ -796,8 +801,8 @@ describe("ControlPlaneService governance state", () => {
           trustLevel: "trusted",
           approvalProfile: "standard",
           createdAt: now,
-          updatedAt: now
-        }
+          updatedAt: now,
+        },
       ],
       [
         {
@@ -823,8 +828,8 @@ describe("ControlPlaneService governance state", () => {
           metadata: {},
           createdBy: "qa-admin",
           createdAt: new Date("2026-03-20T10:00:00.000Z"),
-          updatedAt: new Date("2026-03-20T14:00:00.000Z")
-        }
+          updatedAt: new Date("2026-03-20T14:00:00.000Z"),
+        },
       ],
       [],
       [
@@ -836,8 +841,8 @@ describe("ControlPlaneService governance state", () => {
           path: "artifacts/audit.txt",
           contentType: "text/plain",
           metadata: {},
-          createdAt: new Date("2026-03-22T14:00:00.000Z")
-        }
+          createdAt: new Date("2026-03-22T14:00:00.000Z"),
+        },
       ],
       [
         {
@@ -853,63 +858,57 @@ describe("ControlPlaneService governance state", () => {
           summary: "Run completed",
           actor: actor,
           metadata: {},
-          createdAt: new Date("2026-03-21T14:00:00.000Z")
-        }
-      ]
+          createdAt: new Date("2026-03-21T14:00:00.000Z"),
+        },
+      ],
     );
 
-    const service = new ControlPlaneService(
-      db as never,
-      { now: () => now }
-    );
+    const service = new ControlPlaneService(db as never, { now: () => now });
 
     const report = await service.reconcileGovernanceRetention({
       requestedBy: actor,
       retentionPolicy: {
         runsDays: 10,
         artifactsDays: 5,
-        eventsDays: 3
+        eventsDays: 3,
       },
       dryRun: false,
-      access
+      access,
     });
 
     expect(report).toMatchObject({
       dryRun: false,
       runsUpdated: 1,
       artifactsUpdated: 1,
-      eventsUpdated: 1
+      eventsUpdated: 1,
     });
     expect(db.runStore[0].metadata).toMatchObject({
       retention: {
         expiresAt: "2026-03-30T14:00:00.000Z",
         lastAppliedAt: "2026-03-28T14:00:00.000Z",
-        appliedBy: "qa-admin"
-      }
+        appliedBy: "qa-admin",
+      },
     });
     expect(db.artifactStore[0].metadata).toMatchObject({
       retention: {
         expiresAt: "2026-03-27T14:00:00.000Z",
         lastAppliedAt: "2026-03-28T14:00:00.000Z",
-        appliedBy: "qa-admin"
-      }
+        appliedBy: "qa-admin",
+      },
     });
     expect(db.eventStore[0].metadata).toMatchObject({
       retention: {
         expiresAt: "2026-03-24T14:00:00.000Z",
         lastAppliedAt: "2026-03-28T14:00:00.000Z",
-        appliedBy: "qa-admin"
-      }
+        appliedBy: "qa-admin",
+      },
     });
   });
 
   it("inherits repository policy defaults and differentiates standard versus sensitive secret access paths", async () => {
     const now = new Date("2026-03-28T15:00:00.000Z");
     const db = new FakeRunInsertDb();
-    const service = new ControlPlaneService(
-      db as never,
-      { now: () => now }
-    );
+    const service = new ControlPlaneService(db as never, { now: () => now });
     const repositoriesById = new Map([
       [
         "11111111-1111-4111-8111-111111111111",
@@ -925,8 +924,8 @@ describe("ControlPlaneService governance state", () => {
           trustLevel: "trusted",
           approvalProfile: "standard",
           createdAt: now,
-          updatedAt: now
-        }
+          updatedAt: now,
+        },
       ],
       [
         "22222222-2222-4222-8222-222222222222",
@@ -942,9 +941,9 @@ describe("ControlPlaneService governance state", () => {
           trustLevel: "trusted",
           approvalProfile: "restricted",
           createdAt: now,
-          updatedAt: now
-        }
-      ]
+          updatedAt: now,
+        },
+      ],
     ]);
 
     (service as any).assertRepositoryExists = async (repositoryId: string) => {
@@ -957,19 +956,27 @@ describe("ControlPlaneService governance state", () => {
       return repository;
     };
 
-    const standardRun = await service.createRun({
-      repositoryId: "11111111-1111-4111-8111-111111111111",
-      goal: "Standard defaults",
-      concurrencyCap: 1,
-      metadata: {}
-    }, actor.principal, access);
+    const standardRun = await service.createRun(
+      {
+        repositoryId: "11111111-1111-4111-8111-111111111111",
+        goal: "Standard defaults",
+        concurrencyCap: 1,
+        metadata: {},
+      },
+      actor.principal,
+      access,
+    );
 
-    const sensitiveRun = await service.createRun({
-      repositoryId: "22222222-2222-4222-8222-222222222222",
-      goal: "Sensitive defaults",
-      concurrencyCap: 1,
-      metadata: {}
-    }, actor.principal, access);
+    const sensitiveRun = await service.createRun(
+      {
+        repositoryId: "22222222-2222-4222-8222-222222222222",
+        goal: "Sensitive defaults",
+        concurrencyCap: 1,
+        metadata: {},
+      },
+      actor.principal,
+      access,
+    );
 
     const standardAccessPlan = await service.getRepositorySecretAccessPlan({
       repositoryId: "11111111-1111-4111-8111-111111111111",
@@ -980,9 +987,9 @@ describe("ControlPlaneService governance state", () => {
         allowedRepositoryTrustLevels: ["trusted"],
         sensitivePolicyProfiles: ["restricted"],
         credentialDistribution: ["broker secrets through vault"],
-        policyDrivenAccess: true
+        policyDrivenAccess: true,
       },
-      access
+      access,
     });
 
     const sensitiveAccessPlan = await service.getRepositorySecretAccessPlan({
@@ -994,9 +1001,9 @@ describe("ControlPlaneService governance state", () => {
         allowedRepositoryTrustLevels: ["trusted"],
         sensitivePolicyProfiles: ["restricted"],
         credentialDistribution: ["broker secrets through vault"],
-        policyDrivenAccess: true
+        policyDrivenAccess: true,
       },
-      access
+      access,
     });
 
     expect(standardRun.policyProfile).toBe("standard");
@@ -1004,22 +1011,22 @@ describe("ControlPlaneService governance state", () => {
     expect(db.insertedRuns).toEqual([
       expect.objectContaining({
         repositoryId: "11111111-1111-4111-8111-111111111111",
-        policyProfile: "standard"
+        policyProfile: "standard",
       }),
       expect.objectContaining({
         repositoryId: "22222222-2222-4222-8222-222222222222",
-        policyProfile: "restricted"
-      })
+        policyProfile: "restricted",
+      }),
     ]);
     expect(standardAccessPlan).toMatchObject({
       repositoryName: "standard-repo",
       access: "allowed",
-      policyProfile: "standard"
+      policyProfile: "standard",
     });
     expect(sensitiveAccessPlan).toMatchObject({
       repositoryName: "sensitive-repo",
       access: "brokered",
-      policyProfile: "restricted"
+      policyProfile: "restricted",
     });
   });
 });

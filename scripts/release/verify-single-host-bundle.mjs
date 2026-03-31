@@ -6,7 +6,9 @@ import readline from "node:readline";
 const bundlePath = process.argv[2];
 
 if (!bundlePath) {
-  throw new Error("Usage: node scripts/release/verify-single-host-bundle.mjs <bundle-path>");
+  throw new Error(
+    "Usage: node scripts/release/verify-single-host-bundle.mjs <bundle-path>",
+  );
 }
 
 const forbiddenPatterns = [
@@ -21,7 +23,7 @@ const forbiddenPatterns = [
   "/apps/worker/",
   "/packages/contracts/",
   "/packages/orchestration/",
-  "/packages/database/"
+  "/packages/database/",
 ];
 
 const requiredEntries = new Set([
@@ -36,12 +38,12 @@ const requiredEntries = new Set([
   "/node_modules/@codex-swarm/worker/index.js",
   "/node_modules/@codex-swarm/contracts/index.js",
   "/node_modules/@codex-swarm/orchestration/index.js",
-  "/node_modules/@codex-swarm/database/index.js"
+  "/node_modules/@codex-swarm/database/index.js",
 ]);
 
 await new Promise((resolve, reject) => {
   const child = spawn("tar", ["-tzf", bundlePath], {
-    stdio: ["ignore", "pipe", "inherit"]
+    stdio: ["ignore", "pipe", "inherit"],
   });
   const lines = readline.createInterface({ input: child.stdout });
 
@@ -49,7 +51,11 @@ await new Promise((resolve, reject) => {
     for (const pattern of forbiddenPatterns) {
       if (entry.includes(pattern)) {
         child.kill("SIGTERM");
-        reject(new Error(`Bundle contains forbidden path pattern: ${pattern} (${entry})`));
+        reject(
+          new Error(
+            `Bundle contains forbidden path pattern: ${pattern} (${entry})`,
+          ),
+        );
         return;
       }
     }
@@ -64,7 +70,9 @@ await new Promise((resolve, reject) => {
   child.on("error", reject);
   child.on("exit", (code, signal) => {
     if (signal && signal !== "SIGTERM") {
-      reject(new Error(`tar -tzf ${bundlePath} terminated with signal ${signal}`));
+      reject(
+        new Error(`tar -tzf ${bundlePath} terminated with signal ${signal}`),
+      );
       return;
     }
 
@@ -76,8 +84,8 @@ await new Promise((resolve, reject) => {
     if (requiredEntries.size > 0) {
       reject(
         new Error(
-          `Bundle is missing required entries: ${Array.from(requiredEntries).join(", ")}`
-        )
+          `Bundle is missing required entries: ${Array.from(requiredEntries).join(", ")}`,
+        ),
       );
       return;
     }

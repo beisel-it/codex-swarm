@@ -61,7 +61,11 @@ if (existsSync("AGENTS.md")) {
   }
 }
 
-for (const file of ["CLAUDE.md", "AGENT.md", ".github/copilot-instructions.md"]) {
+for (const file of [
+  "CLAUDE.md",
+  "AGENT.md",
+  ".github/copilot-instructions.md",
+]) {
   if (!existsSync(file)) {
     continue;
   }

@@ -5,13 +5,21 @@ import { tmpdir } from "node:os";
 import { runLeaderPlanningLoop } from "../../src/lib/leader-planning-loop.ts";
 
 const baseUrl = process.env.SMOKE_BASE_URL;
-const authToken = process.env.SMOKE_AUTH_TOKEN ?? process.env.DEV_AUTH_TOKEN ?? "codex-swarm-dev-token";
+const authToken =
+  process.env.SMOKE_AUTH_TOKEN ??
+  process.env.DEV_AUTH_TOKEN ??
+  "codex-swarm-dev-token";
 const repositoryName = process.env.SMOKE_REPOSITORY_NAME ?? "codex-swarm-smoke";
-const repositoryUrl = process.env.SMOKE_REPOSITORY_URL ?? "https://example.com/codex-swarm-smoke.git";
+const repositoryUrl =
+  process.env.SMOKE_REPOSITORY_URL ??
+  "https://example.com/codex-swarm-smoke.git";
 const defaultBranch = process.env.SMOKE_DEFAULT_BRANCH ?? "main";
-const runGoal = process.env.SMOKE_RUN_GOAL ?? "Execute the single-host smoke flow";
-const leaderThreadId = process.env.SMOKE_LEADER_THREAD_ID ?? `thread-leader-${Date.now()}`;
-const workerThreadId = process.env.SMOKE_WORKER_THREAD_ID ?? `thread-worker-${Date.now()}`;
+const runGoal =
+  process.env.SMOKE_RUN_GOAL ?? "Execute the single-host smoke flow";
+const leaderThreadId =
+  process.env.SMOKE_LEADER_THREAD_ID ?? `thread-leader-${Date.now()}`;
+const workerThreadId =
+  process.env.SMOKE_WORKER_THREAD_ID ?? `thread-worker-${Date.now()}`;
 
 if (!baseUrl) {
   console.error("SMOKE_BASE_URL is required");
@@ -21,7 +29,7 @@ if (!baseUrl) {
 function buildHeaders() {
   return {
     authorization: `Bearer ${authToken}`,
-    "content-type": "application/json"
+    "content-type": "application/json",
   };
 }
 
@@ -29,14 +37,16 @@ async function request(method, path, payload) {
   const response = await fetch(new URL(path, baseUrl), {
     method,
     headers: buildHeaders(),
-    body: payload ? JSON.stringify(payload) : undefined
+    body: payload ? JSON.stringify(payload) : undefined,
   });
 
   const raw = await response.text();
   const data = raw.length > 0 ? JSON.parse(raw) : null;
 
   if (!response.ok) {
-    throw new Error(`${method} ${path} failed with ${response.status}: ${JSON.stringify(data)}`);
+    throw new Error(
+      `${method} ${path} failed with ${response.status}: ${JSON.stringify(data)}`,
+    );
   }
 
   return data;
@@ -53,9 +63,9 @@ function buildFixturePlan(goal) {
         description: "Write and persist the plan artifact",
         acceptanceCriteria: [
           ".swarm/plan.md exists",
-          "run.planArtifactPath is populated"
+          "run.planArtifactPath is populated",
         ],
-        dependencyKeys: []
+        dependencyKeys: [],
       },
       {
         key: "worker-task",
@@ -64,11 +74,11 @@ function buildFixturePlan(goal) {
         description: "Pick up the next delegated backend action",
         acceptanceCriteria: [
           "worker receives a direct message from the leader",
-          "worker session is registered"
+          "worker session is registered",
         ],
-        dependencyKeys: ["leader-plan"]
-      }
-    ]
+        dependencyKeys: ["leader-plan"],
+      },
+    ],
   });
 }
 
@@ -79,7 +89,7 @@ const repository = await request("POST", "/api/v1/repositories", {
   name: repositoryName,
   url: repositoryUrl,
   defaultBranch,
-  trustLevel: "trusted"
+  trustLevel: "trusted",
 });
 
 const run = await request("POST", "/api/v1/runs", {
@@ -87,8 +97,8 @@ const run = await request("POST", "/api/v1/runs", {
   goal: runGoal,
   concurrencyCap: 2,
   metadata: {
-    source: "single-host-smoke"
-  }
+    source: "single-host-smoke",
+  },
 });
 
 const leaderFlow = await runLeaderPlanningLoop({
@@ -101,32 +111,37 @@ const leaderFlow = await runLeaderPlanningLoop({
     profile: "default",
     sandbox: "workspace-write",
     approvalPolicy: "on-request",
-    includePlanTool: true
+    includePlanTool: true,
   },
   supervisorCommand: [
     process.execPath,
     "--input-type=module",
     "-e",
-    "setInterval(() => {}, 1000);"
+    "setInterval(() => {}, 1000);",
   ],
   executeTool: async (toolRequest) => ({
     threadId: leaderThreadId,
-    output: toolRequest.tool === "codex"
-      ? "leader-started"
-      : buildFixturePlan(runGoal)
-  })
+    output:
+      toolRequest.tool === "codex"
+        ? "leader-started"
+        : buildFixturePlan(runGoal),
+  }),
 });
 
 const leaderTask = leaderFlow.tasks.find((task) => task.role === "tech-lead");
-const workerTask = leaderFlow.tasks.find((task) => task.role === "backend-developer");
+const workerTask = leaderFlow.tasks.find(
+  (task) => task.role === "backend-developer",
+);
 
 if (!leaderTask || !workerTask) {
-  throw new Error("leader planning loop did not produce both leader and worker tasks");
+  throw new Error(
+    "leader planning loop did not produce both leader and worker tasks",
+  );
 }
 
 await request("PATCH", `/api/v1/tasks/${leaderTask.id}/status`, {
   status: "completed",
-  ownerAgentId: leaderFlow.agentId
+  ownerAgentId: leaderFlow.agentId,
 });
 
 const workerAgent = await request("POST", "/api/v1/agents", {
@@ -142,9 +157,9 @@ const workerAgent = await request("POST", "/api/v1/agents", {
     approvalPolicy: "on-request",
     includePlanTool: false,
     metadata: {
-      source: "single-host-smoke"
-    }
-  }
+      source: "single-host-smoke",
+    },
+  },
 });
 
 await request("POST", "/api/v1/messages", {
@@ -152,7 +167,7 @@ await request("POST", "/api/v1/messages", {
   senderAgentId: leaderFlow.agentId,
   recipientAgentId: workerAgent.id,
   kind: "direct",
-  body: `Implement task ${workerTask.id} using the persisted plan at ${leaderFlow.planArtifactPath}`
+  body: `Implement task ${workerTask.id} using the persisted plan at ${leaderFlow.planArtifactPath}`,
 });
 
 const runDetail = await request("GET", `/api/v1/runs/${run.id}`);
@@ -162,33 +177,48 @@ const verification = {
   runId: run.id,
   repositoryId: repository.id,
   planArtifactPath: runDetail.planArtifactPath,
-  leaderTaskStatus: runDetail.tasks.find((task) => task.id === leaderTask.id)?.status ?? null,
-  workerTaskStatus: runDetail.tasks.find((task) => task.id === workerTask.id)?.status ?? null,
+  leaderTaskStatus:
+    runDetail.tasks.find((task) => task.id === leaderTask.id)?.status ?? null,
+  workerTaskStatus:
+    runDetail.tasks.find((task) => task.id === workerTask.id)?.status ?? null,
   agentCount: runDetail.agents.length,
   sessionThreadIds: runDetail.sessions.map((session) => session.threadId),
   leaderSessionId: leaderFlow.sessionId,
-  directMessages: messages.length
+  directMessages: messages.length,
 };
 
-const ok = verification.planArtifactPath === leaderFlow.planArtifactPath
-  && verification.leaderTaskStatus === "completed"
-  && verification.workerTaskStatus === "pending"
-  && verification.agentCount >= 2
-  && verification.sessionThreadIds.includes(leaderThreadId)
-  && verification.sessionThreadIds.includes(workerThreadId)
-  && verification.directMessages >= 1;
+const ok =
+  verification.planArtifactPath === leaderFlow.planArtifactPath &&
+  verification.leaderTaskStatus === "completed" &&
+  verification.workerTaskStatus === "pending" &&
+  verification.agentCount >= 2 &&
+  verification.sessionThreadIds.includes(leaderThreadId) &&
+  verification.sessionThreadIds.includes(workerThreadId) &&
+  verification.directMessages >= 1;
 
 if (!ok) {
-  console.error(JSON.stringify({
-    ok,
-    workspaceRoot,
-    verification
-  }, null, 2));
+  console.error(
+    JSON.stringify(
+      {
+        ok,
+        workspaceRoot,
+        verification,
+      },
+      null,
+      2,
+    ),
+  );
   process.exit(1);
 }
 
-console.log(JSON.stringify({
-  ok,
-  workspaceRoot,
-  verification
-}, null, 2));
+console.log(
+  JSON.stringify(
+    {
+      ok,
+      workspaceRoot,
+      verification,
+    },
+    null,
+    2,
+  ),
+);

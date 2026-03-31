@@ -36,7 +36,7 @@ import {
   workerNodeDrainUpdateSchema,
   workerNodeHeartbeatSchema,
   workerNodeReconcileSchema,
-  workerNodeRegisterSchema
+  workerNodeRegisterSchema,
 } from "@codex-swarm/contracts";
 
 import { messageKinds } from "../domain/types.js";
@@ -55,59 +55,66 @@ const policyExceptionCreatePayloadSchema = z.object({
     checkpointSource: z.string().min(1),
     observed: z.object({
       totalTokens: z.number().nonnegative().nullable().default(null),
-      totalCostUsd: z.number().nonnegative().nullable().default(null)
+      totalCostUsd: z.number().nonnegative().nullable().default(null),
     }),
     threshold: z.object({
       budgetTokens: z.number().int().positive().nullable().default(null),
-      budgetCostUsd: z.number().nonnegative().nullable().default(null)
-    })
+      budgetCostUsd: z.number().nonnegative().nullable().default(null),
+    }),
   }),
   enforcement: z.object({
     onApproval: z.enum(["continue_run"]),
-    onRejection: z.enum(["remain_blocked"])
+    onRejection: z.enum(["remain_blocked"]),
+  }),
+});
+
+export const messageCreateSchema = z
+  .object({
+    runId: idSchema,
+    senderAgentId: idSchema.optional(),
+    recipientAgentId: idSchema.optional(),
+    kind: z.enum(messageKinds).default("direct"),
+    body: z.string().min(1),
   })
-});
+  .superRefine((value, ctx) => {
+    if (value.kind === "direct" && !value.recipientAgentId) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["recipientAgentId"],
+        message: "direct messages require a recipientAgentId",
+      });
+    }
+  });
 
-export const messageCreateSchema = z.object({
-  runId: idSchema,
-  senderAgentId: idSchema.optional(),
-  recipientAgentId: idSchema.optional(),
-  kind: z.enum(messageKinds).default("direct"),
-  body: z.string().min(1)
-}).superRefine((value, ctx) => {
-  if (value.kind === "direct" && !value.recipientAgentId) {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      path: ["recipientAgentId"],
-      message: "direct messages require a recipientAgentId"
-    });
-  }
-});
+export const approvalCreateSchema = contractApprovalCreateSchema.superRefine(
+  (value, ctx) => {
+    if (value.kind !== "policy_exception") {
+      return;
+    }
 
-export const approvalCreateSchema = contractApprovalCreateSchema.superRefine((value, ctx) => {
-  if (value.kind !== "policy_exception") {
-    return;
-  }
+    const parsedPayload = policyExceptionCreatePayloadSchema.safeParse(
+      value.requestedPayload,
+    );
 
-  const parsedPayload = policyExceptionCreatePayloadSchema.safeParse(value.requestedPayload);
+    if (!parsedPayload.success) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["requestedPayload"],
+        message:
+          "policy_exception approvals require a structured policy decision payload",
+      });
+      return;
+    }
 
-  if (!parsedPayload.success) {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      path: ["requestedPayload"],
-      message: "policy_exception approvals require a structured policy decision payload"
-    });
-    return;
-  }
-
-  if (parsedPayload.data.policyDecision.targetId !== value.runId) {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      path: ["requestedPayload", "policyDecision", "targetId"],
-      message: "policy_exception targetId must match runId"
-    });
-  }
-});
+    if (parsedPayload.data.policyDecision.targetId !== value.runId) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["requestedPayload", "policyDecision", "targetId"],
+        message: "policy_exception targetId must match runId",
+      });
+    }
+  },
+);
 export const approvalResolveSchema = contractApprovalResolveSchema;
 export const validationCreateSchema = contractValidationCreateSchema;
 export const artifactCreateSchema = contractArtifactCreateSchema;
@@ -119,46 +126,54 @@ export const agentSessionCreateSchema = z.object({
   includePlanTool: z.boolean().default(false),
   workerNodeId: z.uuid().optional(),
   placementConstraintLabels: z.array(z.string().min(1)).default([]),
-  metadata: z.record(z.string(), z.unknown()).default({})
+  metadata: z.record(z.string(), z.unknown()).default({}),
 });
 export const workerDispatchSessionAttachSchema = z.object({
-  sessionId: z.uuid()
+  sessionId: z.uuid(),
 });
-export const sessionTranscriptEntrySchema = contractSessionTranscriptEntrySchema;
-export const sessionTranscriptAppendSchema = contractSessionTranscriptAppendSchema;
-export const repeatableRunDefinitionUpdateSchema = z.object({
-  repositoryId: z.uuid().optional(),
-  projectTeamId: z.uuid().optional(),
-  name: z.string().min(1).optional(),
-  description: z.string().min(1).nullable().optional(),
-  status: z.enum(repeatableRunStatuses).optional(),
-  execution: repeatableRunDefinitionCreateSchema.shape.execution.optional()
-}).refine((value) => Object.keys(value).length > 0, {
-  message: "at least one repeatable run field must be updated"
-});
-export const repeatableRunTriggerUpdateSchema = z.object({
-  repeatableRunId: z.uuid().optional(),
-  name: z.string().min(1).optional(),
-  description: z.string().min(1).nullable().optional(),
-  enabled: z.boolean().optional(),
-  config: repeatableRunTriggerCreateSchema.options[0].shape.config.partial().optional()
-}).refine((value) => Object.keys(value).length > 0, {
-  message: "at least one repeatable trigger field must be updated"
-});
+export const sessionTranscriptEntrySchema =
+  contractSessionTranscriptEntrySchema;
+export const sessionTranscriptAppendSchema =
+  contractSessionTranscriptAppendSchema;
+export const repeatableRunDefinitionUpdateSchema = z
+  .object({
+    repositoryId: z.uuid().optional(),
+    projectTeamId: z.uuid().optional(),
+    name: z.string().min(1).optional(),
+    description: z.string().min(1).nullable().optional(),
+    status: z.enum(repeatableRunStatuses).optional(),
+    execution: repeatableRunDefinitionCreateSchema.shape.execution.optional(),
+  })
+  .refine((value) => Object.keys(value).length > 0, {
+    message: "at least one repeatable run field must be updated",
+  });
+export const repeatableRunTriggerUpdateSchema = z
+  .object({
+    repeatableRunId: z.uuid().optional(),
+    name: z.string().min(1).optional(),
+    description: z.string().min(1).nullable().optional(),
+    enabled: z.boolean().optional(),
+    config: repeatableRunTriggerCreateSchema.options[0].shape.config
+      .partial()
+      .optional(),
+  })
+  .refine((value) => Object.keys(value).length > 0, {
+    message: "at least one repeatable trigger field must be updated",
+  });
 export const repeatableRunListQuerySchema = z.object({
-  repositoryId: z.uuid().optional()
+  repositoryId: z.uuid().optional(),
 });
 export const projectTeamListQuerySchema = z.object({
-  projectId: z.uuid().optional()
+  projectId: z.uuid().optional(),
 });
 export const repeatableRunTriggerListQuerySchema = z.object({
   repositoryId: z.uuid().optional(),
-  repeatableRunId: z.uuid().optional()
+  repeatableRunId: z.uuid().optional(),
 });
 export const externalEventReceiptListQuerySchema = z.object({
   repositoryId: z.uuid().optional(),
   repeatableRunId: z.uuid().optional(),
-  repeatableRunTriggerId: z.uuid().optional()
+  repeatableRunTriggerId: z.uuid().optional(),
 });
 export {
   agentCreateSchema,
@@ -190,5 +205,5 @@ export {
   workerNodeDrainUpdateSchema,
   workerNodeHeartbeatSchema,
   workerNodeReconcileSchema,
-  workerNodeRegisterSchema
+  workerNodeRegisterSchema,
 };

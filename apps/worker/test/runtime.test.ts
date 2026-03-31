@@ -9,7 +9,7 @@ import type {
   Repository,
   RunDetail,
   WorkerDispatchAssignment,
-  WorkerNodeRuntime
+  WorkerNodeRuntime,
 } from "@codex-swarm/contracts";
 
 import {
@@ -26,7 +26,7 @@ import {
   materializeRepositoryWorkspace,
   materializePlanArtifact,
   createWorktreePath,
-  resolveWorkspaceProvisioningMode
+  resolveWorkspaceProvisioningMode,
 } from "../src/runtime.js";
 import { claimAndProvisionDispatchWorkspace } from "../src/control-plane.js";
 import { SessionRegistry } from "../src/session-registry.js";
@@ -34,7 +34,7 @@ import { SessionRegistry } from "../src/session-registry.js";
 function git(args: string[], cwd: string) {
   execFileSync("git", args, {
     cwd,
-    stdio: "pipe"
+    stdio: "pipe",
   });
 }
 
@@ -46,7 +46,7 @@ function createRuntime(workspaceRoot: string): WorkerNodeRuntime {
     workspaceRoot,
     codexCommand: ["codex"],
     codexTransport: {
-      kind: "stdio"
+      kind: "stdio",
     },
     controlPlaneUrl: "http://127.0.0.1",
     artifactBaseUrl: "http://127.0.0.1/artifacts",
@@ -55,47 +55,57 @@ function createRuntime(workspaceRoot: string): WorkerNodeRuntime {
     queueKeyPrefix: "codex-swarm",
     capabilities: ["node"],
     credentialEnvNames: [],
-    heartbeatIntervalSeconds: 30
+    heartbeatIntervalSeconds: 30,
   };
 }
 
 describe("worker runtime helpers", () => {
   it("creates deterministic shared workspace paths by default", () => {
-    expect(createWorktreePath({
-      rootDir: ".swarm/worktrees",
-      repositorySlug: "Codex Swarm",
-      runId: "Run 001",
-      agentId: "Backend Dev",
-      taskId: "Task / A"
-    })).toBe(".swarm/worktrees/codex-swarm/run-001/shared");
+    expect(
+      createWorktreePath({
+        rootDir: ".swarm/worktrees",
+        repositorySlug: "Codex Swarm",
+        runId: "Run 001",
+        agentId: "Backend Dev",
+        taskId: "Task / A",
+      }),
+    ).toBe(".swarm/worktrees/codex-swarm/run-001/shared");
   });
 
   it("creates deterministic isolated worktree paths when explicitly enabled", () => {
-    expect(createWorktreePath({
-      rootDir: ".swarm/worktrees",
-      repositorySlug: "Codex Swarm",
-      runId: "Run 001",
-      agentId: "Backend Dev",
-      taskId: "Task / A",
-      mode: "isolated"
-    })).toBe(".swarm/worktrees/codex-swarm/run-001/backend-dev/task-a");
+    expect(
+      createWorktreePath({
+        rootDir: ".swarm/worktrees",
+        repositorySlug: "Codex Swarm",
+        runId: "Run 001",
+        agentId: "Backend Dev",
+        taskId: "Task / A",
+        mode: "isolated",
+      }),
+    ).toBe(".swarm/worktrees/codex-swarm/run-001/backend-dev/task-a");
   });
 
   it("defaults workspace provisioning mode to shared and gates isolation behind an env flag", () => {
-    expect(resolveWorkspaceProvisioningMode({} as NodeJS.ProcessEnv)).toBe("shared");
-    expect(resolveWorkspaceProvisioningMode({
-      CODEX_SWARM_ENABLE_WORKSPACE_ISOLATION: "true"
-    } as NodeJS.ProcessEnv)).toBe("isolated");
+    expect(resolveWorkspaceProvisioningMode({} as NodeJS.ProcessEnv)).toBe(
+      "shared",
+    );
+    expect(
+      resolveWorkspaceProvisioningMode({
+        CODEX_SWARM_ENABLE_WORKSPACE_ISOLATION: "true",
+      } as NodeJS.ProcessEnv),
+    ).toBe("isolated");
   });
 
   it("builds the codex mcp-server command", () => {
-    expect(buildCodexServerCommand({
-      cwd: "/tmp/run-001/backend-dev",
-      profile: "default",
-      sandbox: "workspace-write",
-      approvalPolicy: "on-request",
-      includePlanTool: true
-    })).toEqual([
+    expect(
+      buildCodexServerCommand({
+        cwd: "/tmp/run-001/backend-dev",
+        profile: "default",
+        sandbox: "workspace-write",
+        approvalPolicy: "on-request",
+        includePlanTool: true,
+      }),
+    ).toEqual([
       "codex",
       "mcp-server",
       "--cwd",
@@ -106,56 +116,13 @@ describe("worker runtime helpers", () => {
       "workspace-write",
       "--approval-policy",
       "on-request",
-      "--include-plan-tool"
+      "--include-plan-tool",
     ]);
   });
 
   it("builds a streamable HTTP codex transport descriptor", () => {
-    expect(buildCodexServerCommand({
-      cwd: "/tmp/run-001/backend-dev",
-      profile: "default",
-      sandbox: "workspace-write",
-      approvalPolicy: "on-request",
-      transport: {
-        kind: "streamable_http",
-        url: "https://codex-mcp.internal/mcp",
-        headers: {
-          authorization: "Bearer shared-token"
-        },
-        protocolVersion: "2025-11-25"
-      }
-    })).toEqual([
-      "streamable_http",
-      "https://codex-mcp.internal/mcp"
-    ]);
-  });
-
-  it("builds a start-session request payload", () => {
-    expect(buildCodexSessionStartRequest({
-      prompt: "Start the worker",
-      config: {
-        cwd: "/tmp/run-001/backend-dev",
-        profile: "default",
-        sandbox: "workspace-write",
-        approvalPolicy: "on-request"
-      }
-    })).toEqual({
-      tool: "codex",
-      input: {
-        prompt: "Start the worker",
-        cwd: "/tmp/run-001/backend-dev",
-        profile: "default",
-        sandbox: "workspace-write",
-        approvalPolicy: "on-request",
-        includePlanTool: false
-      }
-    });
-  });
-
-  it("builds a streamable HTTP start-session request payload", () => {
-    expect(buildCodexSessionStartRequest({
-      prompt: "Start the remote worker",
-      config: {
+    expect(
+      buildCodexServerCommand({
         cwd: "/tmp/run-001/backend-dev",
         profile: "default",
         sandbox: "workspace-write",
@@ -164,19 +131,65 @@ describe("worker runtime helpers", () => {
           kind: "streamable_http",
           url: "https://codex-mcp.internal/mcp",
           headers: {
-            authorization: "Bearer shared-token"
+            authorization: "Bearer shared-token",
           },
-          protocolVersion: "2025-11-25"
-        }
-      }
-    })).toEqual({
+          protocolVersion: "2025-11-25",
+        },
+      }),
+    ).toEqual(["streamable_http", "https://codex-mcp.internal/mcp"]);
+  });
+
+  it("builds a start-session request payload", () => {
+    expect(
+      buildCodexSessionStartRequest({
+        prompt: "Start the worker",
+        config: {
+          cwd: "/tmp/run-001/backend-dev",
+          profile: "default",
+          sandbox: "workspace-write",
+          approvalPolicy: "on-request",
+        },
+      }),
+    ).toEqual({
+      tool: "codex",
+      input: {
+        prompt: "Start the worker",
+        cwd: "/tmp/run-001/backend-dev",
+        profile: "default",
+        sandbox: "workspace-write",
+        approvalPolicy: "on-request",
+        includePlanTool: false,
+      },
+    });
+  });
+
+  it("builds a streamable HTTP start-session request payload", () => {
+    expect(
+      buildCodexSessionStartRequest({
+        prompt: "Start the remote worker",
+        config: {
+          cwd: "/tmp/run-001/backend-dev",
+          profile: "default",
+          sandbox: "workspace-write",
+          approvalPolicy: "on-request",
+          transport: {
+            kind: "streamable_http",
+            url: "https://codex-mcp.internal/mcp",
+            headers: {
+              authorization: "Bearer shared-token",
+            },
+            protocolVersion: "2025-11-25",
+          },
+        },
+      }),
+    ).toEqual({
       transport: "streamable_http",
       endpoint: "https://codex-mcp.internal/mcp",
       headers: {
         Accept: "application/json, text/event-stream",
         "Content-Type": "application/json",
         "MCP-Protocol-Version": "2025-11-25",
-        authorization: "Bearer shared-token"
+        authorization: "Bearer shared-token",
       },
       message: {
         jsonrpc: "2.0",
@@ -188,48 +201,52 @@ describe("worker runtime helpers", () => {
           profile: "default",
           sandbox: "workspace-write",
           approvalPolicy: "on-request",
-          includePlanTool: false
-        }
-      }
+          includePlanTool: false,
+        },
+      },
     });
   });
 
   it("builds a reply-session request payload", () => {
-    expect(buildCodexSessionReplyRequest({
-      threadId: "thread-001",
-      prompt: "Continue the worker"
-    })).toEqual({
+    expect(
+      buildCodexSessionReplyRequest({
+        threadId: "thread-001",
+        prompt: "Continue the worker",
+      }),
+    ).toEqual({
       tool: "codex-reply",
       input: {
         threadId: "thread-001",
-        prompt: "Continue the worker"
-      }
+        prompt: "Continue the worker",
+      },
     });
   });
 
   it("builds a streamable HTTP reply-session request payload", () => {
-    expect(buildCodexSessionReplyRequest({
-      threadId: "thread-001",
-      prompt: "Continue the remote worker",
-      config: {
-        cwd: "/tmp/run-001/backend-dev",
-        profile: "default",
-        sandbox: "workspace-write",
-        approvalPolicy: "on-request",
-        transport: {
-          kind: "streamable_http",
-          url: "https://codex-mcp.internal/mcp",
-          headers: {},
-          protocolVersion: "2025-11-25"
-        }
-      }
-    })).toEqual({
+    expect(
+      buildCodexSessionReplyRequest({
+        threadId: "thread-001",
+        prompt: "Continue the remote worker",
+        config: {
+          cwd: "/tmp/run-001/backend-dev",
+          profile: "default",
+          sandbox: "workspace-write",
+          approvalPolicy: "on-request",
+          transport: {
+            kind: "streamable_http",
+            url: "https://codex-mcp.internal/mcp",
+            headers: {},
+            protocolVersion: "2025-11-25",
+          },
+        },
+      }),
+    ).toEqual({
       transport: "streamable_http",
       endpoint: "https://codex-mcp.internal/mcp",
       headers: {
         Accept: "application/json, text/event-stream",
         "Content-Type": "application/json",
-        "MCP-Protocol-Version": "2025-11-25"
+        "MCP-Protocol-Version": "2025-11-25",
       },
       message: {
         jsonrpc: "2.0",
@@ -237,9 +254,9 @@ describe("worker runtime helpers", () => {
         method: "codex/session/reply",
         params: {
           threadId: "thread-001",
-          prompt: "Continue the remote worker"
-        }
-      }
+          prompt: "Continue the remote worker",
+        },
+      },
     });
   });
 
@@ -257,15 +274,21 @@ describe("worker runtime helpers", () => {
               title: "Define the control-plane API",
               role: "backend-developer",
               description: "Document and expose the first run endpoints",
-              definitionOfDone: ["run creation route responds successfully", "shared contract types include the new endpoint"],
-              acceptanceCriteria: ["run creation is routable", "contracts are typed"]
+              definitionOfDone: [
+                "run creation route responds successfully",
+                "shared contract types include the new endpoint",
+              ],
+              acceptanceCriteria: [
+                "run creation is routable",
+                "contracts are typed",
+              ],
             },
             {
               title: "Render the board shell",
-              role: "frontend-developer"
-            }
-          ]
-        }
+              role: "frontend-developer",
+            },
+          ],
+        },
       });
 
       expect(artifact.relativePath).toBe(".swarm/plan.md");
@@ -273,7 +296,9 @@ describe("worker runtime helpers", () => {
       expect(artifact.markdown).toContain("# Swarm Plan");
       expect(artifact.markdown).toContain("1. Define the control-plane API");
       expect(artifact.markdown).toContain("Definition of Done:");
-      expect(artifact.markdown).toContain("run creation route responds successfully");
+      expect(artifact.markdown).toContain(
+        "run creation route responds successfully",
+      );
 
       const persisted = await readFile(artifact.path, "utf8");
       expect(persisted).toBe(artifact.markdown);
@@ -284,14 +309,20 @@ describe("worker runtime helpers", () => {
 
   it("materializes a worker repository by cloning the configured branch", async () => {
     const repoRoot = await mkdtemp(join(tmpdir(), "codex-swarm-repo-source-"));
-    const workspaceRoot = await mkdtemp(join(tmpdir(), "codex-swarm-repo-clone-"));
+    const workspaceRoot = await mkdtemp(
+      join(tmpdir(), "codex-swarm-repo-clone-"),
+    );
     const clonePath = join(workspaceRoot, "worker-001");
 
     try {
       git(["init", "--initial-branch=main"], repoRoot);
       git(["config", "user.name", "Codex Swarm"], repoRoot);
       git(["config", "user.email", "codex-swarm@example.com"], repoRoot);
-      await writeFile(join(repoRoot, "README.md"), "hello from clone\n", "utf8");
+      await writeFile(
+        join(repoRoot, "README.md"),
+        "hello from clone\n",
+        "utf8",
+      );
       git(["add", "README.md"], repoRoot);
       git(["commit", "-m", "initial"], repoRoot);
 
@@ -300,18 +331,20 @@ describe("worker runtime helpers", () => {
           name: "codex-swarm",
           url: repoRoot,
           defaultBranch: "main",
-          localPath: null
+          localPath: null,
         },
-        destinationPath: clonePath
+        destinationPath: clonePath,
       });
 
       expect(workspace).toMatchObject({
         path: clonePath,
         mode: "git_clone",
         branch: "main",
-        sourcePath: null
+        sourcePath: null,
       });
-      expect(await readFile(join(clonePath, "README.md"), "utf8")).toBe("hello from clone\n");
+      expect(await readFile(join(clonePath, "README.md"), "utf8")).toBe(
+        "hello from clone\n",
+      );
     } finally {
       await rm(repoRoot, { recursive: true, force: true });
       await rm(workspaceRoot, { recursive: true, force: true });
@@ -319,30 +352,40 @@ describe("worker runtime helpers", () => {
   });
 
   it("materializes a worker repository by mounting a trusted local path", async () => {
-    const sourceRoot = await mkdtemp(join(tmpdir(), "codex-swarm-repo-mount-source-"));
-    const workspaceRoot = await mkdtemp(join(tmpdir(), "codex-swarm-repo-mount-"));
+    const sourceRoot = await mkdtemp(
+      join(tmpdir(), "codex-swarm-repo-mount-source-"),
+    );
+    const workspaceRoot = await mkdtemp(
+      join(tmpdir(), "codex-swarm-repo-mount-"),
+    );
     const mountPath = join(workspaceRoot, "worker-001");
 
     try {
-      await writeFile(join(sourceRoot, "README.md"), "hello from mount\n", "utf8");
+      await writeFile(
+        join(sourceRoot, "README.md"),
+        "hello from mount\n",
+        "utf8",
+      );
 
       const workspace = await materializeRepositoryWorkspace({
         repository: {
           name: "codex-swarm",
           url: "file:///tmp/codex-swarm",
           defaultBranch: "main",
-          localPath: sourceRoot
+          localPath: sourceRoot,
         },
-        destinationPath: mountPath
+        destinationPath: mountPath,
       });
 
       expect(workspace).toMatchObject({
         path: mountPath,
         mode: "local_path_mount",
         branch: null,
-        sourcePath: sourceRoot
+        sourcePath: sourceRoot,
       });
-      expect(await readFile(join(mountPath, "README.md"), "utf8")).toBe("hello from mount\n");
+      expect(await readFile(join(mountPath, "README.md"), "utf8")).toBe(
+        "hello from mount\n",
+      );
     } finally {
       await rm(sourceRoot, { recursive: true, force: true });
       await rm(workspaceRoot, { recursive: true, force: true });
@@ -350,14 +393,22 @@ describe("worker runtime helpers", () => {
   });
 
   it("claims dispatch work from the control plane and provisions isolated worktrees", async () => {
-    const repoRoot = await mkdtemp(join(tmpdir(), "codex-swarm-provision-source-"));
-    const workspaceRoot = await mkdtemp(join(tmpdir(), "codex-swarm-provision-workspaces-"));
+    const repoRoot = await mkdtemp(
+      join(tmpdir(), "codex-swarm-provision-source-"),
+    );
+    const workspaceRoot = await mkdtemp(
+      join(tmpdir(), "codex-swarm-provision-workspaces-"),
+    );
 
     try {
       git(["init", "--initial-branch=main"], repoRoot);
       git(["config", "user.name", "Codex Swarm"], repoRoot);
       git(["config", "user.email", "codex-swarm@example.com"], repoRoot);
-      await writeFile(join(repoRoot, "README.md"), "hello from source\n", "utf8");
+      await writeFile(
+        join(repoRoot, "README.md"),
+        "hello from source\n",
+        "utf8",
+      );
       git(["add", "README.md"], repoRoot);
       git(["commit", "-m", "initial"], repoRoot);
 
@@ -387,7 +438,7 @@ describe("worker runtime helpers", () => {
           attempt: 0,
           maxAttempts: 3,
           leaseTtlSeconds: 300,
-          createdAt: new Date("2026-03-29T00:00:00.000Z")
+          createdAt: new Date("2026-03-29T00:00:00.000Z"),
         },
         {
           id: "66666666-6666-4666-8666-666666666666",
@@ -414,8 +465,8 @@ describe("worker runtime helpers", () => {
           attempt: 0,
           maxAttempts: 3,
           leaseTtlSeconds: 300,
-          createdAt: new Date("2026-03-29T00:00:00.000Z")
-        }
+          createdAt: new Date("2026-03-29T00:00:00.000Z"),
+        },
       ];
 
       const runDetail: RunDetail = {
@@ -448,13 +499,13 @@ describe("worker runtime helpers", () => {
           autoPublishBranch: false,
           autoCreatePullRequest: false,
           titleTemplate: null,
-          bodyTemplate: null
+          bodyTemplate: null,
         },
         handoffExecution: {
           state: "idle",
           failureReason: null,
           attemptedAt: null,
-          completedAt: null
+          completedAt: null,
         },
         metadata: {},
         context: {
@@ -466,7 +517,7 @@ describe("worker runtime helpers", () => {
           jobId: null,
           jobName: null,
           externalInput: null,
-          values: {}
+          values: {},
         },
         createdBy: "tech-lead",
         createdAt: new Date("2026-03-29T00:00:00.000Z"),
@@ -480,8 +531,8 @@ describe("worker runtime helpers", () => {
           edges: [],
           rootTaskIds: [],
           blockedTaskIds: [],
-          unblockPaths: []
-        }
+          unblockPaths: [],
+        },
       };
       const repository: Repository = {
         id: "55555555-5555-4555-8555-555555555555",
@@ -501,27 +552,36 @@ describe("worker runtime helpers", () => {
           defaultBranch: "main",
           branches: ["main"],
           providerRepoUrl: repoRoot,
-          lastError: null
+          lastError: null,
         },
         createdAt: new Date("2026-03-29T00:00:00.000Z"),
-        updatedAt: new Date("2026-03-29T00:00:00.000Z")
+        updatedAt: new Date("2026-03-29T00:00:00.000Z"),
       };
 
       const server = createServer((request, response) => {
-        if (request.method === "POST" && request.url === "/api/v1/worker-nodes/node-a/claim-dispatch") {
+        if (
+          request.method === "POST" &&
+          request.url === "/api/v1/worker-nodes/node-a/claim-dispatch"
+        ) {
           const nextAssignment = assignments.shift() ?? null;
           response.writeHead(200, { "content-type": "application/json" });
           response.end(JSON.stringify(nextAssignment));
           return;
         }
 
-        if (request.method === "GET" && request.url === `/api/v1/runs/${runDetail.id}`) {
+        if (
+          request.method === "GET" &&
+          request.url === `/api/v1/runs/${runDetail.id}`
+        ) {
           response.writeHead(200, { "content-type": "application/json" });
           response.end(JSON.stringify(runDetail));
           return;
         }
 
-        if (request.method === "GET" && request.url === "/api/v1/repositories") {
+        if (
+          request.method === "GET" &&
+          request.url === "/api/v1/repositories"
+        ) {
           response.writeHead(200, { "content-type": "application/json" });
           response.end(JSON.stringify([repository]));
           return;
@@ -544,34 +604,52 @@ describe("worker runtime helpers", () => {
 
         const runtime = {
           ...createRuntime(workspaceRoot),
-          controlPlaneUrl: `http://127.0.0.1:${address.port}`
+          controlPlaneUrl: `http://127.0.0.1:${address.port}`,
         };
 
         const first = await claimAndProvisionDispatchWorkspace({
           runtime,
           controlPlane: {
-            baseUrl: runtime.controlPlaneUrl
-          }
+            baseUrl: runtime.controlPlaneUrl,
+          },
         });
         const second = await claimAndProvisionDispatchWorkspace({
           runtime,
           controlPlane: {
-            baseUrl: runtime.controlPlaneUrl
-          }
+            baseUrl: runtime.controlPlaneUrl,
+          },
         });
 
         expect(first?.workspace.mode).toBe("git_clone");
         expect(second?.workspace.mode).toBe("git_clone");
-        expect(await readFile(join(first!.workspace.path, "README.md"), "utf8")).toBe("hello from source\n");
-        expect(await readFile(join(second!.workspace.path, "README.md"), "utf8")).toBe("hello from source\n");
-        expect(first?.bootstrap.environment.CODEX_SWARM_DISPATCH_ID).toBe(first?.assignment.id);
-        expect(second?.bootstrap.environment.CODEX_SWARM_DISPATCH_ID).toBe(second?.assignment.id);
+        expect(
+          await readFile(join(first!.workspace.path, "README.md"), "utf8"),
+        ).toBe("hello from source\n");
+        expect(
+          await readFile(join(second!.workspace.path, "README.md"), "utf8"),
+        ).toBe("hello from source\n");
+        expect(first?.bootstrap.environment.CODEX_SWARM_DISPATCH_ID).toBe(
+          first?.assignment.id,
+        );
+        expect(second?.bootstrap.environment.CODEX_SWARM_DISPATCH_ID).toBe(
+          second?.assignment.id,
+        );
 
-        await writeFile(join(first!.workspace.path, "README.md"), "worker one change\n", "utf8");
+        await writeFile(
+          join(first!.workspace.path, "README.md"),
+          "worker one change\n",
+          "utf8",
+        );
 
-        expect(await readFile(join(first!.workspace.path, "README.md"), "utf8")).toBe("worker one change\n");
-        expect(await readFile(join(second!.workspace.path, "README.md"), "utf8")).toBe("hello from source\n");
-        expect(await readFile(join(repoRoot, "README.md"), "utf8")).toBe("hello from source\n");
+        expect(
+          await readFile(join(first!.workspace.path, "README.md"), "utf8"),
+        ).toBe("worker one change\n");
+        expect(
+          await readFile(join(second!.workspace.path, "README.md"), "utf8"),
+        ).toBe("hello from source\n");
+        expect(await readFile(join(repoRoot, "README.md"), "utf8")).toBe(
+          "hello from source\n",
+        );
       } finally {
         await new Promise<void>((resolve, reject) => {
           server.close((error) => {
@@ -591,15 +669,23 @@ describe("worker runtime helpers", () => {
   });
 
   it("reuses an existing shared workspace when reuseExisting is enabled", async () => {
-    const repoRoot = await mkdtemp(join(tmpdir(), "codex-swarm-shared-source-"));
-    const workspaceRoot = await mkdtemp(join(tmpdir(), "codex-swarm-shared-workspaces-"));
+    const repoRoot = await mkdtemp(
+      join(tmpdir(), "codex-swarm-shared-source-"),
+    );
+    const workspaceRoot = await mkdtemp(
+      join(tmpdir(), "codex-swarm-shared-workspaces-"),
+    );
     const sharedWorkspacePath = join(workspaceRoot, "shared");
 
     try {
       git(["init", "--initial-branch=main"], repoRoot);
       git(["config", "user.name", "Codex Swarm"], repoRoot);
       git(["config", "user.email", "codex-swarm@example.com"], repoRoot);
-      await writeFile(join(repoRoot, "README.md"), "hello from source\n", "utf8");
+      await writeFile(
+        join(repoRoot, "README.md"),
+        "hello from source\n",
+        "utf8",
+      );
       git(["add", "README.md"], repoRoot);
       git(["commit", "-m", "initial"], repoRoot);
 
@@ -621,30 +707,36 @@ describe("worker runtime helpers", () => {
           defaultBranch: "main",
           branches: ["main"],
           providerRepoUrl: repoRoot,
-          lastError: null
+          lastError: null,
         },
         createdAt: new Date("2026-03-29T00:00:00.000Z"),
-        updatedAt: new Date("2026-03-29T00:00:00.000Z")
+        updatedAt: new Date("2026-03-29T00:00:00.000Z"),
       };
 
       const first = await materializeRepositoryWorkspace({
         repository,
         destinationPath: sharedWorkspacePath,
         branch: "main",
-        reuseExisting: true
+        reuseExisting: true,
       });
 
-      await writeFile(join(first.path, "README.md"), "shared workspace change\n", "utf8");
+      await writeFile(
+        join(first.path, "README.md"),
+        "shared workspace change\n",
+        "utf8",
+      );
 
       const second = await materializeRepositoryWorkspace({
         repository,
         destinationPath: sharedWorkspacePath,
         branch: "main",
-        reuseExisting: true
+        reuseExisting: true,
       });
 
       expect(second.path).toBe(first.path);
-      expect(await readFile(join(second.path, "README.md"), "utf8")).toBe("shared workspace change\n");
+      expect(await readFile(join(second.path, "README.md"), "utf8")).toBe(
+        "shared workspace change\n",
+      );
     } finally {
       await rm(repoRoot, { recursive: true, force: true });
       await rm(workspaceRoot, { recursive: true, force: true });
@@ -652,7 +744,9 @@ describe("worker runtime helpers", () => {
   });
 
   it("deletes stale worktree directories while skipping placeholder paths", async () => {
-    const workspaceRoot = await mkdtemp(join(tmpdir(), "codex-swarm-worktree-cleanup-"));
+    const workspaceRoot = await mkdtemp(
+      join(tmpdir(), "codex-swarm-worktree-cleanup-"),
+    );
     const staleWorktree = join(workspaceRoot, "stale-worker");
 
     try {
@@ -661,23 +755,25 @@ describe("worker runtime helpers", () => {
 
       const results = await cleanupWorktreePaths([
         staleWorktree,
-        "untracked/session-001"
+        "untracked/session-001",
       ]);
 
       expect(results).toEqual([
         {
           path: staleWorktree,
           deleted: true,
-          reason: null
+          reason: null,
         },
         {
           path: "untracked/session-001",
           deleted: false,
-          reason: "placeholder_path"
-        }
+          reason: "placeholder_path",
+        },
       ]);
 
-      await expect(readFile(join(staleWorktree, "README.md"), "utf8")).rejects.toThrow();
+      await expect(
+        readFile(join(staleWorktree, "README.md"), "utf8"),
+      ).rejects.toThrow();
     } finally {
       await rm(workspaceRoot, { recursive: true, force: true });
     }
@@ -694,13 +790,13 @@ describe("worker runtime helpers", () => {
         cwd: process.cwd(),
         profile: "default",
         sandbox: "workspace-write",
-        approvalPolicy: "on-request"
+        approvalPolicy: "on-request",
       },
       command: [
         process.execPath,
         "--input-type=module",
         "-e",
-        "console.log('codex-mcp-server-ready'); setInterval(() => {}, 1000);"
+        "console.log('codex-mcp-server-ready'); setInterval(() => {}, 1000);",
       ],
       onStdout: (chunk) => {
         stdout.push(chunk);
@@ -708,7 +804,7 @@ describe("worker runtime helpers", () => {
         if (chunk.includes("codex-mcp-server-ready")) {
           resolveReady?.();
         }
-      }
+      },
     });
 
     const started = await supervisor.start();
@@ -729,14 +825,14 @@ describe("worker runtime helpers", () => {
         cwd: process.cwd(),
         profile: "default",
         sandbox: "workspace-write",
-        approvalPolicy: "on-request"
+        approvalPolicy: "on-request",
       },
       command: [
         process.execPath,
         "--input-type=module",
         "-e",
-        "process.exit(7);"
-      ]
+        "process.exit(7);",
+      ],
     });
 
     await supervisor.start();
@@ -758,9 +854,9 @@ describe("worker runtime helpers", () => {
           kind: "streamable_http",
           url: "https://codex-mcp.internal/mcp",
           headers: {},
-          protocolVersion: "2025-11-25"
-        }
-      }
+          protocolVersion: "2025-11-25",
+        },
+      },
     });
 
     const started = await supervisor.start();
@@ -786,26 +882,30 @@ describe("worker runtime helpers", () => {
       req.on("end", () => {
         requests.push({
           headers: req.headers,
-          body
+          body,
         });
         res.writeHead(200, {
           "Content-Type": "application/json",
-          "MCP-Session-Id": "mcp-session-001"
+          "MCP-Session-Id": "mcp-session-001",
         });
-        res.end(JSON.stringify({
-          jsonrpc: "2.0",
-          result: {
-            threadId: "thread-remote-001",
-            output: "remote-ok",
-            metadata: {
-              source: "shared-service"
-            }
-          }
-        }));
+        res.end(
+          JSON.stringify({
+            jsonrpc: "2.0",
+            result: {
+              threadId: "thread-remote-001",
+              output: "remote-ok",
+              metadata: {
+                source: "shared-service",
+              },
+            },
+          }),
+        );
       });
     });
 
-    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
+    await new Promise<void>((resolve) =>
+      server.listen(0, "127.0.0.1", () => resolve()),
+    );
     const address = server.address();
 
     if (!address || typeof address === "string") {
@@ -814,36 +914,40 @@ describe("worker runtime helpers", () => {
 
     try {
       const executeTool = createStreamableHttpToolExecutor();
-      const result = await executeTool(buildCodexSessionStartRequest({
-        prompt: "Start remote worker",
-        config: {
-          cwd: "/tmp/run-001/backend-dev",
-          profile: "default",
-          sandbox: "workspace-write",
-          approvalPolicy: "on-request",
-          transport: {
-            kind: "streamable_http",
-            url: `http://127.0.0.1:${address.port}/mcp`,
-            headers: {
-              authorization: "Bearer shared-token"
+      const result = await executeTool(
+        buildCodexSessionStartRequest({
+          prompt: "Start remote worker",
+          config: {
+            cwd: "/tmp/run-001/backend-dev",
+            profile: "default",
+            sandbox: "workspace-write",
+            approvalPolicy: "on-request",
+            transport: {
+              kind: "streamable_http",
+              url: `http://127.0.0.1:${address.port}/mcp`,
+              headers: {
+                authorization: "Bearer shared-token",
+              },
+              protocolVersion: "2025-11-25",
             },
-            protocolVersion: "2025-11-25"
-          }
-        }
-      }));
+          },
+        }),
+      );
 
       expect(result).toEqual({
         threadId: "thread-remote-001",
         output: "remote-ok",
         metadata: {
           source: "shared-service",
-          mcpSessionId: "mcp-session-001"
-        }
+          mcpSessionId: "mcp-session-001",
+        },
       });
       expect(requests).toHaveLength(1);
-      expect(requests[0]?.headers["accept"]).toBe("application/json, text/event-stream");
+      expect(requests[0]?.headers["accept"]).toBe(
+        "application/json, text/event-stream",
+      );
       expect(requests[0]?.headers["mcp-protocol-version"]).toBe("2025-11-25");
-      expect(requests[0]?.body).toContain("\"method\":\"codex/session/start\"");
+      expect(requests[0]?.body).toContain('"method":"codex/session/start"');
     } finally {
       await new Promise<void>((resolve, reject) => {
         server.close((error) => {
@@ -859,54 +963,84 @@ describe("worker runtime helpers", () => {
   });
 
   it("executes local codex start requests through the CLI", async () => {
-    const calls: Array<{ command: string; args: string[]; cwd: string | undefined }> = [];
+    const calls: Array<{
+      command: string;
+      args: string[];
+      cwd: string | undefined;
+    }> = [];
     const executeTool = createLocalCodexCliExecutor({
       command: process.execPath,
       spawnImpl: (command, args, options) => {
         calls.push({
           command,
           args: [...args],
-          cwd: options.cwd?.toString()
+          cwd: options.cwd?.toString(),
         });
 
         const stdout = new PassThrough();
         const stderr = new PassThrough();
         const child = {
           stdout,
-          stderr
+          stderr,
         } as any;
 
         queueMicrotask(() => {
-          stdout.end([
-            JSON.stringify({ type: "thread.started", thread_id: "thread-cli-001" }),
-            JSON.stringify({ type: "item.completed", item: { id: "item-1", type: "agent_message", text: "cli-started" } }),
-            JSON.stringify({ type: "turn.completed", usage: { output_tokens: 1 } })
-          ].join("\n"));
+          stdout.end(
+            [
+              JSON.stringify({
+                type: "thread.started",
+                thread_id: "thread-cli-001",
+              }),
+              JSON.stringify({
+                type: "item.completed",
+                item: {
+                  id: "item-1",
+                  type: "agent_message",
+                  text: "cli-started",
+                },
+              }),
+              JSON.stringify({
+                type: "turn.completed",
+                usage: { output_tokens: 1 },
+              }),
+            ].join("\n"),
+          );
           child.emit("exit", 0, null);
         });
 
         Object.setPrototypeOf(child, PassThrough.prototype);
-        child.on = Function.prototype.bind.call((new PassThrough() as any).on, child);
-        child.once = Function.prototype.bind.call((new PassThrough() as any).once, child);
-        child.emit = Function.prototype.bind.call((new PassThrough() as any).emit, child);
+        child.on = Function.prototype.bind.call(
+          (new PassThrough() as any).on,
+          child,
+        );
+        child.once = Function.prototype.bind.call(
+          (new PassThrough() as any).once,
+          child,
+        );
+        child.emit = Function.prototype.bind.call(
+          (new PassThrough() as any).emit,
+          child,
+        );
 
         return child;
-      }
+      },
     });
 
-    const result = await executeTool(buildCodexSessionStartRequest({
-      prompt: "Start the worker",
-      config: {
-        cwd: "/tmp/run-001/backend-dev",
-        profile: "default",
-        sandbox: "workspace-write",
-        approvalPolicy: "on-request"
-      }
-    }));
+    const result = await executeTool(
+      buildCodexSessionStartRequest({
+        prompt: "Start the worker",
+        config: {
+          cwd: "/tmp/run-001/backend-dev",
+          profile: "default",
+          sandbox: "workspace-write",
+          approvalPolicy: "on-request",
+        },
+      }),
+    );
 
     expect(result).toEqual({
       threadId: "thread-cli-001",
-      output: "cli-started"
+      output: "cli-started",
     });
     expect(calls).toHaveLength(1);
     expect(calls[0]?.command).toBe(process.execPath);
@@ -919,55 +1053,85 @@ describe("worker runtime helpers", () => {
       "/tmp/run-001/backend-dev",
       "-s",
       "workspace-write",
-      "Start the worker"
+      "Start the worker",
     ]);
     expect(calls[0]?.cwd).toBe("/tmp/run-001/backend-dev");
   });
 
   it("executes local codex reply requests through the CLI", async () => {
-    const calls: Array<{ command: string; args: string[]; cwd: string | undefined }> = [];
+    const calls: Array<{
+      command: string;
+      args: string[];
+      cwd: string | undefined;
+    }> = [];
     const executeTool = createLocalCodexCliExecutor({
       command: process.execPath,
       spawnImpl: (command, args, options) => {
         calls.push({
           command,
           args: [...args],
-          cwd: options.cwd?.toString()
+          cwd: options.cwd?.toString(),
         });
 
         const stdout = new PassThrough();
         const stderr = new PassThrough();
         const child = {
           stdout,
-          stderr
+          stderr,
         } as any;
 
         queueMicrotask(() => {
-          stdout.end([
-            JSON.stringify({ type: "thread.started", thread_id: "thread-cli-001" }),
-            JSON.stringify({ type: "item.completed", item: { id: "item-1", type: "agent_message", text: "cli-continued" } }),
-            JSON.stringify({ type: "turn.completed", usage: { output_tokens: 1 } })
-          ].join("\n"));
+          stdout.end(
+            [
+              JSON.stringify({
+                type: "thread.started",
+                thread_id: "thread-cli-001",
+              }),
+              JSON.stringify({
+                type: "item.completed",
+                item: {
+                  id: "item-1",
+                  type: "agent_message",
+                  text: "cli-continued",
+                },
+              }),
+              JSON.stringify({
+                type: "turn.completed",
+                usage: { output_tokens: 1 },
+              }),
+            ].join("\n"),
+          );
           child.emit("exit", 0, null);
         });
 
         Object.setPrototypeOf(child, PassThrough.prototype);
-        child.on = Function.prototype.bind.call((new PassThrough() as any).on, child);
-        child.once = Function.prototype.bind.call((new PassThrough() as any).once, child);
-        child.emit = Function.prototype.bind.call((new PassThrough() as any).emit, child);
+        child.on = Function.prototype.bind.call(
+          (new PassThrough() as any).on,
+          child,
+        );
+        child.once = Function.prototype.bind.call(
+          (new PassThrough() as any).once,
+          child,
+        );
+        child.emit = Function.prototype.bind.call(
+          (new PassThrough() as any).emit,
+          child,
+        );
 
         return child;
-      }
+      },
     });
 
-    const result = await executeTool(buildCodexSessionReplyRequest({
-      threadId: "thread-cli-001",
-      prompt: "Continue the worker"
-    }));
+    const result = await executeTool(
+      buildCodexSessionReplyRequest({
+        threadId: "thread-cli-001",
+        prompt: "Continue the worker",
+      }),
+    );
 
     expect(result).toEqual({
       threadId: "thread-cli-001",
-      output: "cli-continued"
+      output: "cli-continued",
     });
     expect(calls).toHaveLength(1);
     expect(calls[0]?.args).toEqual([
@@ -977,7 +1141,7 @@ describe("worker runtime helpers", () => {
       "--json",
       "--full-auto",
       "thread-cli-001",
-      "Continue the worker"
+      "Continue the worker",
     ]);
   });
 
@@ -988,46 +1152,72 @@ describe("worker runtime helpers", () => {
       spawnImpl: (_command, args, options) => {
         calls.push({
           args: [...args],
-          cwd: options.cwd?.toString()
+          cwd: options.cwd?.toString(),
         });
 
         const stdout = new PassThrough();
         const stderr = new PassThrough();
         const child = {
           stdout,
-          stderr
+          stderr,
         } as any;
 
         queueMicrotask(() => {
-          stdout.end([
-            JSON.stringify({ type: "thread.started", thread_id: "thread-cli-relative-001" }),
-            JSON.stringify({ type: "item.completed", item: { id: "item-1", type: "agent_message", text: "cli-started-relative" } }),
-            JSON.stringify({ type: "turn.completed", usage: { output_tokens: 1 } })
-          ].join("\n"));
+          stdout.end(
+            [
+              JSON.stringify({
+                type: "thread.started",
+                thread_id: "thread-cli-relative-001",
+              }),
+              JSON.stringify({
+                type: "item.completed",
+                item: {
+                  id: "item-1",
+                  type: "agent_message",
+                  text: "cli-started-relative",
+                },
+              }),
+              JSON.stringify({
+                type: "turn.completed",
+                usage: { output_tokens: 1 },
+              }),
+            ].join("\n"),
+          );
           child.emit("exit", 0, null);
         });
 
         Object.setPrototypeOf(child, PassThrough.prototype);
-        child.on = Function.prototype.bind.call((new PassThrough() as any).on, child);
-        child.once = Function.prototype.bind.call((new PassThrough() as any).once, child);
-        child.emit = Function.prototype.bind.call((new PassThrough() as any).emit, child);
+        child.on = Function.prototype.bind.call(
+          (new PassThrough() as any).on,
+          child,
+        );
+        child.once = Function.prototype.bind.call(
+          (new PassThrough() as any).once,
+          child,
+        );
+        child.emit = Function.prototype.bind.call(
+          (new PassThrough() as any).emit,
+          child,
+        );
 
         return child;
-      }
+      },
     });
 
     const relativeCwd = ".swarm/worktrees/example/run-001/shared";
     const resolvedCwd = resolve(relativeCwd);
 
-    await executeTool(buildCodexSessionStartRequest({
-      prompt: "Start the worker",
-      config: {
-        cwd: relativeCwd,
-        profile: "leader",
-        sandbox: "workspace-write",
-        approvalPolicy: "never"
-      }
-    }));
+    await executeTool(
+      buildCodexSessionStartRequest({
+        prompt: "Start the worker",
+        config: {
+          cwd: relativeCwd,
+          profile: "leader",
+          sandbox: "workspace-write",
+          approvalPolicy: "never",
+        },
+      }),
+    );
 
     expect(calls).toHaveLength(1);
     expect(calls[0]?.args).toEqual([
@@ -1039,7 +1229,7 @@ describe("worker runtime helpers", () => {
       resolvedCwd,
       "-p",
       "leader",
-      "Start the worker"
+      "Start the worker",
     ]);
     expect(calls[0]?.cwd).toBe(resolvedCwd);
   });
@@ -1054,8 +1244,8 @@ describe("worker runtime helpers", () => {
         rootDir: ".swarm/worktrees",
         repositorySlug: "codex-swarm",
         runId: "run-001",
-        agentId: "agent-001"
-      })
+        agentId: "agent-001",
+      }),
     });
 
     const requests: Array<{ tool: string; threadId?: string }> = [];
@@ -1065,14 +1255,14 @@ describe("worker runtime helpers", () => {
         profile: "default",
         sandbox: "workspace-write",
         approvalPolicy: "on-request",
-        includePlanTool: true
+        includePlanTool: true,
       },
       command: [
         process.execPath,
         "--input-type=module",
         "-e",
-        "setInterval(() => {}, 1000);"
-      ]
+        "setInterval(() => {}, 1000);",
+      ],
     });
     const runtime = new CodexSessionRuntime({
       registry,
@@ -1082,32 +1272,42 @@ describe("worker runtime helpers", () => {
           throw new Error("expected stdio codex request");
         }
 
-        requests.push(request.tool === "codex-reply"
-          ? {
-              tool: request.tool,
-              threadId: request.input.threadId
-            }
-          : {
-              tool: request.tool
-            });
+        requests.push(
+          request.tool === "codex-reply"
+            ? {
+                tool: request.tool,
+                threadId: request.input.threadId,
+              }
+            : {
+                tool: request.tool,
+              },
+        );
 
         return {
           threadId: "thread-001",
-          output: request.tool === "codex" ? "started" : "continued"
+          output: request.tool === "codex" ? "started" : "continued",
         };
       },
-      now: () => new Date("2026-03-29T00:00:00.000Z")
+      now: () => new Date("2026-03-29T00:00:00.000Z"),
     });
 
-    const started = await runtime.startSession("session-001", "Start the worker");
+    const started = await runtime.startSession(
+      "session-001",
+      "Start the worker",
+    );
     expect(started.request.tool).toBe("codex");
     expect(started.session.threadId).toBe("thread-001");
     expect(started.supervisor.status).toBe("running");
 
-    const continued = await runtime.continueSession("session-001", "Continue the worker");
+    const continued = await runtime.continueSession(
+      "session-001",
+      "Continue the worker",
+    );
     expect(continued.request.tool).toBe("codex-reply");
     expect(continued.session.threadId).toBe("thread-001");
-    expect(continued.session.lastHeartbeatAt?.toISOString()).toBe("2026-03-29T00:00:00.000Z");
+    expect(continued.session.lastHeartbeatAt?.toISOString()).toBe(
+      "2026-03-29T00:00:00.000Z",
+    );
 
     const stopped = await runtime.stopSession("session-001");
     expect(stopped.session.state).toBe("stopped");
@@ -1115,121 +1315,131 @@ describe("worker runtime helpers", () => {
 
     expect(requests).toEqual([
       {
-        tool: "codex"
+        tool: "codex",
       },
       {
         tool: "codex-reply",
-        threadId: "thread-001"
-      }
+        threadId: "thread-001",
+      },
     ]);
   });
 
   it("builds a restart recovery plan for persisted sessions", () => {
-    expect(buildSessionRecoveryPlan([
-      {
-        sessionId: "session-active",
-        runId: "run-001",
-        agentId: "agent-001",
-        worktreePath: ".swarm/worktrees/codex-swarm/run-001/agent-001",
-        state: "active",
-        threadId: "thread-001",
-        lastHeartbeatAt: new Date("2026-03-28T12:10:00.000Z")
-      },
-      {
-        sessionId: "session-pending",
-        runId: "run-001",
-        agentId: "agent-002",
-        worktreePath: ".swarm/worktrees/codex-swarm/run-001/agent-002",
-        state: "pending",
-        threadId: null,
-        lastHeartbeatAt: null
-      },
-      {
-        sessionId: "session-stale",
-        runId: "run-001",
-        agentId: "agent-003",
-        worktreePath: ".swarm/worktrees/codex-swarm/run-001/agent-003",
-        state: "active",
-        threadId: "thread-003",
-        lastHeartbeatAt: new Date("2026-03-28T11:30:00.000Z")
-      },
-      {
-        sessionId: "session-missing-worktree",
-        runId: "run-001",
-        agentId: "agent-004",
-        worktreePath: ".swarm/worktrees/codex-swarm/run-001/agent-004",
-        state: "active",
-        threadId: "thread-004",
-        lastHeartbeatAt: new Date("2026-03-28T12:10:00.000Z")
-      },
-      {
-        sessionId: "session-failed",
-        runId: "run-001",
-        agentId: "agent-005",
-        worktreePath: ".swarm/worktrees/codex-swarm/run-001/agent-005",
-        state: "failed",
-        threadId: "thread-005",
-        lastHeartbeatAt: new Date("2026-03-28T12:10:00.000Z")
-      }
-    ], {
-      now: new Date("2026-03-28T12:15:00.000Z"),
-      staleAfterMs: 10 * 60 * 1000,
-      existingWorktreePaths: [
-        ".swarm/worktrees/codex-swarm/run-001/agent-001",
-        ".swarm/worktrees/codex-swarm/run-001/agent-002",
-        ".swarm/worktrees/codex-swarm/run-001/agent-003",
-        ".swarm/worktrees/codex-swarm/run-001/agent-005"
-      ]
-    })).toEqual([
+    expect(
+      buildSessionRecoveryPlan(
+        [
+          {
+            sessionId: "session-active",
+            runId: "run-001",
+            agentId: "agent-001",
+            worktreePath: ".swarm/worktrees/codex-swarm/run-001/agent-001",
+            state: "active",
+            threadId: "thread-001",
+            lastHeartbeatAt: new Date("2026-03-28T12:10:00.000Z"),
+          },
+          {
+            sessionId: "session-pending",
+            runId: "run-001",
+            agentId: "agent-002",
+            worktreePath: ".swarm/worktrees/codex-swarm/run-001/agent-002",
+            state: "pending",
+            threadId: null,
+            lastHeartbeatAt: null,
+          },
+          {
+            sessionId: "session-stale",
+            runId: "run-001",
+            agentId: "agent-003",
+            worktreePath: ".swarm/worktrees/codex-swarm/run-001/agent-003",
+            state: "active",
+            threadId: "thread-003",
+            lastHeartbeatAt: new Date("2026-03-28T11:30:00.000Z"),
+          },
+          {
+            sessionId: "session-missing-worktree",
+            runId: "run-001",
+            agentId: "agent-004",
+            worktreePath: ".swarm/worktrees/codex-swarm/run-001/agent-004",
+            state: "active",
+            threadId: "thread-004",
+            lastHeartbeatAt: new Date("2026-03-28T12:10:00.000Z"),
+          },
+          {
+            sessionId: "session-failed",
+            runId: "run-001",
+            agentId: "agent-005",
+            worktreePath: ".swarm/worktrees/codex-swarm/run-001/agent-005",
+            state: "failed",
+            threadId: "thread-005",
+            lastHeartbeatAt: new Date("2026-03-28T12:10:00.000Z"),
+          },
+        ],
+        {
+          now: new Date("2026-03-28T12:15:00.000Z"),
+          staleAfterMs: 10 * 60 * 1000,
+          existingWorktreePaths: [
+            ".swarm/worktrees/codex-swarm/run-001/agent-001",
+            ".swarm/worktrees/codex-swarm/run-001/agent-002",
+            ".swarm/worktrees/codex-swarm/run-001/agent-003",
+            ".swarm/worktrees/codex-swarm/run-001/agent-005",
+          ],
+        },
+      ),
+    ).toEqual([
       {
         sessionId: "session-active",
         action: "resume",
-        reason: "resume_session"
+        reason: "resume_session",
       },
       {
         sessionId: "session-pending",
         action: "retry",
-        reason: "retry_pending_session"
+        reason: "retry_pending_session",
       },
       {
         sessionId: "session-stale",
         action: "mark_stale",
-        reason: "heartbeat_timeout"
+        reason: "heartbeat_timeout",
       },
       {
         sessionId: "session-missing-worktree",
         action: "mark_stale",
-        reason: "missing_worktree"
+        reason: "missing_worktree",
       },
       {
         sessionId: "session-failed",
         action: "archive",
-        reason: "terminal_state"
-      }
+        reason: "terminal_state",
+      },
     ]);
   });
 
   it("marks active sessions without thread ids as stale instead of retrying them", () => {
-    expect(buildSessionRecoveryPlan([
-      {
-        sessionId: "session-active-missing-thread",
-        runId: "run-001",
-        agentId: "agent-006",
-        worktreePath: ".swarm/worktrees/codex-swarm/run-001/agent-006",
-        state: "active",
-        threadId: null,
-        lastHeartbeatAt: null
-      }
-    ], {
-      existingWorktreePaths: [
-        ".swarm/worktrees/codex-swarm/run-001/agent-006"
-      ]
-    })).toEqual([
+    expect(
+      buildSessionRecoveryPlan(
+        [
+          {
+            sessionId: "session-active-missing-thread",
+            runId: "run-001",
+            agentId: "agent-006",
+            worktreePath: ".swarm/worktrees/codex-swarm/run-001/agent-006",
+            state: "active",
+            threadId: null,
+            lastHeartbeatAt: null,
+          },
+        ],
+        {
+          existingWorktreePaths: [
+            ".swarm/worktrees/codex-swarm/run-001/agent-006",
+          ],
+        },
+      ),
+    ).toEqual([
       {
         sessionId: "session-active-missing-thread",
         action: "mark_stale",
-        reason: "missing_thread"
-      }
+        reason: "missing_thread",
+      },
     ]);
   });
 
@@ -1245,7 +1455,7 @@ describe("worker runtime helpers", () => {
           worktreePath,
           state: "active" as const,
           threadId: `thread-${index}`,
-          lastHeartbeatAt: new Date("2026-03-28T12:14:00.000Z")
+          lastHeartbeatAt: new Date("2026-03-28T12:14:00.000Z"),
         };
       }
 
@@ -1257,7 +1467,7 @@ describe("worker runtime helpers", () => {
           worktreePath,
           state: "pending" as const,
           threadId: null,
-          lastHeartbeatAt: null
+          lastHeartbeatAt: null,
         };
       }
 
@@ -1269,7 +1479,7 @@ describe("worker runtime helpers", () => {
           worktreePath,
           state: "active" as const,
           threadId: `thread-${index}`,
-          lastHeartbeatAt: new Date("2026-03-28T11:00:00.000Z")
+          lastHeartbeatAt: new Date("2026-03-28T11:00:00.000Z"),
         };
       }
 
@@ -1280,20 +1490,22 @@ describe("worker runtime helpers", () => {
         worktreePath,
         state: "failed" as const,
         threadId: `thread-${index}`,
-        lastHeartbeatAt: new Date("2026-03-28T12:14:00.000Z")
+        lastHeartbeatAt: new Date("2026-03-28T12:14:00.000Z"),
       };
     });
 
     const plan = buildSessionRecoveryPlan(sessions, {
       now: new Date("2026-03-28T12:15:00.000Z"),
       staleAfterMs: 10 * 60 * 1000,
-      existingWorktreePaths: sessions.map((session) => session.worktreePath)
+      existingWorktreePaths: sessions.map((session) => session.worktreePath),
     });
 
     expect(plan).toHaveLength(240);
     expect(plan.filter((item) => item.action === "resume")).toHaveLength(60);
     expect(plan.filter((item) => item.action === "retry")).toHaveLength(60);
-    expect(plan.filter((item) => item.action === "mark_stale")).toHaveLength(60);
+    expect(plan.filter((item) => item.action === "mark_stale")).toHaveLength(
+      60,
+    );
     expect(plan.filter((item) => item.action === "archive")).toHaveLength(60);
   });
 });

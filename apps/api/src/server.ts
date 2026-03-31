@@ -4,5 +4,5 @@ const app = await buildApp();
 
 await app.listen({
   host: app.config.HOST,
-  port: app.config.PORT
+  port: app.config.PORT,
 });

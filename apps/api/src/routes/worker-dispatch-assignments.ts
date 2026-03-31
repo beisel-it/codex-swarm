@@ -5,79 +5,105 @@ import {
   workerDispatchCompleteSchema,
   workerDispatchCreateSchema,
   workerDispatchListQuerySchema,
-  workerDispatchSessionAttachSchema
+  workerDispatchSessionAttachSchema,
 } from "../http/schemas.js";
-import { controlPlaneEvents, timelineEvent } from "../lib/control-plane-events.js";
+import {
+  controlPlaneEvents,
+  timelineEvent,
+} from "../lib/control-plane-events.js";
 import { requireValue } from "../lib/require-value.js";
 
-export const workerDispatchAssignmentRoutes: FastifyPluginAsync = async (app) => {
+export const workerDispatchAssignmentRoutes: FastifyPluginAsync = async (
+  app,
+) => {
   app.get("/worker-dispatch-assignments", async (request) => {
     const query = workerDispatchListQuerySchema.parse(request.query);
     return app.controlPlane.listWorkerDispatchAssignments(query);
   });
 
   app.post("/worker-dispatch-assignments", async (request, reply) => {
-    return app.observability.withTrace("api.worker-dispatch-assignments.create", async () => {
-      const input = workerDispatchCreateSchema.parse(request.body);
-      const assignment = requireValue(
-        await app.controlPlane.createWorkerDispatchAssignment(input),
-        "control plane returned no worker dispatch assignment"
-      );
+    return app.observability.withTrace(
+      "api.worker-dispatch-assignments.create",
+      async () => {
+        const input = workerDispatchCreateSchema.parse(request.body);
+        const assignment = requireValue(
+          await app.controlPlane.createWorkerDispatchAssignment(input),
+          "control plane returned no worker dispatch assignment",
+        );
 
-      await app.observability.recordTimelineEvent(timelineEvent(controlPlaneEvents.workerDispatchAssignmentCreated, {
-        runId: assignment.runId,
-        taskId: assignment.taskId,
-        agentId: assignment.agentId,
-        entityId: assignment.id,
-        status: assignment.state,
-        summary: `Worker dispatch assignment ${assignment.id} created`
-      }));
+        await app.observability.recordTimelineEvent(
+          timelineEvent(controlPlaneEvents.workerDispatchAssignmentCreated, {
+            runId: assignment.runId,
+            taskId: assignment.taskId,
+            agentId: assignment.agentId,
+            entityId: assignment.id,
+            status: assignment.state,
+            summary: `Worker dispatch assignment ${assignment.id} created`,
+          }),
+        );
 
-      return reply.code(201).send(assignment);
-    }, { route: "worker-dispatch-assignments.create" });
+        return reply.code(201).send(assignment);
+      },
+      { route: "worker-dispatch-assignments.create" },
+    );
   });
 
   app.patch("/worker-dispatch-assignments/:id", async (request) => {
-    return app.observability.withTrace("api.worker-dispatch-assignments.complete", async () => {
-      const { id } = idParamSchema.parse(request.params);
-      const input = workerDispatchCompleteSchema.parse(request.body);
-      const assignment = requireValue(
-        await app.controlPlane.completeWorkerDispatch(id, input),
-        "control plane returned no worker dispatch assignment"
-      );
+    return app.observability.withTrace(
+      "api.worker-dispatch-assignments.complete",
+      async () => {
+        const { id } = idParamSchema.parse(request.params);
+        const input = workerDispatchCompleteSchema.parse(request.body);
+        const assignment = requireValue(
+          await app.controlPlane.completeWorkerDispatch(id, input),
+          "control plane returned no worker dispatch assignment",
+        );
 
-      await app.observability.recordTimelineEvent(timelineEvent(controlPlaneEvents.workerDispatchAssignmentUpdated, {
-        runId: assignment.runId,
-        taskId: assignment.taskId,
-        agentId: assignment.agentId,
-        entityId: assignment.id,
-        status: assignment.state,
-        summary: `Worker dispatch assignment ${assignment.id} updated to ${assignment.state}`
-      }));
+        await app.observability.recordTimelineEvent(
+          timelineEvent(controlPlaneEvents.workerDispatchAssignmentUpdated, {
+            runId: assignment.runId,
+            taskId: assignment.taskId,
+            agentId: assignment.agentId,
+            entityId: assignment.id,
+            status: assignment.state,
+            summary: `Worker dispatch assignment ${assignment.id} updated to ${assignment.state}`,
+          }),
+        );
 
-      return assignment;
-    }, { route: "worker-dispatch-assignments.complete" });
+        return assignment;
+      },
+      { route: "worker-dispatch-assignments.complete" },
+    );
   });
 
   app.post("/worker-dispatch-assignments/:id/session", async (request) => {
-    return app.observability.withTrace("api.worker-dispatch-assignments.attach-session", async () => {
-      const { id } = idParamSchema.parse(request.params);
-      const input = workerDispatchSessionAttachSchema.parse(request.body);
-      const assignment = requireValue(
-        await app.controlPlane.attachSessionToWorkerDispatchAssignment(id, input.sessionId),
-        "control plane returned no worker dispatch assignment"
-      );
+    return app.observability.withTrace(
+      "api.worker-dispatch-assignments.attach-session",
+      async () => {
+        const { id } = idParamSchema.parse(request.params);
+        const input = workerDispatchSessionAttachSchema.parse(request.body);
+        const assignment = requireValue(
+          await app.controlPlane.attachSessionToWorkerDispatchAssignment(
+            id,
+            input.sessionId,
+          ),
+          "control plane returned no worker dispatch assignment",
+        );
 
-      await app.observability.recordTimelineEvent(timelineEvent(controlPlaneEvents.workerDispatchAssignmentUpdated, {
-        runId: assignment.runId,
-        taskId: assignment.taskId,
-        agentId: assignment.agentId,
-        entityId: assignment.id,
-        status: assignment.state,
-        summary: `Worker dispatch assignment ${assignment.id} attached to session ${input.sessionId}`
-      }));
+        await app.observability.recordTimelineEvent(
+          timelineEvent(controlPlaneEvents.workerDispatchAssignmentUpdated, {
+            runId: assignment.runId,
+            taskId: assignment.taskId,
+            agentId: assignment.agentId,
+            entityId: assignment.id,
+            status: assignment.state,
+            summary: `Worker dispatch assignment ${assignment.id} attached to session ${input.sessionId}`,
+          }),
+        );
 
-      return assignment;
-    }, { route: "worker-dispatch-assignments.attach-session" });
+        return assignment;
+      },
+      { route: "worker-dispatch-assignments.attach-session" },
+    );
   });
 };

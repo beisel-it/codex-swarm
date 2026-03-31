@@ -40,7 +40,15 @@ export interface WorkerCoordinationMessage {
 }
 
 export interface WorkerOutcomeArtifact {
-  kind: "plan" | "patch" | "log" | "report" | "diff" | "screenshot" | "pr_link" | "other";
+  kind:
+    | "plan"
+    | "patch"
+    | "log"
+    | "report"
+    | "diff"
+    | "screenshot"
+    | "pr_link"
+    | "other";
   path: string;
   contentType: string;
   contentBase64?: string;
@@ -104,7 +112,9 @@ export interface RunExecutionContextLike {
   values?: Record<string, unknown>;
 }
 
-function formatLeaderPlanningRoles(availableRoles?: LeaderPlanningRoleOption[]) {
+function formatLeaderPlanningRoles(
+  availableRoles?: LeaderPlanningRoleOption[],
+) {
   if (!availableRoles || availableRoles.length === 0) {
     return null;
   }
@@ -123,13 +133,13 @@ function formatLeaderPlanningRoles(availableRoles?: LeaderPlanningRoleOption[]) 
       const details = [
         option.name?.trim() ? `member ${option.name.trim()}` : null,
         option.profile?.trim() ? `profile ${option.profile.trim()}` : null,
-        option.responsibility?.trim() ? option.responsibility.trim() : null
+        option.responsibility?.trim() ? option.responsibility.trim() : null,
       ].filter((value): value is string => Boolean(value));
 
       return details.length > 0
         ? `- ${option.role}: ${details.join(" | ")}`
         : `- ${option.role}`;
-    })
+    }),
   ].join("\n");
 }
 
@@ -145,7 +155,15 @@ const leaderPlanSchema = {
       items: {
         type: "object",
         additionalProperties: false,
-        required: ["key", "title", "role", "description", "definitionOfDone", "acceptanceCriteria", "dependencyKeys"],
+        required: [
+          "key",
+          "title",
+          "role",
+          "description",
+          "definitionOfDone",
+          "acceptanceCriteria",
+          "dependencyKeys",
+        ],
         properties: {
           key: { type: "string", minLength: 1 },
           title: { type: "string", minLength: 1 },
@@ -154,14 +172,14 @@ const leaderPlanSchema = {
           definitionOfDone: {
             type: "array",
             minItems: 1,
-            items: { type: "string", minLength: 1 }
+            items: { type: "string", minLength: 1 },
           },
           acceptanceCriteria: { type: "array", items: { type: "string" } },
-          dependencyKeys: { type: "array", items: { type: "string" } }
-        }
-      }
-    }
-  }
+          dependencyKeys: { type: "array", items: { type: "string" } },
+        },
+      },
+    },
+  },
 } as const;
 
 const workerTaskOutcomeSchema = {
@@ -180,9 +198,9 @@ const workerTaskOutcomeSchema = {
         required: ["target", "body"],
         properties: {
           target: { type: "string", minLength: 1 },
-          body: { type: "string", minLength: 1 }
-        }
-      }
+          body: { type: "string", minLength: 1 },
+        },
+      },
     },
     blockingIssues: { type: "array", items: { type: "string" } },
     artifacts: {
@@ -192,13 +210,25 @@ const workerTaskOutcomeSchema = {
         additionalProperties: false,
         required: ["kind", "path", "contentType"],
         properties: {
-          kind: { type: "string", enum: ["plan", "patch", "log", "report", "diff", "screenshot", "pr_link", "other"] },
+          kind: {
+            type: "string",
+            enum: [
+              "plan",
+              "patch",
+              "log",
+              "report",
+              "diff",
+              "screenshot",
+              "pr_link",
+              "other",
+            ],
+          },
           path: { type: "string", minLength: 1 },
           contentType: { type: "string", minLength: 1 },
           contentBase64: { type: "string", minLength: 1 },
-          metadata: { type: "object" }
-        }
-      }
+          metadata: { type: "object" },
+        },
+      },
     },
     branchPublish: {
       type: "object",
@@ -206,8 +236,8 @@ const workerTaskOutcomeSchema = {
       properties: {
         branchName: { type: "string", minLength: 1 },
         commitSha: { type: "string", minLength: 1 },
-        notes: { type: "string", minLength: 1 }
-      }
+        notes: { type: "string", minLength: 1 },
+      },
     },
     pullRequestHandoff: {
       type: "object",
@@ -220,16 +250,23 @@ const workerTaskOutcomeSchema = {
         headBranch: { type: "string", minLength: 1 },
         url: { type: "string", minLength: 1 },
         number: { type: "number", minimum: 1 },
-        status: { type: "string", enum: ["draft", "open", "merged", "closed"] }
-      }
-    }
-  }
+        status: { type: "string", enum: ["draft", "open", "merged", "closed"] },
+      },
+    },
+  },
 } as const;
 
 const verifierTaskOutcomeSchema = {
   type: "object",
   additionalProperties: false,
-  required: ["summary", "status", "findings", "changeRequests", "messages", "blockingIssues"],
+  required: [
+    "summary",
+    "status",
+    "findings",
+    "changeRequests",
+    "messages",
+    "blockingIssues",
+  ],
   properties: {
     summary: { type: "string", minLength: 1 },
     status: { type: "string", enum: ["passed", "failed", "blocked"] },
@@ -237,8 +274,8 @@ const verifierTaskOutcomeSchema = {
     changeRequests: { type: "array", items: { type: "string", minLength: 1 } },
     messages: workerTaskOutcomeSchema.properties.messages,
     blockingIssues: workerTaskOutcomeSchema.properties.blockingIssues,
-    artifacts: workerTaskOutcomeSchema.properties.artifacts
-  }
+    artifacts: workerTaskOutcomeSchema.properties.artifacts,
+  },
 } as const;
 
 function parseStringField(value: unknown, fieldName: string) {
@@ -254,7 +291,10 @@ function parseStringArray(value: unknown) {
     return [];
   }
 
-  return value.filter((item): item is string => typeof item === "string" && item.trim().length > 0);
+  return value.filter(
+    (item): item is string =>
+      typeof item === "string" && item.trim().length > 0,
+  );
 }
 
 function parseNonEmptyStringArray(value: unknown, fieldName: string) {
@@ -289,21 +329,20 @@ function shouldRenderRunContext(context?: RunExecutionContextLike | null) {
   return Object.keys(context.values ?? {}).length > 0;
 }
 
-export function formatRunExecutionContext(context?: RunExecutionContextLike | null) {
+export function formatRunExecutionContext(
+  context?: RunExecutionContextLike | null,
+) {
   if (!shouldRenderRunContext(context)) {
     return null;
   }
 
-  return [
-    "Run context:",
-    JSON.stringify(context, null, 2)
-  ].join("\n");
+  return ["Run context:", JSON.stringify(context, null, 2)].join("\n");
 }
 
 export function buildLeaderPlanningPrompt(
   goal: string,
   runContext?: RunExecutionContextLike | null,
-  availableRoles?: LeaderPlanningRoleOption[]
+  availableRoles?: LeaderPlanningRoleOption[],
 ) {
   const formattedRoles = formatLeaderPlanningRoles(availableRoles);
   const availableRoleNames = availableRoles
@@ -334,12 +373,16 @@ export function buildLeaderPlanningPrompt(
     "- do not serialize tasks unless one task materially depends on another",
     "- materialize only concrete near-term work; avoid deep future chains that are not yet specific",
     ...(availableRoleNames.length > 0
-      ? [`- use only these role names in task.role: ${availableRoleNames.map((role) => `\`${role}\``).join(", ")}`]
-      : ["- use concrete role names such as `frontend-developer`, `backend-developer`, `infrastructure-engineer`, `technical-writer`, or `tech-lead`"]),
+      ? [
+          `- use only these role names in task.role: ${availableRoleNames.map((role) => `\`${role}\``).join(", ")}`,
+        ]
+      : [
+          "- use concrete role names such as `frontend-developer`, `backend-developer`, `infrastructure-engineer`, `technical-writer`, or `tech-lead`",
+        ]),
     ...(availableRoleNames.length > 0
       ? ["- do not invent task roles outside the available team role list"]
       : []),
-    "- do not add any properties beyond the schema"
+    "- do not add any properties beyond the schema",
   ].join("\n");
 }
 
@@ -357,17 +400,20 @@ export function buildWorkerTaskExecutionPrompt(input: {
     body: string;
   }>;
 }) {
-  const definitionOfDone = input.definitionOfDone.length > 0
-    ? input.definitionOfDone.map((criterion) => `- ${criterion}`).join("\n")
-    : "- No persisted definition of done was provided.";
-  const acceptanceCriteria = input.acceptanceCriteria.length > 0
-    ? input.acceptanceCriteria.map((criterion) => `- ${criterion}`).join("\n")
-    : "- Complete the assigned task and leave clear implementation notes.";
-  const inbox = (input.inboundMessages ?? []).length > 0
-    ? (input.inboundMessages ?? [])
-      .map((message) => `- ${message.sender}: ${message.body}`)
-      .join("\n")
-    : "- No inbound agent messages.";
+  const definitionOfDone =
+    input.definitionOfDone.length > 0
+      ? input.definitionOfDone.map((criterion) => `- ${criterion}`).join("\n")
+      : "- No persisted definition of done was provided.";
+  const acceptanceCriteria =
+    input.acceptanceCriteria.length > 0
+      ? input.acceptanceCriteria.map((criterion) => `- ${criterion}`).join("\n")
+      : "- Complete the assigned task and leave clear implementation notes.";
+  const inbox =
+    (input.inboundMessages ?? []).length > 0
+      ? (input.inboundMessages ?? [])
+          .map((message) => `- ${message.sender}: ${message.body}`)
+          .join("\n")
+      : "- No inbound agent messages.";
 
   return [
     `Repository: ${input.repositoryName}`,
@@ -405,7 +451,7 @@ export function buildWorkerTaskExecutionPrompt(input: {
     "- If you publish a branch, include branchPublish with the published branch details.",
     "- If you open or prepare a PR handoff, include pullRequestHandoff with the PR details.",
     "- If you produce durable evidence worth surfacing in codex-swarm, include it in artifacts.",
-    "- do not add any properties beyond the schema"
+    "- do not add any properties beyond the schema",
   ].join("\n");
 }
 
@@ -426,30 +472,55 @@ export function buildVerifierTaskExecutionPrompt(input: {
   }>;
   runContext?: RunExecutionContextLike | null;
 }) {
-  const definitionOfDone = input.definitionOfDone.length > 0
-    ? input.definitionOfDone.map((criterion) => `- ${criterion}`).join("\n")
-    : "- No persisted definition of done was provided.";
-  const acceptanceCriteria = input.acceptanceCriteria.length > 0
-    ? input.acceptanceCriteria.map((criterion) => `- ${criterion}`).join("\n")
-    : "- No separate acceptance summary was provided.";
-  const renderedArtifacts = input.artifacts.length > 0
-    ? input.artifacts.map((artifact) => [
-      `- ${artifact.kind}: ${artifact.path}`,
-      `  contentType: ${artifact.contentType}`,
-      artifact.summary?.trim() ? `  summary: ${artifact.summary.trim()}` : null
-    ].filter((line): line is string => Boolean(line)).join("\n")).join("\n")
-    : "- No task artifacts were recorded.";
-  const renderedValidations = input.validations.length > 0
-    ? input.validations.map((validation) => [
-      `- ${validation.name}: ${validation.status}`,
-      `  command: ${validation.command}`,
-      validation.summary?.trim() ? `  summary: ${validation.summary.trim()}` : null,
-      validation.artifactPath?.trim() ? `  artifactPath: ${validation.artifactPath.trim()}` : null
-    ].filter((line): line is string => Boolean(line)).join("\n")).join("\n")
-    : "- No validation results were recorded.";
-  const renderedMessages = (input.relevantMessages ?? []).length > 0
-    ? (input.relevantMessages ?? []).map((message) => `- ${message.sender}: ${message.body}`).join("\n")
-    : "- No relevant run messages were recorded.";
+  const definitionOfDone =
+    input.definitionOfDone.length > 0
+      ? input.definitionOfDone.map((criterion) => `- ${criterion}`).join("\n")
+      : "- No persisted definition of done was provided.";
+  const acceptanceCriteria =
+    input.acceptanceCriteria.length > 0
+      ? input.acceptanceCriteria.map((criterion) => `- ${criterion}`).join("\n")
+      : "- No separate acceptance summary was provided.";
+  const renderedArtifacts =
+    input.artifacts.length > 0
+      ? input.artifacts
+          .map((artifact) =>
+            [
+              `- ${artifact.kind}: ${artifact.path}`,
+              `  contentType: ${artifact.contentType}`,
+              artifact.summary?.trim()
+                ? `  summary: ${artifact.summary.trim()}`
+                : null,
+            ]
+              .filter((line): line is string => Boolean(line))
+              .join("\n"),
+          )
+          .join("\n")
+      : "- No task artifacts were recorded.";
+  const renderedValidations =
+    input.validations.length > 0
+      ? input.validations
+          .map((validation) =>
+            [
+              `- ${validation.name}: ${validation.status}`,
+              `  command: ${validation.command}`,
+              validation.summary?.trim()
+                ? `  summary: ${validation.summary.trim()}`
+                : null,
+              validation.artifactPath?.trim()
+                ? `  artifactPath: ${validation.artifactPath.trim()}`
+                : null,
+            ]
+              .filter((line): line is string => Boolean(line))
+              .join("\n"),
+          )
+          .join("\n")
+      : "- No validation results were recorded.";
+  const renderedMessages =
+    (input.relevantMessages ?? []).length > 0
+      ? (input.relevantMessages ?? [])
+          .map((message) => `- ${message.sender}: ${message.body}`)
+          .join("\n")
+      : "- No relevant run messages were recorded.";
 
   return [
     `Repository: ${input.repositoryName}`,
@@ -493,7 +564,7 @@ export function buildVerifierTaskExecutionPrompt(input: {
     "- Do not create follow-up tasks, do not fix the work yourself, and do not instruct other agents directly beyond routing messages.",
     "- Include leader messages when verification fails or is blocked.",
     "- If you produce durable evidence worth surfacing in codex-swarm, include it in artifacts.",
-    "- do not add any properties beyond the schema"
+    "- do not add any properties beyond the schema",
   ].join("\n");
 }
 
@@ -507,12 +578,16 @@ export function buildLeaderReslicePrompt(input: {
   messages: WorkerCoordinationMessage[];
   availableRoles?: LeaderPlanningRoleOption[];
 }) {
-  const blockingIssues = input.blockingIssues.length > 0
-    ? input.blockingIssues.map((issue) => `- ${issue}`).join("\n")
-    : "- No explicit blocking issues were reported.";
-  const workerMessages = input.messages.length > 0
-    ? input.messages.map((message) => `- ${message.target}: ${message.body}`).join("\n")
-    : "- No explicit worker coordination messages were returned.";
+  const blockingIssues =
+    input.blockingIssues.length > 0
+      ? input.blockingIssues.map((issue) => `- ${issue}`).join("\n")
+      : "- No explicit blocking issues were reported.";
+  const workerMessages =
+    input.messages.length > 0
+      ? input.messages
+          .map((message) => `- ${message.target}: ${message.body}`)
+          .join("\n")
+      : "- No explicit worker coordination messages were returned.";
   const formattedRoles = formatLeaderPlanningRoles(input.availableRoles);
   const availableRoleNames = input.availableRoles
     ? [...new Set(input.availableRoles.map((role) => role.role))]
@@ -548,13 +623,15 @@ export function buildLeaderReslicePrompt(input: {
     "- every task must include definitionOfDone with concrete, testable verification checks.",
     "- use acceptanceCriteria only as a concise compatibility-facing summary of the same slice.",
     ...(availableRoleNames.length > 0
-      ? [`- use only these role names in task.role: ${availableRoleNames.map((role) => `\`${role}\``).join(", ")}`]
+      ? [
+          `- use only these role names in task.role: ${availableRoleNames.map((role) => `\`${role}\``).join(", ")}`,
+        ]
       : []),
     ...(availableRoleNames.length > 0
       ? ["- do not invent task roles outside the available team role list"]
       : []),
     "- Keep the tasks specific enough for workers to execute without hidden context.",
-    "- do not add any properties beyond the schema"
+    "- do not add any properties beyond the schema",
   ].join("\n");
 }
 
@@ -568,12 +645,16 @@ export function buildLeaderUnblockPrompt(input: {
   messages: WorkerCoordinationMessage[];
   availableRoles?: LeaderPlanningRoleOption[];
 }) {
-  const blockingIssues = input.blockingIssues.length > 0
-    ? input.blockingIssues.map((issue) => `- ${issue}`).join("\n")
-    : "- No explicit blocking issues were reported.";
-  const workerMessages = input.messages.length > 0
-    ? input.messages.map((message) => `- ${message.target}: ${message.body}`).join("\n")
-    : "- No explicit worker coordination messages were returned.";
+  const blockingIssues =
+    input.blockingIssues.length > 0
+      ? input.blockingIssues.map((issue) => `- ${issue}`).join("\n")
+      : "- No explicit blocking issues were reported.";
+  const workerMessages =
+    input.messages.length > 0
+      ? input.messages
+          .map((message) => `- ${message.target}: ${message.body}`)
+          .join("\n")
+      : "- No explicit worker coordination messages were returned.";
   const formattedRoles = formatLeaderPlanningRoles(input.availableRoles);
   const availableRoleNames = input.availableRoles
     ? [...new Set(input.availableRoles.map((role) => role.role))]
@@ -614,20 +695,27 @@ export function buildLeaderUnblockPrompt(input: {
     "- every task must include definitionOfDone with concrete, testable verification checks.",
     "- use acceptanceCriteria only as a concise compatibility-facing summary of the same slice.",
     ...(availableRoleNames.length > 0
-      ? [`- use only these role names in task.role: ${availableRoleNames.map((role) => `\`${role}\``).join(", ")}`]
+      ? [
+          `- use only these role names in task.role: ${availableRoleNames.map((role) => `\`${role}\``).join(", ")}`,
+        ]
       : []),
     ...(availableRoleNames.length > 0
       ? ["- do not invent task roles outside the available team role list"]
       : []),
     "- Keep the tasks specific enough for workers to execute without hidden context.",
-    "- do not add any properties beyond the schema"
+    "- do not add any properties beyond the schema",
   ].join("\n");
 }
 
 export function parseLeaderPlanOutput(output: string): LeaderPlan {
   const parsed = JSON.parse(extractJsonDocument(output)) as Partial<LeaderPlan>;
 
-  if (!parsed || typeof parsed !== "object" || !Array.isArray(parsed.tasks) || parsed.tasks.length === 0) {
+  if (
+    !parsed ||
+    typeof parsed !== "object" ||
+    !Array.isArray(parsed.tasks) ||
+    parsed.tasks.length === 0
+  ) {
     throw new Error("leader plan output must contain at least one task");
   }
 
@@ -642,27 +730,41 @@ export function parseLeaderPlanOutput(output: string): LeaderPlan {
       key: parseStringField(candidate.key, `task ${index} key`),
       title: parseStringField(candidate.title, `task ${index} title`),
       role: parseStringField(candidate.role, `task ${index} role`),
-      description: parseStringField(candidate.description, `task ${index} description`),
-      definitionOfDone: parseNonEmptyStringArray(candidate.definitionOfDone, `leader plan task ${index} definitionOfDone`),
+      description: parseStringField(
+        candidate.description,
+        `task ${index} description`,
+      ),
+      definitionOfDone: parseNonEmptyStringArray(
+        candidate.definitionOfDone,
+        `leader plan task ${index} definitionOfDone`,
+      ),
       acceptanceCriteria: parseStringArray(candidate.acceptanceCriteria),
-      dependencyKeys: parseStringArray(candidate.dependencyKeys)
+      dependencyKeys: parseStringArray(candidate.dependencyKeys),
     };
   });
 
   return {
     ...(typeof parsed.summary === "string" ? { summary: parsed.summary } : {}),
-    tasks
+    tasks,
   };
 }
 
 export function parseWorkerTaskOutcome(output: string): WorkerTaskOutcome {
-  const parsed = JSON.parse(extractJsonDocument(output)) as Partial<WorkerTaskOutcome>;
+  const parsed = JSON.parse(
+    extractJsonDocument(output),
+  ) as Partial<WorkerTaskOutcome>;
 
   const summary = parseStringField(parsed.summary, "worker outcome summary");
   const status = parsed.status;
 
-  if (status !== "needs_slicing" && status !== "blocked" && status !== "completed") {
-    throw new Error("worker outcome status must be completed, needs_slicing, or blocked");
+  if (
+    status !== "needs_slicing" &&
+    status !== "blocked" &&
+    status !== "completed"
+  ) {
+    throw new Error(
+      "worker outcome status must be completed, needs_slicing, or blocked",
+    );
   }
 
   if (!Array.isArray(parsed.messages)) {
@@ -674,45 +776,77 @@ export function parseWorkerTaskOutcome(output: string): WorkerTaskOutcome {
       throw new Error(`worker outcome message ${index} is not an object`);
     }
 
-    const target = parseStringField((message as { target?: unknown }).target, `worker outcome message ${index} target`);
-    const body = parseStringField((message as { body?: unknown }).body, `worker outcome message ${index} body`);
+    const target = parseStringField(
+      (message as { target?: unknown }).target,
+      `worker outcome message ${index} target`,
+    );
+    const body = parseStringField(
+      (message as { body?: unknown }).body,
+      `worker outcome message ${index} body`,
+    );
 
-    if (target !== "leader" && target !== "broadcast" && !target.startsWith("agent:") && !target.startsWith("role:")) {
+    if (
+      target !== "leader" &&
+      target !== "broadcast" &&
+      !target.startsWith("agent:") &&
+      !target.startsWith("role:")
+    ) {
       throw new Error(`worker outcome message ${index} target is invalid`);
     }
 
     return {
       target: target as WorkerCoordinationMessageTarget,
-      body
+      body,
     };
   });
 
   const blockingIssues = parseStringArray(parsed.blockingIssues);
   const artifacts = Array.isArray(parsed.artifacts)
     ? parsed.artifacts.map((artifact, index): WorkerOutcomeArtifact => {
-      if (!artifact || typeof artifact !== "object") {
-        throw new Error(`worker outcome artifact ${index} is not an object`);
-      }
+        if (!artifact || typeof artifact !== "object") {
+          throw new Error(`worker outcome artifact ${index} is not an object`);
+        }
 
-      const candidate = artifact as Partial<WorkerOutcomeArtifact>;
-      const kind = parseStringField(candidate.kind, `worker outcome artifact ${index} kind`);
+        const candidate = artifact as Partial<WorkerOutcomeArtifact>;
+        const kind = parseStringField(
+          candidate.kind,
+          `worker outcome artifact ${index} kind`,
+        );
 
-      if (!["plan", "patch", "log", "report", "diff", "screenshot", "pr_link", "other"].includes(kind)) {
-        throw new Error(`worker outcome artifact ${index} kind is invalid`);
-      }
+        if (
+          ![
+            "plan",
+            "patch",
+            "log",
+            "report",
+            "diff",
+            "screenshot",
+            "pr_link",
+            "other",
+          ].includes(kind)
+        ) {
+          throw new Error(`worker outcome artifact ${index} kind is invalid`);
+        }
 
-      return {
-        kind: kind as WorkerOutcomeArtifact["kind"],
-        path: parseStringField(candidate.path, `worker outcome artifact ${index} path`),
-        contentType: parseStringField(candidate.contentType, `worker outcome artifact ${index} contentType`),
-        ...(typeof candidate.contentBase64 === "string" && candidate.contentBase64.length > 0
-          ? { contentBase64: candidate.contentBase64 }
-          : {}),
-        ...(candidate.metadata && typeof candidate.metadata === "object"
-          ? { metadata: candidate.metadata as Record<string, unknown> }
-          : {})
-      };
-    })
+        return {
+          kind: kind as WorkerOutcomeArtifact["kind"],
+          path: parseStringField(
+            candidate.path,
+            `worker outcome artifact ${index} path`,
+          ),
+          contentType: parseStringField(
+            candidate.contentType,
+            `worker outcome artifact ${index} contentType`,
+          ),
+          ...(typeof candidate.contentBase64 === "string" &&
+          candidate.contentBase64.length > 0
+            ? { contentBase64: candidate.contentBase64 }
+            : {}),
+          ...(candidate.metadata && typeof candidate.metadata === "object"
+            ? { metadata: candidate.metadata as Record<string, unknown> }
+            : {}),
+        };
+      })
     : [];
 
   let branchPublish: WorkerOutcomeBranchPublish | undefined;
@@ -720,69 +854,97 @@ export function parseWorkerTaskOutcome(output: string): WorkerTaskOutcome {
     if (!parsed.branchPublish || typeof parsed.branchPublish !== "object") {
       throw new Error("worker outcome branchPublish must be an object");
     }
-    const candidate = parsed.branchPublish as Partial<WorkerOutcomeBranchPublish>;
+    const candidate =
+      parsed.branchPublish as Partial<WorkerOutcomeBranchPublish>;
     branchPublish = {
-      ...(typeof candidate.branchName === "string" && candidate.branchName.trim().length > 0
+      ...(typeof candidate.branchName === "string" &&
+      candidate.branchName.trim().length > 0
         ? { branchName: candidate.branchName }
         : {}),
-      ...(typeof candidate.commitSha === "string" && candidate.commitSha.trim().length > 0
+      ...(typeof candidate.commitSha === "string" &&
+      candidate.commitSha.trim().length > 0
         ? { commitSha: candidate.commitSha }
         : {}),
-      ...(typeof candidate.notes === "string" && candidate.notes.trim().length > 0
+      ...(typeof candidate.notes === "string" &&
+      candidate.notes.trim().length > 0
         ? { notes: candidate.notes }
-        : {})
+        : {}),
     };
   }
 
   let pullRequestHandoff: WorkerOutcomePullRequestHandoff | undefined;
   if (parsed.pullRequestHandoff !== undefined) {
-    if (!parsed.pullRequestHandoff || typeof parsed.pullRequestHandoff !== "object") {
+    if (
+      !parsed.pullRequestHandoff ||
+      typeof parsed.pullRequestHandoff !== "object"
+    ) {
       throw new Error("worker outcome pullRequestHandoff must be an object");
     }
 
-    const candidate = parsed.pullRequestHandoff as Partial<WorkerOutcomePullRequestHandoff>;
+    const candidate =
+      parsed.pullRequestHandoff as Partial<WorkerOutcomePullRequestHandoff>;
     pullRequestHandoff = {
-      title: parseStringField(candidate.title, "worker outcome pullRequestHandoff title"),
-      body: parseStringField(candidate.body, "worker outcome pullRequestHandoff body"),
-      ...(typeof candidate.baseBranch === "string" && candidate.baseBranch.trim().length > 0
+      title: parseStringField(
+        candidate.title,
+        "worker outcome pullRequestHandoff title",
+      ),
+      body: parseStringField(
+        candidate.body,
+        "worker outcome pullRequestHandoff body",
+      ),
+      ...(typeof candidate.baseBranch === "string" &&
+      candidate.baseBranch.trim().length > 0
         ? { baseBranch: candidate.baseBranch }
         : {}),
-      ...(typeof candidate.headBranch === "string" && candidate.headBranch.trim().length > 0
+      ...(typeof candidate.headBranch === "string" &&
+      candidate.headBranch.trim().length > 0
         ? { headBranch: candidate.headBranch }
         : {}),
       ...(typeof candidate.url === "string" && candidate.url.trim().length > 0
         ? { url: candidate.url }
         : {}),
-      ...(typeof candidate.number === "number" && Number.isInteger(candidate.number) && candidate.number > 0
+      ...(typeof candidate.number === "number" &&
+      Number.isInteger(candidate.number) &&
+      candidate.number > 0
         ? { number: candidate.number }
         : {}),
-      ...(candidate.status === "draft" || candidate.status === "open" || candidate.status === "merged" || candidate.status === "closed"
+      ...(candidate.status === "draft" ||
+      candidate.status === "open" ||
+      candidate.status === "merged" ||
+      candidate.status === "closed"
         ? { status: candidate.status }
-        : {})
+        : {}),
     };
   }
 
   return {
     summary,
     status,
-    ...(status === "blocked" && (parsed.blockerKind === "external" || parsed.blockerKind === "actionable")
+    ...(status === "blocked" &&
+    (parsed.blockerKind === "external" || parsed.blockerKind === "actionable")
       ? { blockerKind: parsed.blockerKind }
       : {}),
     messages,
     blockingIssues,
     ...(artifacts.length > 0 ? { artifacts } : {}),
-    ...(branchPublish && Object.keys(branchPublish).length > 0 ? { branchPublish } : {}),
-    ...(pullRequestHandoff ? { pullRequestHandoff } : {})
+    ...(branchPublish && Object.keys(branchPublish).length > 0
+      ? { branchPublish }
+      : {}),
+    ...(pullRequestHandoff ? { pullRequestHandoff } : {}),
   };
 }
 
 export function parseVerifierTaskOutcome(output: string): VerifierTaskOutcome {
-  const parsed = JSON.parse(extractJsonDocument(output)) as Partial<VerifierTaskOutcome>;
+  const parsed = JSON.parse(
+    extractJsonDocument(output),
+  ) as Partial<VerifierTaskOutcome>;
   const summary = parseStringField(parsed.summary, "verifier outcome summary");
   const status = parsed.status;
 
   if (status !== "passed" && status !== "failed" && status !== "blocked") {
-    throw new Error("verifier outcome status must be passed, failed, or blocked");
+    throw new Error(
+      "verifier outcome status must be passed, failed, or blocked",
+    );
   }
 
   if (!Array.isArray(parsed.messages)) {
@@ -794,16 +956,27 @@ export function parseVerifierTaskOutcome(output: string): VerifierTaskOutcome {
       throw new Error(`verifier outcome message ${index} is not an object`);
     }
 
-    const target = parseStringField((message as { target?: unknown }).target, `verifier outcome message ${index} target`);
-    const body = parseStringField((message as { body?: unknown }).body, `verifier outcome message ${index} body`);
+    const target = parseStringField(
+      (message as { target?: unknown }).target,
+      `verifier outcome message ${index} target`,
+    );
+    const body = parseStringField(
+      (message as { body?: unknown }).body,
+      `verifier outcome message ${index} body`,
+    );
 
-    if (target !== "leader" && target !== "broadcast" && !target.startsWith("agent:") && !target.startsWith("role:")) {
+    if (
+      target !== "leader" &&
+      target !== "broadcast" &&
+      !target.startsWith("agent:") &&
+      !target.startsWith("role:")
+    ) {
       throw new Error(`verifier outcome message ${index} target is invalid`);
     }
 
     return {
       target: target as WorkerCoordinationMessageTarget,
-      body
+      body,
     };
   });
 
@@ -812,29 +985,52 @@ export function parseVerifierTaskOutcome(output: string): VerifierTaskOutcome {
   const blockingIssues = parseStringArray(parsed.blockingIssues);
   const artifacts = Array.isArray(parsed.artifacts)
     ? parsed.artifacts.map((artifact, index): WorkerOutcomeArtifact => {
-      if (!artifact || typeof artifact !== "object") {
-        throw new Error(`verifier outcome artifact ${index} is not an object`);
-      }
+        if (!artifact || typeof artifact !== "object") {
+          throw new Error(
+            `verifier outcome artifact ${index} is not an object`,
+          );
+        }
 
-      const candidate = artifact as Partial<WorkerOutcomeArtifact>;
-      const kind = parseStringField(candidate.kind, `verifier outcome artifact ${index} kind`);
+        const candidate = artifact as Partial<WorkerOutcomeArtifact>;
+        const kind = parseStringField(
+          candidate.kind,
+          `verifier outcome artifact ${index} kind`,
+        );
 
-      if (!["plan", "patch", "log", "report", "diff", "screenshot", "pr_link", "other"].includes(kind)) {
-        throw new Error(`verifier outcome artifact ${index} kind is invalid`);
-      }
+        if (
+          ![
+            "plan",
+            "patch",
+            "log",
+            "report",
+            "diff",
+            "screenshot",
+            "pr_link",
+            "other",
+          ].includes(kind)
+        ) {
+          throw new Error(`verifier outcome artifact ${index} kind is invalid`);
+        }
 
-      return {
-        kind: kind as WorkerOutcomeArtifact["kind"],
-        path: parseStringField(candidate.path, `verifier outcome artifact ${index} path`),
-        contentType: parseStringField(candidate.contentType, `verifier outcome artifact ${index} contentType`),
-        ...(typeof candidate.contentBase64 === "string" && candidate.contentBase64.length > 0
-          ? { contentBase64: candidate.contentBase64 }
-          : {}),
-        ...(candidate.metadata && typeof candidate.metadata === "object"
-          ? { metadata: candidate.metadata as Record<string, unknown> }
-          : {})
-      };
-    })
+        return {
+          kind: kind as WorkerOutcomeArtifact["kind"],
+          path: parseStringField(
+            candidate.path,
+            `verifier outcome artifact ${index} path`,
+          ),
+          contentType: parseStringField(
+            candidate.contentType,
+            `verifier outcome artifact ${index} contentType`,
+          ),
+          ...(typeof candidate.contentBase64 === "string" &&
+          candidate.contentBase64.length > 0
+            ? { contentBase64: candidate.contentBase64 }
+            : {}),
+          ...(candidate.metadata && typeof candidate.metadata === "object"
+            ? { metadata: candidate.metadata as Record<string, unknown> }
+            : {}),
+        };
+      })
     : [];
 
   return {
@@ -844,27 +1040,36 @@ export function parseVerifierTaskOutcome(output: string): VerifierTaskOutcome {
     changeRequests,
     messages,
     blockingIssues,
-    ...(artifacts.length > 0 ? { artifacts } : {})
+    ...(artifacts.length > 0 ? { artifacts } : {}),
   };
 }
 
 export function orderLeaderPlanTasks(plan: LeaderPlan): LeaderPlanTask[] {
-  const tasksByKey = new Map(plan.tasks.map((task) => [task.key, task] as const));
+  const tasksByKey = new Map(
+    plan.tasks.map((task) => [task.key, task] as const),
+  );
 
   for (const task of plan.tasks) {
     for (const dependencyKey of task.dependencyKeys) {
       if (!tasksByKey.has(dependencyKey)) {
-        throw new Error(`leader plan task ${task.key} references missing dependency ${dependencyKey}`);
+        throw new Error(
+          `leader plan task ${task.key} references missing dependency ${dependencyKey}`,
+        );
       }
     }
   }
 
-  const pending = new Map<string, Set<string>>(plan.tasks.map((task) => [task.key, new Set(task.dependencyKeys)] as const));
+  const pending = new Map<string, Set<string>>(
+    plan.tasks.map((task) => [task.key, new Set(task.dependencyKeys)] as const),
+  );
   const emitted = new Set<string>();
   const ordered: LeaderPlanTask[] = [];
 
   while (ordered.length < plan.tasks.length) {
-    const ready = plan.tasks.filter((task) => !emitted.has(task.key) && (pending.get(task.key)?.size ?? 0) === 0);
+    const ready = plan.tasks.filter(
+      (task) =>
+        !emitted.has(task.key) && (pending.get(task.key)?.size ?? 0) === 0,
+    );
 
     if (ready.length === 0) {
       throw new Error("leader plan task graph contains a cycle");
@@ -884,18 +1089,25 @@ export function orderLeaderPlanTasks(plan: LeaderPlan): LeaderPlanTask[] {
 }
 
 export function normalizeLeaderPlanTasks(plan: LeaderPlan): LeaderPlanTask[] {
-  const tasksByKey = new Map(plan.tasks.map((task) => [task.key, task] as const));
+  const tasksByKey = new Map(
+    plan.tasks.map((task) => [task.key, task] as const),
+  );
   const sanitizedTasks = plan.tasks.map((task) => ({
     ...task,
-    dependencyKeys: Array.from(new Set(task.dependencyKeys.filter((dependencyKey) => (
-      dependencyKey !== task.key && tasksByKey.has(dependencyKey)
-    ))))
+    dependencyKeys: Array.from(
+      new Set(
+        task.dependencyKeys.filter(
+          (dependencyKey) =>
+            dependencyKey !== task.key && tasksByKey.has(dependencyKey),
+        ),
+      ),
+    ),
   }));
 
   try {
     return orderLeaderPlanTasks({
       ...plan,
-      tasks: sanitizedTasks
+      tasks: sanitizedTasks,
     });
   } catch (error) {
     if (error instanceof Error && error.message.includes("cycle")) {

@@ -1,9 +1,17 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { agents, runs, sessions, tasks, workerDispatchAssignments } from "../src/db/schema.js";
+import {
+  agents,
+  runs,
+  sessions,
+  tasks,
+  workerDispatchAssignments,
+} from "../src/db/schema.js";
 import { ControlPlaneService } from "../src/services/control-plane-service.js";
 
-function extractTargetId(condition: { queryChunks: Array<{ value?: string[] } | { value?: string }> }) {
+function extractTargetId(condition: {
+  queryChunks: Array<{ value?: string[] } | { value?: string }>;
+}) {
   const chunk = condition.queryChunks[3] as { value?: string };
 
   if (!chunk || typeof chunk.value !== "string") {
@@ -18,44 +26,54 @@ class FakeVerificationDb {
     readonly assignmentStore: any[],
     readonly agentStore: any[],
     readonly taskStore: any[],
-    readonly sessionStore: any[]
+    readonly sessionStore: any[],
   ) {}
 
   update(table: unknown) {
     return {
       set: (values: Record<string, unknown>) => ({
-        where: (condition: { queryChunks: Array<{ value?: string[] } | { value?: string }> }) => {
+        where: (condition: {
+          queryChunks: Array<{ value?: string[] } | { value?: string }>;
+        }) => {
           const id = extractTargetId(condition);
 
           if (table === workerDispatchAssignments) {
-            const record = this.assignmentStore.find((candidate) => candidate.id === id);
+            const record = this.assignmentStore.find(
+              (candidate) => candidate.id === id,
+            );
             Object.assign(record, values);
             return {
-              returning: async () => [record]
+              returning: async () => [record],
             };
           }
 
           if (table === agents) {
-            const record = this.agentStore.find((candidate) => candidate.id === id);
+            const record = this.agentStore.find(
+              (candidate) => candidate.id === id,
+            );
             Object.assign(record, values);
             return Promise.resolve([record]);
           }
 
           if (table === tasks) {
-            const record = this.taskStore.find((candidate) => candidate.id === id);
+            const record = this.taskStore.find(
+              (candidate) => candidate.id === id,
+            );
             Object.assign(record, values);
             return Promise.resolve([record]);
           }
 
           if (table === sessions) {
-            const record = this.sessionStore.find((candidate) => candidate.id === id);
+            const record = this.sessionStore.find(
+              (candidate) => candidate.id === id,
+            );
             Object.assign(record, values);
             return Promise.resolve([record]);
           }
 
           throw new Error("unexpected table update");
-        }
-      })
+        },
+      }),
     };
   }
 }
@@ -64,7 +82,7 @@ class FakeVerificationSchedulingDb {
   constructor(
     readonly runStore: any[],
     readonly assignmentStore: any[],
-    readonly agentStore: any[]
+    readonly agentStore: any[],
   ) {}
 
   select() {
@@ -77,37 +95,43 @@ class FakeVerificationSchedulingDb {
             }
 
             throw new Error("unexpected ordered select table");
-          }
-        })
-      })
+          },
+        }),
+      }),
     };
   }
 
   update(table: unknown) {
     return {
       set: (values: Record<string, unknown>) => ({
-        where: (condition: { queryChunks: Array<{ value?: string[] } | { value?: string }> }) => {
+        where: (condition: {
+          queryChunks: Array<{ value?: string[] } | { value?: string }>;
+        }) => {
           const id = extractTargetId(condition);
 
           if (table === runs) {
-            const record = this.runStore.find((candidate) => candidate.id === id);
+            const record = this.runStore.find(
+              (candidate) => candidate.id === id,
+            );
             Object.assign(record, values);
             return {
-              returning: async () => [record]
+              returning: async () => [record],
             };
           }
 
           if (table === agents) {
-            const record = this.agentStore.find((candidate) => candidate.id === id);
+            const record = this.agentStore.find(
+              (candidate) => candidate.id === id,
+            );
             Object.assign(record, values);
             return {
-              returning: async () => [record]
+              returning: async () => [record],
             };
           }
 
           throw new Error("unexpected update table");
-        }
-      })
+        },
+      }),
     };
   }
 }
@@ -118,93 +142,129 @@ class FakeRepairDb {
     readonly assignmentStore: any[],
     readonly agentStore: any[],
     readonly taskStore: any[],
-    readonly sessionStore: any[]
+    readonly sessionStore: any[],
   ) {}
 
   select() {
     return {
       from: (table: unknown) => ({
-        where: (condition: { queryChunks?: Array<{ value?: string[] } | { value?: string }> }) => ({
+        where: (condition: {
+          queryChunks?: Array<{ value?: string[] } | { value?: string }>;
+        }) => ({
           orderBy: async () => {
             const target = condition.queryChunks?.[3]?.value;
             const ids = Array.isArray(target) ? target : [target];
 
             if (table === runs) {
-              return this.runStore.filter((candidate) => ids.includes(candidate.id));
+              return this.runStore.filter((candidate) =>
+                ids.includes(candidate.id),
+              );
             }
 
             if (table === tasks) {
-              return this.taskStore.filter((candidate) => ids.includes(candidate.id) || ids.includes(candidate.runId));
+              return this.taskStore.filter(
+                (candidate) =>
+                  ids.includes(candidate.id) || ids.includes(candidate.runId),
+              );
             }
 
             if (table === workerDispatchAssignments) {
-              return this.assignmentStore.filter((candidate) => ids.includes(candidate.id) || ids.includes(candidate.runId));
+              return this.assignmentStore.filter(
+                (candidate) =>
+                  ids.includes(candidate.id) || ids.includes(candidate.runId),
+              );
             }
 
             return [];
           },
           then: <TResult1 = any[], TResult2 = never>(
-            onfulfilled?: ((value: any[]) => TResult1 | PromiseLike<TResult1>) | null,
-            onrejected?: ((reason: unknown) => TResult2 | PromiseLike<TResult2>) | null
+            onfulfilled?:
+              | ((value: any[]) => TResult1 | PromiseLike<TResult1>)
+              | null,
+            onrejected?:
+              | ((reason: unknown) => TResult2 | PromiseLike<TResult2>)
+              | null,
           ) => {
             const target = condition.queryChunks?.[3]?.value;
             const ids = Array.isArray(target) ? target : [target];
-            const rows = table === runs
-              ? this.runStore.filter((candidate) => ids.includes(candidate.id))
-              : table === tasks
-                ? this.taskStore.filter((candidate) => ids.includes(candidate.id) || ids.includes(candidate.runId))
-                : table === workerDispatchAssignments
-                  ? this.assignmentStore.filter((candidate) => ids.includes(candidate.id) || ids.includes(candidate.runId))
-                  : [];
+            const rows =
+              table === runs
+                ? this.runStore.filter((candidate) =>
+                    ids.includes(candidate.id),
+                  )
+                : table === tasks
+                  ? this.taskStore.filter(
+                      (candidate) =>
+                        ids.includes(candidate.id) ||
+                        ids.includes(candidate.runId),
+                    )
+                  : table === workerDispatchAssignments
+                    ? this.assignmentStore.filter(
+                        (candidate) =>
+                          ids.includes(candidate.id) ||
+                          ids.includes(candidate.runId),
+                      )
+                    : [];
 
             return Promise.resolve(rows).then(onfulfilled, onrejected);
-          }
-        })
-      })
+          },
+        }),
+      }),
     };
   }
 
   update(table: unknown) {
     return {
       set: (values: Record<string, unknown>) => ({
-        where: (condition: { queryChunks: Array<{ value?: string[] } | { value?: string }> }) => {
+        where: (condition: {
+          queryChunks: Array<{ value?: string[] } | { value?: string }>;
+        }) => {
           const target = condition.queryChunks?.[3]?.value;
           const ids = Array.isArray(target) ? target : [target];
-          const store = table === runs
-            ? this.runStore
-            : table === workerDispatchAssignments
-              ? this.assignmentStore
-              : table === agents
-                ? this.agentStore
-                : table === tasks
-                  ? this.taskStore
-                  : table === sessions
-                    ? this.sessionStore
-                    : null;
+          const store =
+            table === runs
+              ? this.runStore
+              : table === workerDispatchAssignments
+                ? this.assignmentStore
+                : table === agents
+                  ? this.agentStore
+                  : table === tasks
+                    ? this.taskStore
+                    : table === sessions
+                      ? this.sessionStore
+                      : null;
 
           if (!store) {
             throw new Error("unexpected update table");
           }
 
-          const records = store.filter((candidate) => ids.includes(candidate.id));
+          const records = store.filter((candidate) =>
+            ids.includes(candidate.id),
+          );
           records.forEach((record) => Object.assign(record, values));
 
           return {
             returning: async () => records,
             then<TResult1 = any[], TResult2 = never>(
-              onfulfilled?: ((value: any[]) => TResult1 | PromiseLike<TResult1>) | null,
-              onrejected?: ((reason: unknown) => TResult2 | PromiseLike<TResult2>) | null
+              onfulfilled?:
+                | ((value: any[]) => TResult1 | PromiseLike<TResult1>)
+                | null,
+              onrejected?:
+                | ((reason: unknown) => TResult2 | PromiseLike<TResult2>)
+                | null,
             ) {
               return Promise.resolve(records).then(onfulfilled, onrejected);
-            }
+            },
           };
-        }
-      })
+        },
+      }),
     };
   }
 }
 
-function createWorkerAssignment(overrides: Partial<Record<string, unknown>> = {}) {
+function createWorkerAssignment(
+  overrides: Partial<Record<string, unknown>> = {},
+) {
   return {
     id: "dispatch-worker-1",
     runId: "run-1",
@@ -227,14 +287,14 @@ function createWorkerAssignment(overrides: Partial<Record<string, unknown>> = {}
     approvalPolicy: "on-request",
     includePlanTool: false,
     metadata: {
-      assignmentKind: "worker"
+      assignmentKind: "worker",
     },
     attempt: 0,
     maxAttempts: 3,
     leaseTtlSeconds: 300,
     createdAt: new Date("2026-03-31T09:00:00.000Z"),
     updatedAt: new Date("2026-03-31T09:00:00.000Z"),
-    ...overrides
+    ...overrides,
   };
 }
 
@@ -261,7 +321,7 @@ function createTaskRecord(overrides: Partial<Record<string, unknown>> = {}) {
     validationTemplates: [],
     createdAt: new Date("2026-03-31T09:00:00.000Z"),
     updatedAt: new Date("2026-03-31T09:00:00.000Z"),
-    ...overrides
+    ...overrides,
   };
 }
 
@@ -275,8 +335,8 @@ describe("ControlPlaneService verification lifecycle", () => {
         {
           id: "worker-agent-1",
           status: "busy",
-          currentTaskId: "task-1"
-        }
+          currentTaskId: "task-1",
+        },
       ],
       [taskRecord],
       [
@@ -285,12 +345,12 @@ describe("ControlPlaneService verification lifecycle", () => {
           state: "active",
           workerNodeId: "node-1",
           stickyNodeId: "node-1",
-          staleReason: null
-        }
-      ]
+          staleReason: null,
+        },
+      ],
     );
     const service = new ControlPlaneService(db as never, {
-      now: () => new Date("2026-03-31T09:10:00.000Z")
+      now: () => new Date("2026-03-31T09:10:00.000Z"),
     });
     const createAgent = vi.fn(async (input: Record<string, unknown>) => ({
       id: "verifier-agent-1",
@@ -311,22 +371,24 @@ describe("ControlPlaneService verification lifecycle", () => {
         visibleTranscriptSessionId: null,
         visibleTranscriptSessionState: null,
         visibleTranscriptUpdatedAt: null,
-        lineageSource: "not_started"
+        lineageSource: "not_started",
       },
       createdAt: new Date("2026-03-31T09:10:00.000Z"),
-      updatedAt: new Date("2026-03-31T09:10:00.000Z")
+      updatedAt: new Date("2026-03-31T09:10:00.000Z"),
     }));
-    const createWorkerDispatchAssignment = vi.fn(async (input: Record<string, unknown>) => ({
-      id: "dispatch-verifier-1",
-      ...input,
-      sessionId: undefined,
-      state: "queued",
-      claimedByNodeId: null,
-      stickyNodeId: null,
-      preferredNodeId: null,
-      attempt: 0,
-      createdAt: new Date("2026-03-31T09:10:00.000Z")
-    }));
+    const createWorkerDispatchAssignment = vi.fn(
+      async (input: Record<string, unknown>) => ({
+        id: "dispatch-verifier-1",
+        ...input,
+        sessionId: undefined,
+        state: "queued",
+        claimedByNodeId: null,
+        stickyNodeId: null,
+        preferredNodeId: null,
+        attempt: 0,
+        createdAt: new Date("2026-03-31T09:10:00.000Z"),
+      }),
+    );
     const recordControlPlaneEvent = vi.fn(async () => undefined);
 
     (service as any).assertTaskExists = async () => taskRecord;
@@ -338,21 +400,21 @@ describe("ControlPlaneService verification lifecycle", () => {
       goal: "Ship verifier pairing",
       context: {
         externalInput: null,
-        values: {}
+        values: {},
       },
       agents: [
         {
           id: "worker-agent-1",
           role: "backend-developer",
           profile: "backend-developer",
-          projectTeamMemberId: "member-backend-1"
-        }
-      ]
+          projectTeamMemberId: "member-backend-1",
+        },
+      ],
     });
     (service as any).assertRepositoryExists = async () => ({
       id: "repo-1",
       name: "codex-swarm",
-      defaultBranch: "main"
+      defaultBranch: "main",
     });
     (service as any).loadRunProjectTeam = async () => ({
       id: "team-1",
@@ -362,56 +424,67 @@ describe("ControlPlaneService verification lifecycle", () => {
           name: "Verifier",
           role: "reviewer",
           profile: "reviewer",
-          position: 0
+          position: 0,
         },
         {
           id: "member-backend-1",
           name: "Builder",
           role: "backend-developer",
           profile: "backend-developer",
-          position: 1
-        }
-      ]
+          position: 1,
+        },
+      ],
     });
     (service as any).createAgent = createAgent;
-    (service as any).createWorkerDispatchAssignment = createWorkerDispatchAssignment;
+    (service as any).createWorkerDispatchAssignment =
+      createWorkerDispatchAssignment;
     (service as any).recordControlPlaneEvent = recordControlPlaneEvent;
     (service as any).enqueueRunnableWorkerDispatches = vi.fn(async () => []);
     (service as any).reconcileRunExecutionState = vi.fn(async () => undefined);
     (service as any).maybeUnblockDependentTasks = vi.fn(async () => undefined);
 
-    await (service as any).transitionWorkerDispatchFailureOrCompletion(workerAssignment, {
-      nodeId: "node-1",
-      status: "completed",
-      outcome: {
-        kind: "worker",
-        summary: "Implementation is ready for verification.",
-        outcomeStatus: "completed",
-        blockingIssues: []
-      }
-    });
+    await (service as any).transitionWorkerDispatchFailureOrCompletion(
+      workerAssignment,
+      {
+        nodeId: "node-1",
+        status: "completed",
+        outcome: {
+          kind: "worker",
+          summary: "Implementation is ready for verification.",
+          outcomeStatus: "completed",
+          blockingIssues: [],
+        },
+      },
+    );
 
     expect(taskRecord.status).toBe("awaiting_review");
     expect(taskRecord.verificationStatus).toBe("requested");
     expect(taskRecord.verifierAgentId).toBe("verifier-agent-1");
-    expect(taskRecord.latestVerificationSummary).toContain("Verification requested");
-    expect(createAgent).toHaveBeenCalledWith(expect.objectContaining({
-      role: "reviewer",
-      projectTeamMemberId: "member-reviewer-1",
-      currentTaskId: "task-1"
-    }), undefined);
-    expect(createWorkerDispatchAssignment).toHaveBeenCalledWith(expect.objectContaining({
-      taskId: "task-1",
-      agentId: "verifier-agent-1",
-      metadata: expect.objectContaining({
-        assignmentKind: "verification",
-        workerAgentId: "worker-agent-1",
-        workerSummary: "Implementation is ready for verification."
-      })
-    }));
+    expect(taskRecord.latestVerificationSummary).toContain(
+      "Verification requested",
+    );
+    expect(createAgent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        role: "reviewer",
+        projectTeamMemberId: "member-reviewer-1",
+        currentTaskId: "task-1",
+      }),
+      undefined,
+    );
+    expect(createWorkerDispatchAssignment).toHaveBeenCalledWith(
+      expect.objectContaining({
+        taskId: "task-1",
+        agentId: "verifier-agent-1",
+        metadata: expect.objectContaining({
+          assignmentKind: "verification",
+          workerAgentId: "worker-agent-1",
+          workerSummary: "Implementation is ready for verification.",
+        }),
+      }),
+    );
     expect(recordControlPlaneEvent).toHaveBeenCalledWith(
       expect.objectContaining({ eventType: "task.verification_requested" }),
-      expect.objectContaining({ entityId: "task-1", status: "requested" })
+      expect.objectContaining({ entityId: "task-1", status: "requested" }),
     );
   });
 
@@ -424,8 +497,8 @@ describe("ControlPlaneService verification lifecycle", () => {
         {
           id: "worker-agent-1",
           status: "busy",
-          currentTaskId: "task-1"
-        }
+          currentTaskId: "task-1",
+        },
       ],
       [taskRecord],
       [
@@ -434,12 +507,12 @@ describe("ControlPlaneService verification lifecycle", () => {
           state: "active",
           workerNodeId: "node-1",
           stickyNodeId: "node-1",
-          staleReason: null
-        }
-      ]
+          staleReason: null,
+        },
+      ],
     );
     const service = new ControlPlaneService(db as never, {
-      now: () => new Date("2026-03-31T09:12:00.000Z")
+      now: () => new Date("2026-03-31T09:12:00.000Z"),
     });
     const createAgent = vi.fn(async (input: Record<string, unknown>) => ({
       id: "verifier-agent-2",
@@ -460,22 +533,24 @@ describe("ControlPlaneService verification lifecycle", () => {
         visibleTranscriptSessionId: null,
         visibleTranscriptSessionState: null,
         visibleTranscriptUpdatedAt: null,
-        lineageSource: "not_started"
+        lineageSource: "not_started",
       },
       createdAt: new Date("2026-03-31T09:12:00.000Z"),
-      updatedAt: new Date("2026-03-31T09:12:00.000Z")
+      updatedAt: new Date("2026-03-31T09:12:00.000Z"),
     }));
-    const createWorkerDispatchAssignment = vi.fn(async (input: Record<string, unknown>) => ({
-      id: "dispatch-verifier-2",
-      ...input,
-      sessionId: undefined,
-      state: "queued",
-      claimedByNodeId: null,
-      stickyNodeId: null,
-      preferredNodeId: null,
-      attempt: 0,
-      createdAt: new Date("2026-03-31T09:12:00.000Z")
-    }));
+    const createWorkerDispatchAssignment = vi.fn(
+      async (input: Record<string, unknown>) => ({
+        id: "dispatch-verifier-2",
+        ...input,
+        sessionId: undefined,
+        state: "queued",
+        claimedByNodeId: null,
+        stickyNodeId: null,
+        preferredNodeId: null,
+        attempt: 0,
+        createdAt: new Date("2026-03-31T09:12:00.000Z"),
+      }),
+    );
 
     (service as any).assertTaskExists = async () => taskRecord;
     (service as any).getRun = async () => ({
@@ -486,21 +561,21 @@ describe("ControlPlaneService verification lifecycle", () => {
       goal: "Ship verifier pairing",
       context: {
         externalInput: null,
-        values: {}
+        values: {},
       },
       agents: [
         {
           id: "worker-agent-1",
           role: "backend-developer",
           profile: "backend-developer",
-          projectTeamMemberId: "member-backend-1"
-        }
-      ]
+          projectTeamMemberId: "member-backend-1",
+        },
+      ],
     });
     (service as any).assertRepositoryExists = async () => ({
       id: "repo-1",
       name: "codex-swarm",
-      defaultBranch: "main"
+      defaultBranch: "main",
     });
     (service as any).loadRunProjectTeam = async () => ({
       id: "team-1",
@@ -510,48 +585,57 @@ describe("ControlPlaneService verification lifecycle", () => {
           name: "Builder One",
           role: "backend-developer",
           profile: "backend-developer",
-          position: 0
+          position: 0,
         },
         {
           id: "member-backend-2",
           name: "Builder Two",
           role: "backend-developer",
           profile: "backend-developer",
-          position: 1
-        }
-      ]
+          position: 1,
+        },
+      ],
     });
     (service as any).createAgent = createAgent;
-    (service as any).createWorkerDispatchAssignment = createWorkerDispatchAssignment;
+    (service as any).createWorkerDispatchAssignment =
+      createWorkerDispatchAssignment;
     (service as any).recordControlPlaneEvent = vi.fn(async () => undefined);
     (service as any).enqueueRunnableWorkerDispatches = vi.fn(async () => []);
     (service as any).reconcileRunExecutionState = vi.fn(async () => undefined);
     (service as any).maybeUnblockDependentTasks = vi.fn(async () => undefined);
 
-    await (service as any).transitionWorkerDispatchFailureOrCompletion(workerAssignment, {
-      nodeId: "node-1",
-      status: "completed",
-      outcome: {
-        kind: "worker",
-        summary: "Implementation is ready for verification.",
-        outcomeStatus: "completed",
-        blockingIssues: []
-      }
-    });
+    await (service as any).transitionWorkerDispatchFailureOrCompletion(
+      workerAssignment,
+      {
+        nodeId: "node-1",
+        status: "completed",
+        outcome: {
+          kind: "worker",
+          summary: "Implementation is ready for verification.",
+          outcomeStatus: "completed",
+          blockingIssues: [],
+        },
+      },
+    );
 
-    expect(createAgent).toHaveBeenCalledWith(expect.objectContaining({
-      role: "backend-developer",
-      profile: "backend-developer",
-      projectTeamMemberId: "member-backend-2",
-      currentTaskId: "task-1"
-    }), undefined);
-    expect(createWorkerDispatchAssignment).toHaveBeenCalledWith(expect.objectContaining({
-      agentId: "verifier-agent-2",
-      metadata: expect.objectContaining({
-        assignmentKind: "verification",
-        workerAgentId: "worker-agent-1"
-      })
-    }));
+    expect(createAgent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        role: "backend-developer",
+        profile: "backend-developer",
+        projectTeamMemberId: "member-backend-2",
+        currentTaskId: "task-1",
+      }),
+      undefined,
+    );
+    expect(createWorkerDispatchAssignment).toHaveBeenCalledWith(
+      expect.objectContaining({
+        agentId: "verifier-agent-2",
+        metadata: expect.objectContaining({
+          assignmentKind: "verification",
+          workerAgentId: "worker-agent-1",
+        }),
+      }),
+    );
     expect(taskRecord.verifierAgentId).toBe("verifier-agent-2");
   });
 
@@ -563,14 +647,14 @@ describe("ControlPlaneService verification lifecycle", () => {
       metadata: {
         assignmentKind: "verification",
         workerAgentId: "worker-agent-1",
-        workerSummary: "Implementation is ready for verification."
-      }
+        workerSummary: "Implementation is ready for verification.",
+      },
     });
     const taskRecord = createTaskRecord({
       status: "awaiting_review",
       ownerAgentId: "verifier-agent-1",
       verificationStatus: "in_progress",
-      verifierAgentId: "verifier-agent-1"
+      verifierAgentId: "verifier-agent-1",
     });
     const db = new FakeVerificationDb(
       [verifierAssignment],
@@ -578,8 +662,8 @@ describe("ControlPlaneService verification lifecycle", () => {
         {
           id: "verifier-agent-1",
           status: "busy",
-          currentTaskId: "task-1"
-        }
+          currentTaskId: "task-1",
+        },
       ],
       [taskRecord],
       [
@@ -588,12 +672,12 @@ describe("ControlPlaneService verification lifecycle", () => {
           state: "active",
           workerNodeId: "node-1",
           stickyNodeId: "node-1",
-          staleReason: null
-        }
-      ]
+          staleReason: null,
+        },
+      ],
     );
     const service = new ControlPlaneService(db as never, {
-      now: () => new Date("2026-03-31T09:20:00.000Z")
+      now: () => new Date("2026-03-31T09:20:00.000Z"),
     });
     const maybeUnblockDependentTasks = vi.fn(async () => undefined);
     const recordControlPlaneEvent = vi.fn(async () => undefined);
@@ -607,27 +691,34 @@ describe("ControlPlaneService verification lifecycle", () => {
       throw new Error("verifier must not create tasks directly");
     });
 
-    await (service as any).transitionWorkerDispatchFailureOrCompletion(verifierAssignment, {
-      nodeId: "node-1",
-      status: "completed",
-      outcome: {
-        kind: "verification",
-        summary: "Definition of done is not satisfied.",
-        outcomeStatus: "failed",
-        findings: ["Worker completion still closes the task immediately."],
-        changeRequests: ["Route worker completion into awaiting_review and queue a verifier assignment."],
-        evidence: ["artifact:.swarm/reports/verification.md"]
-      }
-    });
+    await (service as any).transitionWorkerDispatchFailureOrCompletion(
+      verifierAssignment,
+      {
+        nodeId: "node-1",
+        status: "completed",
+        outcome: {
+          kind: "verification",
+          summary: "Definition of done is not satisfied.",
+          outcomeStatus: "failed",
+          findings: ["Worker completion still closes the task immediately."],
+          changeRequests: [
+            "Route worker completion into awaiting_review and queue a verifier assignment.",
+          ],
+          evidence: ["artifact:.swarm/reports/verification.md"],
+        },
+      },
+    );
 
     expect(taskRecord.status).toBe("awaiting_review");
     expect(taskRecord.verificationStatus).toBe("failed");
-    expect(taskRecord.latestVerificationSummary).toBe("Definition of done is not satisfied.");
+    expect(taskRecord.latestVerificationSummary).toBe(
+      "Definition of done is not satisfied.",
+    );
     expect(taskRecord.latestVerificationFindings).toEqual([
-      "Worker completion still closes the task immediately."
+      "Worker completion still closes the task immediately.",
     ]);
     expect(taskRecord.latestVerificationChangeRequests).toEqual([
-      "Route worker completion into awaiting_review and queue a verifier assignment."
+      "Route worker completion into awaiting_review and queue a verifier assignment.",
     ]);
     expect(maybeUnblockDependentTasks).not.toHaveBeenCalled();
     expect(recordControlPlaneEvent).toHaveBeenCalledWith(
@@ -636,9 +727,11 @@ describe("ControlPlaneService verification lifecycle", () => {
         entityId: "task-1",
         status: "failed",
         metadata: expect.objectContaining({
-          changeRequests: ["Route worker completion into awaiting_review and queue a verifier assignment."]
-        })
-      })
+          changeRequests: [
+            "Route worker completion into awaiting_review and queue a verifier assignment.",
+          ],
+        }),
+      }),
     );
   });
 
@@ -650,14 +743,14 @@ describe("ControlPlaneService verification lifecycle", () => {
       metadata: {
         assignmentKind: "verification",
         workerAgentId: "worker-agent-1",
-        workerSummary: "Implementation is ready for verification."
-      }
+        workerSummary: "Implementation is ready for verification.",
+      },
     });
     const taskRecord = createTaskRecord({
       status: "awaiting_review",
       ownerAgentId: "verifier-agent-1",
       verificationStatus: "in_progress",
-      verifierAgentId: "verifier-agent-1"
+      verifierAgentId: "verifier-agent-1",
     });
     const db = new FakeVerificationDb(
       [verifierAssignment],
@@ -665,8 +758,8 @@ describe("ControlPlaneService verification lifecycle", () => {
         {
           id: "verifier-agent-1",
           status: "busy",
-          currentTaskId: "task-1"
-        }
+          currentTaskId: "task-1",
+        },
       ],
       [taskRecord],
       [
@@ -675,12 +768,12 @@ describe("ControlPlaneService verification lifecycle", () => {
           state: "active",
           workerNodeId: "node-1",
           stickyNodeId: "node-1",
-          staleReason: null
-        }
-      ]
+          staleReason: null,
+        },
+      ],
     );
     const service = new ControlPlaneService(db as never, {
-      now: () => new Date("2026-03-31T09:30:00.000Z")
+      now: () => new Date("2026-03-31T09:30:00.000Z"),
     });
     const maybeUnblockDependentTasks = vi.fn(async () => undefined);
     const recordControlPlaneEvent = vi.fn(async () => undefined);
@@ -691,26 +784,35 @@ describe("ControlPlaneService verification lifecycle", () => {
     (service as any).enqueueRunnableWorkerDispatches = vi.fn(async () => []);
     (service as any).reconcileRunExecutionState = vi.fn(async () => undefined);
 
-    await (service as any).transitionWorkerDispatchFailureOrCompletion(verifierAssignment, {
-      nodeId: "node-1",
-      status: "completed",
-      outcome: {
-        kind: "verification",
-        summary: "Definition of done is satisfied.",
-        outcomeStatus: "passed",
-        findings: [],
-        changeRequests: [],
-        evidence: ["validation:typecheck=passed"]
-      }
-    });
+    await (service as any).transitionWorkerDispatchFailureOrCompletion(
+      verifierAssignment,
+      {
+        nodeId: "node-1",
+        status: "completed",
+        outcome: {
+          kind: "verification",
+          summary: "Definition of done is satisfied.",
+          outcomeStatus: "passed",
+          findings: [],
+          changeRequests: [],
+          evidence: ["validation:typecheck=passed"],
+        },
+      },
+    );
 
     expect(taskRecord.status).toBe("completed");
     expect(taskRecord.verificationStatus).toBe("passed");
-    expect(taskRecord.latestVerificationSummary).toBe("Definition of done is satisfied.");
-    expect(maybeUnblockDependentTasks).toHaveBeenCalledWith("run-1", "task-1", "completed");
+    expect(taskRecord.latestVerificationSummary).toBe(
+      "Definition of done is satisfied.",
+    );
+    expect(maybeUnblockDependentTasks).toHaveBeenCalledWith(
+      "run-1",
+      "task-1",
+      "completed",
+    );
     expect(recordControlPlaneEvent).toHaveBeenCalledWith(
       expect.objectContaining({ eventType: "task.verification_passed" }),
-      expect.objectContaining({ entityId: "task-1", status: "passed" })
+      expect.objectContaining({ entityId: "task-1", status: "passed" }),
     );
   });
 
@@ -746,13 +848,13 @@ describe("ControlPlaneService verification lifecycle", () => {
         autoPublishBranch: false,
         autoCreatePullRequest: false,
         titleTemplate: null,
-        bodyTemplate: null
+        bodyTemplate: null,
       },
       handoffExecution: {
         state: "idle",
         failureReason: null,
         attemptedAt: null,
-        completedAt: null
+        completedAt: null,
       },
       metadata: {},
       context: {
@@ -764,7 +866,7 @@ describe("ControlPlaneService verification lifecycle", () => {
         jobId: null,
         jobName: null,
         externalInput: null,
-        values: {}
+        values: {},
       },
       completedAt: null,
       createdBy: "leader",
@@ -776,8 +878,8 @@ describe("ControlPlaneService verification lifecycle", () => {
             id: "task-review",
             status: "awaiting_review",
             verificationStatus: "requested",
-            verifierAgentId: "verifier-agent-1"
-          })
+            verifierAgentId: "verifier-agent-1",
+          }),
         },
         {
           ...createTaskRecord({
@@ -786,9 +888,9 @@ describe("ControlPlaneService verification lifecycle", () => {
             status: "pending",
             verificationStatus: "pending",
             verifierAgentId: null,
-            ownerAgentId: null
-          })
-        }
+            ownerAgentId: null,
+          }),
+        },
       ],
       agents: [],
       sessions: [],
@@ -797,8 +899,8 @@ describe("ControlPlaneService verification lifecycle", () => {
         edges: [],
         rootTaskIds: [],
         blockedTaskIds: [],
-        unblockPaths: []
-      }
+        unblockPaths: [],
+      },
     };
     const agentStore: Array<Record<string, unknown>> = [];
     const db = new FakeVerificationSchedulingDb(
@@ -812,70 +914,79 @@ describe("ControlPlaneService verification lifecycle", () => {
           metadata: {
             assignmentKind: "verification",
             workerAgentId: "worker-agent-1",
-            workerSummary: "Implementation is ready for verification."
-          }
-        })
+            workerSummary: "Implementation is ready for verification.",
+          },
+        }),
       ],
-      agentStore
+      agentStore,
     );
     const service = new ControlPlaneService(db as never, {
-      now: () => new Date("2026-03-31T09:40:00.000Z")
+      now: () => new Date("2026-03-31T09:40:00.000Z"),
     });
-    const createWorkerDispatchAssignment = vi.fn(async (input: Record<string, unknown>) => ({
-      id: "dispatch-worker-2",
-      ...input,
-      state: "queued",
-      claimedByNodeId: null,
-      stickyNodeId: null,
-      preferredNodeId: null,
-      attempt: 0,
-      createdAt: new Date("2026-03-31T09:40:00.000Z"),
-      updatedAt: new Date("2026-03-31T09:40:00.000Z")
-    }));
+    const createWorkerDispatchAssignment = vi.fn(
+      async (input: Record<string, unknown>) => ({
+        id: "dispatch-worker-2",
+        ...input,
+        state: "queued",
+        claimedByNodeId: null,
+        stickyNodeId: null,
+        preferredNodeId: null,
+        attempt: 0,
+        createdAt: new Date("2026-03-31T09:40:00.000Z"),
+        updatedAt: new Date("2026-03-31T09:40:00.000Z"),
+      }),
+    );
 
     (service as any).getRun = async () => runDetail;
     (service as any).assertRepositoryExists = async () => ({
       id: "repo-1",
       name: "codex-swarm",
       defaultBranch: "main",
-      projectId: null
+      projectId: null,
     });
     (service as any).loadRunProjectTeam = async () => null;
-    (service as any).createAgent = vi.fn(async (input: Record<string, unknown>) => {
-      const agent = {
-        id: "worker-agent-2",
-        runId: "run-1",
-        name: input.name,
-        role: input.role,
-        profile: input.profile,
-        status: "idle",
-        projectTeamMemberId: input.projectTeamMemberId ?? null,
-        worktreePath: null,
-        branchName: input.branchName ?? null,
-        currentTaskId: input.currentTaskId ?? null,
-        createdAt: new Date("2026-03-31T09:40:00.000Z"),
-        updatedAt: new Date("2026-03-31T09:40:00.000Z")
-      };
+    (service as any).createAgent = vi.fn(
+      async (input: Record<string, unknown>) => {
+        const agent = {
+          id: "worker-agent-2",
+          runId: "run-1",
+          name: input.name,
+          role: input.role,
+          profile: input.profile,
+          status: "idle",
+          projectTeamMemberId: input.projectTeamMemberId ?? null,
+          worktreePath: null,
+          branchName: input.branchName ?? null,
+          currentTaskId: input.currentTaskId ?? null,
+          createdAt: new Date("2026-03-31T09:40:00.000Z"),
+          updatedAt: new Date("2026-03-31T09:40:00.000Z"),
+        };
 
-      agentStore.push(agent);
-      return agent;
-    });
-    (service as any).createWorkerDispatchAssignment = createWorkerDispatchAssignment;
+        agentStore.push(agent);
+        return agent;
+      },
+    );
+    (service as any).createWorkerDispatchAssignment =
+      createWorkerDispatchAssignment;
     (service as any).createMessage = vi.fn(async () => undefined);
     (service as any).maybeExecuteAutoHandoff = vi.fn(async () => undefined);
 
     await (service as any).enqueueRunnableWorkerDispatches("run-1");
 
     expect(createWorkerDispatchAssignment).toHaveBeenCalledTimes(1);
-    expect(createWorkerDispatchAssignment).toHaveBeenCalledWith(expect.objectContaining({
-      taskId: "task-next",
-      metadata: expect.objectContaining({
-        assignmentKind: "worker"
-      })
-    }));
-    expect(createWorkerDispatchAssignment).not.toHaveBeenCalledWith(expect.objectContaining({
-      taskId: "task-review"
-    }));
+    expect(createWorkerDispatchAssignment).toHaveBeenCalledWith(
+      expect.objectContaining({
+        taskId: "task-next",
+        metadata: expect.objectContaining({
+          assignmentKind: "worker",
+        }),
+      }),
+    );
+    expect(createWorkerDispatchAssignment).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        taskId: "task-review",
+      }),
+    );
 
     await service.reconcileRunExecutionState("run-1");
     expect(runDetail.status).toBe("in_progress");
@@ -899,8 +1010,8 @@ describe("ControlPlaneService verification lifecycle", () => {
       [
         {
           id: "run-1",
-          status: "in_progress"
-        }
+          status: "in_progress",
+        },
       ],
       [
         createWorkerAssignment({
@@ -908,24 +1019,24 @@ describe("ControlPlaneService verification lifecycle", () => {
           taskId: "task-blocked",
           agentId: "worker-agent-1",
           sessionId: "session-worker-1",
-          state: "claimed"
-        })
+          state: "claimed",
+        }),
       ],
       [
         {
           id: "worker-agent-1",
           status: "busy",
           currentTaskId: "task-blocked",
-          updatedAt: now
-        }
+          updatedAt: now,
+        },
       ],
       [
         createTaskRecord({
           id: "task-blocked",
           status: "blocked",
           ownerAgentId: "worker-agent-1",
-          dependencyIds: []
-        })
+          dependencyIds: [],
+        }),
       ],
       [
         {
@@ -934,12 +1045,12 @@ describe("ControlPlaneService verification lifecycle", () => {
           workerNodeId: "node-1",
           stickyNodeId: "node-1",
           staleReason: null,
-          updatedAt: now
-        }
-      ]
+          updatedAt: now,
+        },
+      ],
     );
     const service = new ControlPlaneService(db as never, {
-      now: () => now
+      now: () => now,
     });
     (service as any).recordControlPlaneEvent = async () => undefined;
 
@@ -949,18 +1060,18 @@ describe("ControlPlaneService verification lifecycle", () => {
     expect(db.assignmentStore[0]).toMatchObject({
       state: "failed",
       lastFailureReason: "task_not_runnable",
-      claimedByNodeId: null
+      claimedByNodeId: null,
     });
     expect(db.taskStore[0]).toMatchObject({
-      status: "blocked"
+      status: "blocked",
     });
     expect(db.agentStore[0]).toMatchObject({
-      status: "idle"
+      status: "idle",
     });
     expect(db.sessionStore[0]).toMatchObject({
       state: "pending",
       workerNodeId: null,
-      staleReason: "task_not_runnable"
+      staleReason: "task_not_runnable",
     });
   });
 });

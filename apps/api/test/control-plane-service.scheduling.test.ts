@@ -1,9 +1,17 @@
 import { describe, expect, it } from "vitest";
 
-import { agents, sessions, tasks, workerDispatchAssignments, workerNodes } from "../src/db/schema.js";
+import {
+  agents,
+  sessions,
+  tasks,
+  workerDispatchAssignments,
+  workerNodes,
+} from "../src/db/schema.js";
 import { ControlPlaneService } from "../src/services/control-plane-service.js";
 
-function extractTargetId(condition: { queryChunks: Array<{ value?: string[] } | { value?: string }> }) {
+function extractTargetId(condition: {
+  queryChunks: Array<{ value?: string[] } | { value?: string }>;
+}) {
   const chunk = condition.queryChunks[3] as { value?: string };
 
   if (!chunk || typeof chunk.value !== "string") {
@@ -19,31 +27,53 @@ class FakeSchedulingDb {
     readonly assignmentStore: any[],
     readonly sessionStore: any[],
     readonly agentStore: any[],
-    readonly taskStore: any[]
+    readonly taskStore: any[],
   ) {}
 
   select() {
     return {
       from: (table: unknown) => ({
-        where: (condition: { queryChunks?: Array<{ value?: string[] } | { value?: string }> }) => ({
+        where: (condition: {
+          queryChunks?: Array<{ value?: string[] } | { value?: string }>;
+        }) => ({
           orderBy: async () => {
             if (table === workerNodes) {
               if (condition.queryChunks) {
-                const id = extractTargetId(condition as { queryChunks: Array<{ value?: string[] } | { value?: string }> });
-                return this.workerNodeStore.filter((candidate) => candidate.id === id);
+                const id = extractTargetId(
+                  condition as {
+                    queryChunks: Array<
+                      { value?: string[] } | { value?: string }
+                    >;
+                  },
+                );
+                return this.workerNodeStore.filter(
+                  (candidate) => candidate.id === id,
+                );
               }
 
               return this.workerNodeStore;
             }
 
             if (table === workerDispatchAssignments) {
-              return this.assignmentStore.filter((candidate) => candidate.state === "queued" || candidate.state === "retrying");
+              return this.assignmentStore.filter(
+                (candidate) =>
+                  candidate.state === "queued" ||
+                  candidate.state === "retrying",
+              );
             }
 
             if (table === tasks) {
               if (condition.queryChunks) {
-                const id = extractTargetId(condition as { queryChunks: Array<{ value?: string[] } | { value?: string }> });
-                return this.taskStore.filter((candidate) => candidate.id === id);
+                const id = extractTargetId(
+                  condition as {
+                    queryChunks: Array<
+                      { value?: string[] } | { value?: string }
+                    >;
+                  },
+                );
+                return this.taskStore.filter(
+                  (candidate) => candidate.id === id,
+                );
               }
 
               return this.taskStore;
@@ -52,27 +82,52 @@ class FakeSchedulingDb {
             throw new Error("unexpected ordered select table");
           },
           then: <TResult1 = any[], TResult2 = never>(
-            onfulfilled?: ((value: any[]) => TResult1 | PromiseLike<TResult1>) | null,
-            onrejected?: ((reason: unknown) => TResult2 | PromiseLike<TResult2>) | null
+            onfulfilled?:
+              | ((value: any[]) => TResult1 | PromiseLike<TResult1>)
+              | null,
+            onrejected?:
+              | ((reason: unknown) => TResult2 | PromiseLike<TResult2>)
+              | null,
           ) => {
-            const rows = table === workerNodes && condition.queryChunks
-              ? this.workerNodeStore.filter((candidate) => candidate.id === extractTargetId(
-                condition as { queryChunks: Array<{ value?: string[] } | { value?: string }> }
-              ))
-              : table === workerNodes
-                ? this.workerNodeStore
-                : table === workerDispatchAssignments
-                  ? this.assignmentStore.filter((candidate) => candidate.state === "queued" || candidate.state === "retrying")
-                  : table === tasks && condition.queryChunks
-                    ? this.taskStore.filter((candidate) => candidate.id === extractTargetId(
-                      condition as { queryChunks: Array<{ value?: string[] } | { value?: string }> }
-                    ))
-                    : table === tasks
-                      ? this.taskStore
-                  : [];
+            const rows =
+              table === workerNodes && condition.queryChunks
+                ? this.workerNodeStore.filter(
+                    (candidate) =>
+                      candidate.id ===
+                      extractTargetId(
+                        condition as {
+                          queryChunks: Array<
+                            { value?: string[] } | { value?: string }
+                          >;
+                        },
+                      ),
+                  )
+                : table === workerNodes
+                  ? this.workerNodeStore
+                  : table === workerDispatchAssignments
+                    ? this.assignmentStore.filter(
+                        (candidate) =>
+                          candidate.state === "queued" ||
+                          candidate.state === "retrying",
+                      )
+                    : table === tasks && condition.queryChunks
+                      ? this.taskStore.filter(
+                          (candidate) =>
+                            candidate.id ===
+                            extractTargetId(
+                              condition as {
+                                queryChunks: Array<
+                                  { value?: string[] } | { value?: string }
+                                >;
+                              },
+                            ),
+                        )
+                      : table === tasks
+                        ? this.taskStore
+                        : [];
 
             return Promise.resolve(rows).then(onfulfilled, onrejected);
-          }
+          },
         }),
         orderBy: async () => {
           if (table === workerNodes) {
@@ -80,23 +135,30 @@ class FakeSchedulingDb {
           }
 
           if (table === workerDispatchAssignments) {
-            return this.assignmentStore.filter((candidate) => candidate.state === "queued" || candidate.state === "retrying");
+            return this.assignmentStore.filter(
+              (candidate) =>
+                candidate.state === "queued" || candidate.state === "retrying",
+            );
           }
 
           throw new Error("unexpected ordered select table");
-        }
-      })
+        },
+      }),
     };
   }
 
   update(table: unknown) {
     return {
       set: (values: Record<string, unknown>) => ({
-        where: (condition: { queryChunks: Array<{ value?: string[] } | { value?: string }> }) => {
+        where: (condition: {
+          queryChunks: Array<{ value?: string[] } | { value?: string }>;
+        }) => {
           const id = extractTargetId(condition);
 
           if (table === workerDispatchAssignments) {
-            const record = this.assignmentStore.find((candidate) => candidate.id === id);
+            const record = this.assignmentStore.find(
+              (candidate) => candidate.id === id,
+            );
 
             if (!record) {
               throw new Error(`unknown worker dispatch assignment ${id}`);
@@ -106,16 +168,22 @@ class FakeSchedulingDb {
             return {
               returning: async () => [record],
               then<TResult1 = any[], TResult2 = never>(
-                onfulfilled?: ((value: any[]) => TResult1 | PromiseLike<TResult1>) | null,
-                onrejected?: ((reason: unknown) => TResult2 | PromiseLike<TResult2>) | null
+                onfulfilled?:
+                  | ((value: any[]) => TResult1 | PromiseLike<TResult1>)
+                  | null,
+                onrejected?:
+                  | ((reason: unknown) => TResult2 | PromiseLike<TResult2>)
+                  | null,
               ) {
                 return Promise.resolve([record]).then(onfulfilled, onrejected);
-              }
+              },
             };
           }
 
           if (table === sessions) {
-            const record = this.sessionStore.find((candidate) => candidate.id === id);
+            const record = this.sessionStore.find(
+              (candidate) => candidate.id === id,
+            );
 
             if (!record) {
               throw new Error(`unknown session ${id}`);
@@ -126,7 +194,9 @@ class FakeSchedulingDb {
           }
 
           if (table === agents) {
-            const record = this.agentStore.find((candidate) => candidate.id === id);
+            const record = this.agentStore.find(
+              (candidate) => candidate.id === id,
+            );
 
             if (!record) {
               throw new Error(`unknown agent ${id}`);
@@ -137,7 +207,9 @@ class FakeSchedulingDb {
           }
 
           if (table === tasks) {
-            const record = this.taskStore.find((candidate) => candidate.id === id);
+            const record = this.taskStore.find(
+              (candidate) => candidate.id === id,
+            );
 
             if (!record) {
               throw new Error(`unknown task ${id}`);
@@ -148,8 +220,8 @@ class FakeSchedulingDb {
           }
 
           throw new Error("unexpected update table");
-        }
-      })
+        },
+      }),
     };
   }
 }
@@ -171,11 +243,11 @@ describe("ControlPlaneService distributed scheduling", () => {
             queueDepth: 6,
             activeClaims: 2,
             utilization: {
-              cpu: 0.9
-            }
+              cpu: 0.9,
+            },
           },
           createdAt: new Date("2026-03-28T11:00:00.000Z"),
-          updatedAt: now
+          updatedAt: now,
         },
         {
           id: "node-b",
@@ -189,12 +261,12 @@ describe("ControlPlaneService distributed scheduling", () => {
             queueDepth: 1,
             activeClaims: 0,
             utilization: {
-              cpu: 0.2
-            }
+              cpu: 0.2,
+            },
           },
           createdAt: new Date("2026-03-28T11:00:00.000Z"),
-          updatedAt: now
-        }
+          updatedAt: now,
+        },
       ],
       [
         {
@@ -226,8 +298,8 @@ describe("ControlPlaneService distributed scheduling", () => {
           completedAt: null,
           lastFailureReason: null,
           createdAt: new Date("2026-03-28T12:00:00.000Z"),
-          updatedAt: new Date("2026-03-28T12:00:00.000Z")
-        }
+          updatedAt: new Date("2026-03-28T12:00:00.000Z"),
+        },
       ],
       [
         {
@@ -246,8 +318,8 @@ describe("ControlPlaneService distributed scheduling", () => {
           staleReason: null,
           metadata: {},
           createdAt: new Date("2026-03-28T12:00:00.000Z"),
-          updatedAt: new Date("2026-03-28T12:00:00.000Z")
-        }
+          updatedAt: new Date("2026-03-28T12:00:00.000Z"),
+        },
       ],
       [
         {
@@ -258,8 +330,8 @@ describe("ControlPlaneService distributed scheduling", () => {
           role: "backend-dev",
           status: "idle",
           createdAt: new Date("2026-03-28T12:00:00.000Z"),
-          updatedAt: new Date("2026-03-28T12:00:00.000Z")
-        }
+          updatedAt: new Date("2026-03-28T12:00:00.000Z"),
+        },
       ],
       [
         {
@@ -267,12 +339,12 @@ describe("ControlPlaneService distributed scheduling", () => {
           runId: "run-1",
           status: "pending",
           dependencyIds: [],
-          ownerAgentId: "agent-1"
-        }
-      ]
+          ownerAgentId: "agent-1",
+        },
+      ],
     );
     const service = new ControlPlaneService(db as never, {
-      now: () => now
+      now: () => now,
     });
     (service as any).reconcileRunExecutionState = async () => undefined;
     (service as any).recordControlPlaneEvent = async () => undefined;
@@ -288,18 +360,18 @@ describe("ControlPlaneService distributed scheduling", () => {
       claimedByNodeId: "node-b",
       stickyNodeId: "node-b",
       preferredNodeId: "node-b",
-      state: "claimed"
+      state: "claimed",
     });
     expect(db.sessionStore[0]).toMatchObject({
       workerNodeId: "node-b",
       stickyNodeId: "node-b",
       state: "active",
       staleReason: null,
-      updatedAt: now
+      updatedAt: now,
     });
     expect(db.agentStore[0]).toMatchObject({
       status: "busy",
-      updatedAt: now
+      updatedAt: now,
     });
   });
 
@@ -319,12 +391,12 @@ describe("ControlPlaneService distributed scheduling", () => {
             queueDepth: 1,
             activeClaims: 0,
             utilization: {
-              cpu: 0.2
-            }
+              cpu: 0.2,
+            },
           },
           createdAt: new Date("2026-03-28T11:00:00.000Z"),
-          updatedAt: now
-        }
+          updatedAt: now,
+        },
       ],
       [
         {
@@ -356,7 +428,7 @@ describe("ControlPlaneService distributed scheduling", () => {
           completedAt: null,
           lastFailureReason: null,
           createdAt: new Date("2026-03-28T12:00:00.000Z"),
-          updatedAt: new Date("2026-03-28T12:00:00.000Z")
+          updatedAt: new Date("2026-03-28T12:00:00.000Z"),
         },
         {
           id: "dispatch-ready",
@@ -387,8 +459,8 @@ describe("ControlPlaneService distributed scheduling", () => {
           completedAt: null,
           lastFailureReason: null,
           createdAt: new Date("2026-03-28T12:01:00.000Z"),
-          updatedAt: new Date("2026-03-28T12:01:00.000Z")
-        }
+          updatedAt: new Date("2026-03-28T12:01:00.000Z"),
+        },
       ],
       [
         {
@@ -407,7 +479,7 @@ describe("ControlPlaneService distributed scheduling", () => {
           staleReason: null,
           metadata: {},
           createdAt: now,
-          updatedAt: now
+          updatedAt: now,
         },
         {
           id: "session-ready",
@@ -425,8 +497,8 @@ describe("ControlPlaneService distributed scheduling", () => {
           staleReason: null,
           metadata: {},
           createdAt: now,
-          updatedAt: now
-        }
+          updatedAt: now,
+        },
       ],
       [
         {
@@ -437,7 +509,7 @@ describe("ControlPlaneService distributed scheduling", () => {
           role: "backend-dev",
           status: "idle",
           createdAt: now,
-          updatedAt: now
+          updatedAt: now,
         },
         {
           id: "agent-ready",
@@ -447,8 +519,8 @@ describe("ControlPlaneService distributed scheduling", () => {
           role: "backend-dev",
           status: "idle",
           createdAt: now,
-          updatedAt: now
-        }
+          updatedAt: now,
+        },
       ],
       [
         {
@@ -457,7 +529,7 @@ describe("ControlPlaneService distributed scheduling", () => {
           status: "blocked",
           dependencyIds: [],
           ownerAgentId: "agent-blocked",
-          updatedAt: now
+          updatedAt: now,
         },
         {
           id: "task-ready",
@@ -465,12 +537,12 @@ describe("ControlPlaneService distributed scheduling", () => {
           status: "pending",
           dependencyIds: [],
           ownerAgentId: "agent-ready",
-          updatedAt: now
-        }
-      ]
+          updatedAt: now,
+        },
+      ],
     );
     const service = new ControlPlaneService(db as never, {
-      now: () => now
+      now: () => now,
     });
     (service as any).recordControlPlaneEvent = async () => undefined;
     (service as any).reconcileRunExecutionState = async () => undefined;
@@ -478,13 +550,19 @@ describe("ControlPlaneService distributed scheduling", () => {
     const claim = await service.claimNextWorkerDispatch("node-a");
 
     expect(claim?.id).toBe("dispatch-ready");
-    expect(db.assignmentStore.find((assignment) => assignment.id === "dispatch-blocked")).toMatchObject({
+    expect(
+      db.assignmentStore.find(
+        (assignment) => assignment.id === "dispatch-blocked",
+      ),
+    ).toMatchObject({
       state: "failed",
       lastFailureReason: "task_not_runnable",
-      claimedByNodeId: null
+      claimedByNodeId: null,
     });
-    expect(db.taskStore.find((task) => task.id === "task-blocked")).toMatchObject({
-      status: "blocked"
+    expect(
+      db.taskStore.find((task) => task.id === "task-blocked"),
+    ).toMatchObject({
+      status: "blocked",
     });
   });
 });

@@ -6,7 +6,7 @@ describe("run handoff schemas", () => {
   it("defaults manual handoff for new runs", () => {
     const run = runCreateSchema.parse({
       repositoryId: "550e8400-e29b-41d4-a716-446655440000",
-      goal: "Ship M10"
+      goal: "Ship M10",
     });
 
     expect(run.handoff).toEqual({
@@ -16,14 +16,14 @@ describe("run handoff schemas", () => {
       autoPublishBranch: false,
       autoCreatePullRequest: false,
       titleTemplate: null,
-      bodyTemplate: null
+      bodyTemplate: null,
     });
   });
 
   it("defaults manual handoff for repeatable run execution", () => {
     const execution = repeatableRunExecutionSchema.parse({
       goal: "Review incoming PRs",
-      concurrencyCap: 1
+      concurrencyCap: 1,
     });
 
     expect(execution.handoff.mode).toBe("manual");
@@ -31,16 +31,18 @@ describe("run handoff schemas", () => {
   });
 
   it("rejects unsupported handoff template tokens", () => {
-    expect(() => runCreateSchema.parse({
-      repositoryId: "550e8400-e29b-41d4-a716-446655440000",
-      goal: "Ship M10",
-      handoff: {
-        mode: "auto",
-        provider: "github",
-        autoPublishBranch: true,
-        autoCreatePullRequest: true,
-        titleTemplate: "Provider handoff: {unknown_token}"
-      }
-    })).toThrow(/unsupported handoff template token unknown_token/);
+    expect(() =>
+      runCreateSchema.parse({
+        repositoryId: "550e8400-e29b-41d4-a716-446655440000",
+        goal: "Ship M10",
+        handoff: {
+          mode: "auto",
+          provider: "github",
+          autoPublishBranch: true,
+          autoCreatePullRequest: true,
+          titleTemplate: "Provider handoff: {unknown_token}",
+        },
+      }),
+    ).toThrow(/unsupported handoff template token unknown_token/);
   });
 });

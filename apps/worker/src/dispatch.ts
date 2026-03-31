@@ -4,7 +4,7 @@ import type {
   WorkerDrainCommand,
   WorkerDrainStatus,
   WorkerNodeRuntime,
-  WorkerRuntimeDependencyCheck
+  WorkerRuntimeDependencyCheck,
 } from "@codex-swarm/contracts";
 
 export interface RedisDispatchQueueKeys {
@@ -25,7 +25,7 @@ export interface RedisDispatchClient {
   lPush(key: string, value: string): Promise<number>;
   blPop(
     key: string,
-    timeoutSeconds: number
+    timeoutSeconds: number,
   ): Promise<{ key: string; element: string } | null>;
   hSet(key: string, field: string, value: string): Promise<number>;
   hDel(key: string, field: string): Promise<number>;
@@ -50,38 +50,52 @@ export interface BuildRemoteWorkerBootstrapInput {
 const drainAcceptingStates = new Set(["active"]);
 const heartbeatStates = new Set(["active", "draining"]);
 
-export function buildRedisDispatchQueueKeys(prefix: string, queue = "worker-dispatch"): RedisDispatchQueueKeys {
+export function buildRedisDispatchQueueKeys(
+  prefix: string,
+  queue = "worker-dispatch",
+): RedisDispatchQueueKeys {
   const namespace = `${prefix}:${queue}`;
 
   return {
     pending: `${namespace}:pending`,
     inflight: `${namespace}:inflight`,
     leases: `${namespace}:leases`,
-    nodeState: `${namespace}:node-state`
+    nodeState: `${namespace}:node-state`,
   };
 }
 
-export function serializeDispatchAssignment(assignment: WorkerDispatchAssignment) {
+export function serializeDispatchAssignment(
+  assignment: WorkerDispatchAssignment,
+) {
   return JSON.stringify({
     ...assignment,
-    createdAt: assignment.createdAt.toISOString()
+    createdAt: assignment.createdAt.toISOString(),
   });
 }
 
-export function deserializeDispatchAssignment(payload: string): WorkerDispatchAssignment {
-  const parsed = JSON.parse(payload) as Omit<WorkerDispatchAssignment, "createdAt"> & { createdAt: string };
+export function deserializeDispatchAssignment(
+  payload: string,
+): WorkerDispatchAssignment {
+  const parsed = JSON.parse(payload) as Omit<
+    WorkerDispatchAssignment,
+    "createdAt"
+  > & { createdAt: string };
 
   return {
     ...parsed,
-    createdAt: new Date(parsed.createdAt)
+    createdAt: new Date(parsed.createdAt),
   };
 }
 
-export function createDispatchLease(assignment: WorkerDispatchAssignment, nodeId: string, now = new Date()): RedisDispatchLease {
+export function createDispatchLease(
+  assignment: WorkerDispatchAssignment,
+  nodeId: string,
+  now = new Date(),
+): RedisDispatchLease {
   return {
     assignment,
     nodeId,
-    claimedAt: now.toISOString()
+    claimedAt: now.toISOString(),
   };
 }
 
@@ -90,22 +104,27 @@ export function serializeDispatchLease(lease: RedisDispatchLease) {
     ...lease,
     assignment: {
       ...lease.assignment,
-      createdAt: lease.assignment.createdAt.toISOString()
-    }
+      createdAt: lease.assignment.createdAt.toISOString(),
+    },
   });
 }
 
 export function deserializeDispatchLease(payload: string): RedisDispatchLease {
-  const parsed = JSON.parse(payload) as Omit<RedisDispatchLease, "assignment"> & {
-    assignment: Omit<WorkerDispatchAssignment, "createdAt"> & { createdAt: string };
+  const parsed = JSON.parse(payload) as Omit<
+    RedisDispatchLease,
+    "assignment"
+  > & {
+    assignment: Omit<WorkerDispatchAssignment, "createdAt"> & {
+      createdAt: string;
+    };
   };
 
   return {
     ...parsed,
     assignment: {
       ...parsed.assignment,
-      createdAt: new Date(parsed.assignment.createdAt)
-    }
+      createdAt: new Date(parsed.assignment.createdAt),
+    },
   };
 }
 
@@ -113,7 +132,10 @@ export function canNodeAcceptDispatch(state: WorkerNodeRuntime["state"]) {
   return drainAcceptingStates.has(state);
 }
 
-export function buildWorkerDrainStatus(command: WorkerDrainCommand, previousState: WorkerNodeRuntime["state"]): WorkerDrainStatus {
+export function buildWorkerDrainStatus(
+  command: WorkerDrainCommand,
+  previousState: WorkerNodeRuntime["state"],
+): WorkerDrainStatus {
   const targetState = command.targetState;
 
   return {
@@ -123,11 +145,13 @@ export function buildWorkerDrainStatus(command: WorkerDrainCommand, previousStat
     shouldAcceptAssignments: drainAcceptingStates.has(targetState),
     shouldKeepHeartbeats: heartbeatStates.has(targetState),
     requiresRedisPause: targetState !== "active",
-    reason: command.reason
+    reason: command.reason,
   };
 }
 
-export function evaluateWorkerRuntimeDependencies(runtime: WorkerNodeRuntime): WorkerRuntimeDependencyCheck[] {
+export function evaluateWorkerRuntimeDependencies(
+  runtime: WorkerNodeRuntime,
+): WorkerRuntimeDependencyCheck[] {
   const requiresSharedArtifactStore = runtime.capabilities.includes("remote");
 
   const checks: WorkerRuntimeDependencyCheck[] = [
@@ -136,51 +160,68 @@ export function evaluateWorkerRuntimeDependencies(runtime: WorkerNodeRuntime): W
       status: runtime.controlPlaneUrl.startsWith("http") ? "ready" : "missing",
       detail: runtime.controlPlaneUrl.startsWith("http")
         ? `control plane reachable via ${runtime.controlPlaneUrl}`
-        : "controlPlaneUrl must be an http(s) URL"
+        : "controlPlaneUrl must be an http(s) URL",
     },
     {
       name: "postgres",
       status: runtime.postgresUrl.length > 0 ? "ready" : "missing",
-      detail: runtime.postgresUrl.length > 0 ? "postgres connection string configured" : "postgresUrl is missing"
+      detail:
+        runtime.postgresUrl.length > 0
+          ? "postgres connection string configured"
+          : "postgresUrl is missing",
     },
     {
       name: "redis",
       status: runtime.redisUrl.length > 0 ? "ready" : "missing",
-      detail: runtime.redisUrl.length > 0 ? "redis connection string configured" : "redisUrl is missing"
+      detail:
+        runtime.redisUrl.length > 0
+          ? "redis connection string configured"
+          : "redisUrl is missing",
     },
     {
       name: "artifact_store",
-      status: runtime.artifactBaseUrl ? "ready" : requiresSharedArtifactStore ? "missing" : "degraded",
+      status: runtime.artifactBaseUrl
+        ? "ready"
+        : requiresSharedArtifactStore
+          ? "missing"
+          : "degraded",
       detail: runtime.artifactBaseUrl
         ? `artifact store configured at ${runtime.artifactBaseUrl}`
         : requiresSharedArtifactStore
           ? "artifactBaseUrl is required for remote workers because artifacts must remain accessible across nodes"
-          : "artifactBaseUrl not configured; single-host workers can fall back to local artifact access"
+          : "artifactBaseUrl not configured; single-host workers can fall back to local artifact access",
     },
     {
       name: "codex_cli",
-      status: runtime.codexTransport.kind === "streamable_http"
-        ? "ready"
-        : runtime.codexCommand.length > 0
+      status:
+        runtime.codexTransport.kind === "streamable_http"
           ? "ready"
-          : "missing",
-      detail: runtime.codexTransport.kind === "streamable_http"
-        ? `streamable HTTP transport via ${runtime.codexTransport.url}`
-        : runtime.codexCommand.length > 0
-          ? `codex command: ${runtime.codexCommand.join(" ")}`
-          : "codexCommand is missing"
+          : runtime.codexCommand.length > 0
+            ? "ready"
+            : "missing",
+      detail:
+        runtime.codexTransport.kind === "streamable_http"
+          ? `streamable HTTP transport via ${runtime.codexTransport.url}`
+          : runtime.codexCommand.length > 0
+            ? `codex command: ${runtime.codexCommand.join(" ")}`
+            : "codexCommand is missing",
     },
     {
       name: "workspace_root",
       status: runtime.workspaceRoot.length > 0 ? "ready" : "missing",
-      detail: runtime.workspaceRoot.length > 0 ? `workspace root: ${runtime.workspaceRoot}` : "workspaceRoot is missing"
-    }
+      detail:
+        runtime.workspaceRoot.length > 0
+          ? `workspace root: ${runtime.workspaceRoot}`
+          : "workspaceRoot is missing",
+    },
   ];
 
   return checks;
 }
 
-export function buildRemoteWorkerBootstrap(input: BuildRemoteWorkerBootstrapInput): RemoteWorkerBootstrap {
+export function buildRemoteWorkerBootstrap(
+  input: BuildRemoteWorkerBootstrapInput,
+): RemoteWorkerBootstrap {
   return {
     runtime: input.runtime,
     dispatch: input.dispatch,
@@ -200,11 +241,12 @@ export function buildRemoteWorkerBootstrap(input: BuildRemoteWorkerBootstrapInpu
       ...(input.runtime.codexTransport.kind === "streamable_http"
         ? {
             CODEX_SWARM_MCP_SERVER_URL: input.runtime.codexTransport.url,
-            CODEX_SWARM_MCP_PROTOCOL_VERSION: input.runtime.codexTransport.protocolVersion
+            CODEX_SWARM_MCP_PROTOCOL_VERSION:
+              input.runtime.codexTransport.protocolVersion,
           }
-        : {})
+        : {}),
     },
-    checks: evaluateWorkerRuntimeDependencies(input.runtime)
+    checks: evaluateWorkerRuntimeDependencies(input.runtime),
   };
 }
 
@@ -214,7 +256,7 @@ export class RedisDispatchQueue {
   constructor(
     private readonly client: RedisDispatchClient,
     prefix: string,
-    queue = "worker-dispatch"
+    queue = "worker-dispatch",
   ) {
     this.keys = buildRedisDispatchQueueKeys(prefix, queue);
   }
@@ -224,17 +266,28 @@ export class RedisDispatchQueue {
   }
 
   async enqueue(assignment: WorkerDispatchAssignment) {
-    return this.client.rPush(this.keys.pending, serializeDispatchAssignment(assignment));
+    return this.client.rPush(
+      this.keys.pending,
+      serializeDispatchAssignment(assignment),
+    );
   }
 
-  async claim(input: ClaimDispatchInput): Promise<WorkerDispatchAssignment | null> {
+  async claim(
+    input: ClaimDispatchInput,
+  ): Promise<WorkerDispatchAssignment | null> {
     const nodeState = await this.client.hGet(this.keys.nodeState, input.nodeId);
 
-    if (nodeState && !canNodeAcceptDispatch(nodeState as WorkerNodeRuntime["state"])) {
+    if (
+      nodeState &&
+      !canNodeAcceptDispatch(nodeState as WorkerNodeRuntime["state"])
+    ) {
       return null;
     }
 
-    const result = await this.client.blPop(this.keys.pending, input.timeoutSeconds ?? 1);
+    const result = await this.client.blPop(
+      this.keys.pending,
+      input.timeoutSeconds ?? 1,
+    );
 
     if (!result) {
       return null;
@@ -243,8 +296,16 @@ export class RedisDispatchQueue {
     const assignment = deserializeDispatchAssignment(result.element);
     const lease = createDispatchLease(assignment, input.nodeId);
 
-    await this.client.hSet(this.keys.inflight, assignment.id, serializeDispatchAssignment(assignment));
-    await this.client.hSet(this.keys.leases, assignment.id, serializeDispatchLease(lease));
+    await this.client.hSet(
+      this.keys.inflight,
+      assignment.id,
+      serializeDispatchAssignment(assignment),
+    );
+    await this.client.hSet(
+      this.keys.leases,
+      assignment.id,
+      serializeDispatchLease(lease),
+    );
 
     return assignment;
   }
@@ -261,12 +322,15 @@ export class RedisDispatchQueue {
       attempt: input.assignment.attempt + 1,
       metadata: {
         ...input.assignment.metadata,
-        requeueReason: input.reason
-      }
+        requeueReason: input.reason,
+      },
     };
 
     await this.acknowledge(input.assignment.id);
-    await this.client.lPush(this.keys.pending, serializeDispatchAssignment(nextAssignment));
+    await this.client.lPush(
+      this.keys.pending,
+      serializeDispatchAssignment(nextAssignment),
+    );
     return nextAssignment;
   }
 

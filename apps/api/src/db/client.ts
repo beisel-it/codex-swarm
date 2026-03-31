@@ -6,7 +6,7 @@ import * as schema from "./schema.js";
 
 export function createPool(connectionString = getConfig().DATABASE_URL): Pool {
   return new Pool({
-    connectionString
+    connectionString,
   });
 }
 

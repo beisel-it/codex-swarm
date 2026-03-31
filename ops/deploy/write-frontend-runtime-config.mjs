@@ -31,18 +31,18 @@ function readEnv(name) {
 }
 
 const apiBaseUrl =
-  readEnv("CODEX_SWARM_API_BASE_URL")
-  || readEnv("VITE_API_BASE_URL")
-  || (readEnv("CODEX_SWARM_HOST") && readEnv("CODEX_SWARM_API_PORT")
+  readEnv("CODEX_SWARM_API_BASE_URL") ||
+  readEnv("VITE_API_BASE_URL") ||
+  (readEnv("CODEX_SWARM_HOST") && readEnv("CODEX_SWARM_API_PORT")
     ? `http://${readEnv("CODEX_SWARM_HOST")}:${readEnv("CODEX_SWARM_API_PORT")}`
     : "");
 
 const apiToken =
-  readEnv("CODEX_SWARM_DEV_AUTH_TOKEN")
-  || readEnv("CODEX_SWARM_API_TOKEN")
-  || readEnv("CODEX_SWARM_AUTH_TOKEN")
-  || readEnv("DEV_AUTH_TOKEN")
-  || readEnv("VITE_API_TOKEN");
+  readEnv("CODEX_SWARM_DEV_AUTH_TOKEN") ||
+  readEnv("CODEX_SWARM_API_TOKEN") ||
+  readEnv("CODEX_SWARM_AUTH_TOKEN") ||
+  readEnv("DEV_AUTH_TOKEN") ||
+  readEnv("VITE_API_TOKEN");
 
 const config = {
   apiBaseUrl,

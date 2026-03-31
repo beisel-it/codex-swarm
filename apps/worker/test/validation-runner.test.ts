@@ -4,7 +4,7 @@ import type { Artifact, RunDetail, Validation } from "@codex-swarm/contracts";
 import {
   executeTaskValidationTemplate,
   executeValidationCommand,
-  type WorkerControlPlaneRequest
+  type WorkerControlPlaneRequest,
 } from "../src/validation-runner.js";
 
 const runDetail: RunDetail = {
@@ -37,13 +37,13 @@ const runDetail: RunDetail = {
     autoPublishBranch: false,
     autoCreatePullRequest: false,
     titleTemplate: null,
-    bodyTemplate: null
+    bodyTemplate: null,
   },
   handoffExecution: {
     state: "idle",
     failureReason: null,
     attemptedAt: null,
-    completedAt: null
+    completedAt: null,
   },
   metadata: {},
   context: {
@@ -55,7 +55,7 @@ const runDetail: RunDetail = {
     jobId: null,
     jobName: null,
     externalInput: null,
-    values: {}
+    values: {},
   },
   completedAt: null,
   createdBy: "tech-lead",
@@ -86,12 +86,12 @@ const runDetail: RunDetail = {
           name: "unit",
           command: `${JSON.stringify(process.execPath)} --input-type=module -e "console.log('validation ok')"`,
           summary: "Unit validation completed",
-          artifactPath: "artifacts/validations/unit.json"
-        }
+          artifactPath: "artifacts/validations/unit.json",
+        },
       ],
       createdAt: new Date("2026-03-29T00:00:00.000Z"),
-      updatedAt: new Date("2026-03-29T00:00:00.000Z")
-    }
+      updatedAt: new Date("2026-03-29T00:00:00.000Z"),
+    },
   ],
   agents: [],
   sessions: [],
@@ -107,14 +107,14 @@ const runDetail: RunDetail = {
         dependentTaskIds: [],
         blockedByTaskIds: [],
         isRoot: true,
-        isBlocked: false
-      }
+        isBlocked: false,
+      },
     ],
     edges: [],
     rootTaskIds: ["33333333-3333-4333-8333-333333333333"],
     blockedTaskIds: [],
-    unblockPaths: []
-  }
+    unblockPaths: [],
+  },
 };
 
 describe("validation runner", () => {
@@ -122,8 +122,8 @@ describe("validation runner", () => {
     const result = await executeValidationCommand(
       `${JSON.stringify(process.execPath)} --input-type=module -e "console.log('out'); console.error('err'); process.exit(0)"`,
       {
-        cwd: process.cwd()
-      }
+        cwd: process.cwd(),
+      },
     );
 
     expect(result.exitCode).toBe(0);
@@ -138,7 +138,7 @@ describe("validation runner", () => {
     const request: WorkerControlPlaneRequest = async <T>(
       method: string,
       path: string,
-      payload?: Record<string, unknown>
+      payload?: Record<string, unknown>,
     ) => {
       if (method === "POST" && path === "/api/v1/artifacts" && payload) {
         const artifact: Artifact = {
@@ -152,7 +152,7 @@ describe("validation runner", () => {
           sizeBytes: 128,
           sha256: "sha",
           metadata: payload.metadata as Record<string, unknown>,
-          createdAt: new Date("2026-03-29T00:00:05.000Z")
+          createdAt: new Date("2026-03-29T00:00:05.000Z"),
         };
 
         capturedArtifacts.push(artifact);
@@ -171,7 +171,7 @@ describe("validation runner", () => {
           artifactPath: payload.artifactPath as string,
           artifactIds: payload.artifactIds as string[],
           createdAt: new Date("2026-03-29T00:00:06.000Z"),
-          updatedAt: new Date("2026-03-29T00:00:06.000Z")
+          updatedAt: new Date("2026-03-29T00:00:06.000Z"),
         };
 
         capturedValidations.push(validation);
@@ -187,7 +187,7 @@ describe("validation runner", () => {
       taskId: runDetail.tasks[0]!.id,
       templateName: "unit",
       cwd: process.cwd(),
-      runDetail
+      runDetail,
     });
 
     expect(executed.validation.status).toBe("passed");

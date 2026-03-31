@@ -3,7 +3,7 @@ module.exports = function (eleventyConfig) {
   eleventyConfig.addWatchTarget("./src/assets/css/site.css");
   eleventyConfig.addWatchTarget("./src/assets/js/site.js");
   eleventyConfig.setServerOptions({
-    showAllHosts: true
+    showAllHosts: true,
   });
 
   return {
@@ -11,10 +11,10 @@ module.exports = function (eleventyConfig) {
       input: "src",
       includes: "_includes",
       data: "_data",
-      output: "_site"
+      output: "_site",
     },
     htmlTemplateEngine: "njk",
     markdownTemplateEngine: "njk",
-    passthroughFileCopy: true
+    passthroughFileCopy: true,
   };
 };

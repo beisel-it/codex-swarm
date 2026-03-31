@@ -1,4 +1,10 @@
-export type WorkerSessionState = "pending" | "active" | "stopped" | "failed" | "stale" | "archived";
+export type WorkerSessionState =
+  | "pending"
+  | "active"
+  | "stopped"
+  | "failed"
+  | "stale"
+  | "archived";
 
 export interface WorkerSessionRecord {
   sessionId: string;
@@ -34,7 +40,7 @@ export class SessionRegistry {
       staleReason: null,
       lastHeartbeatAt: null,
       createdAt: new Date(),
-      updatedAt: new Date()
+      updatedAt: new Date(),
     };
 
     this.sessions.set(record.sessionId, record);
@@ -44,7 +50,7 @@ export class SessionRegistry {
   hydrate(records: WorkerSessionRecord[]) {
     for (const record of records) {
       this.sessions.set(record.sessionId, {
-        ...record
+        ...record,
       });
     }
 
@@ -60,7 +66,9 @@ export class SessionRegistry {
     const record = this.get(sessionId);
 
     if (record.threadId && record.threadId !== threadId) {
-      throw new Error(`session ${sessionId} is already bound to thread ${record.threadId}`);
+      throw new Error(
+        `session ${sessionId} is already bound to thread ${record.threadId}`,
+      );
     }
 
     record.threadId = threadId;
@@ -121,7 +129,11 @@ export class SessionRegistry {
   }
 
   findByThreadId(threadId: string) {
-    return [...this.sessions.values()].find((record) => record.threadId === threadId) ?? null;
+    return (
+      [...this.sessions.values()].find(
+        (record) => record.threadId === threadId,
+      ) ?? null
+    );
   }
 
   list() {

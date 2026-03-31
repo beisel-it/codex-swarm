@@ -17,8 +17,8 @@ if (!window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
     },
     {
       threshold: 0.16,
-      rootMargin: "0px 0px -8% 0px"
-    }
+      rootMargin: "0px 0px -8% 0px",
+    },
   );
 
   revealables.forEach((element) => observer.observe(element));

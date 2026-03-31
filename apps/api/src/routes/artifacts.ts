@@ -4,18 +4,28 @@ import type { FastifyPluginAsync } from "fastify";
 import { z } from "zod";
 
 import { artifactCreateSchema } from "../http/schemas.js";
-import { artifactDetailSchema, artifactDiffSummarySchema, type Artifact } from "@codex-swarm/contracts";
-import { persistArtifactBlob, readArtifactBlob } from "../lib/artifact-store.js";
-import { controlPlaneEvents, timelineEvent } from "../lib/control-plane-events.js";
+import {
+  artifactDetailSchema,
+  artifactDiffSummarySchema,
+  type Artifact,
+} from "@codex-swarm/contracts";
+import {
+  persistArtifactBlob,
+  readArtifactBlob,
+} from "../lib/artifact-store.js";
+import {
+  controlPlaneEvents,
+  timelineEvent,
+} from "../lib/control-plane-events.js";
 import { HttpError } from "../lib/http-error.js";
 import { requireValue } from "../lib/require-value.js";
 
 const querySchema = z.object({
-  runId: z.uuid()
+  runId: z.uuid(),
 });
 
 const paramsSchema = z.object({
-  id: z.uuid()
+  id: z.uuid(),
 });
 
 const ARTIFACT_ROUTE_BODY_LIMIT_BYTES = 256 * 1024 * 1024;
@@ -24,28 +34,33 @@ const MAX_DIFF_PREVIEW_CHARS = 4_000;
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value)
-    ? value as Record<string, unknown>
+    ? (value as Record<string, unknown>)
     : null;
 }
 
 function isTextArtifact(artifact: Artifact) {
-  return artifact.kind === "diff"
-    || artifact.contentType.startsWith("text/")
-    || artifact.contentType === "application/json"
-    || artifact.contentType.endsWith("+json")
-    || artifact.contentType.endsWith("/json")
-    || artifact.contentType.endsWith("+xml");
+  return (
+    artifact.kind === "diff" ||
+    artifact.contentType.startsWith("text/") ||
+    artifact.contentType === "application/json" ||
+    artifact.contentType.endsWith("+json") ||
+    artifact.contentType.endsWith("/json") ||
+    artifact.contentType.endsWith("+xml")
+  );
 }
 
-function resolveArtifactSourcePath(input: z.infer<typeof artifactCreateSchema>) {
+function resolveArtifactSourcePath(
+  input: z.infer<typeof artifactCreateSchema>,
+) {
   if (input.contentBase64) {
     return null;
   }
 
   const metadata = asRecord(input.metadata);
-  const resolvedArtifactPath = typeof metadata?.resolvedArtifactPath === "string"
-    ? metadata.resolvedArtifactPath.trim()
-    : "";
+  const resolvedArtifactPath =
+    typeof metadata?.resolvedArtifactPath === "string"
+      ? metadata.resolvedArtifactPath.trim()
+      : "";
 
   if (resolvedArtifactPath.length > 0) {
     return resolvedArtifactPath;
@@ -54,7 +69,9 @@ function resolveArtifactSourcePath(input: z.infer<typeof artifactCreateSchema>) 
   return input.path;
 }
 
-async function readArtifactContent(input: z.infer<typeof artifactCreateSchema>) {
+async function readArtifactContent(
+  input: z.infer<typeof artifactCreateSchema>,
+) {
   if (input.contentBase64) {
     return Buffer.from(input.contentBase64, "base64");
   }
@@ -64,7 +81,12 @@ async function readArtifactContent(input: z.infer<typeof artifactCreateSchema>) 
   try {
     return await readFile(sourcePath as string);
   } catch (error) {
-    if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") {
+    if (
+      error &&
+      typeof error === "object" &&
+      "code" in error &&
+      error.code === "ENOENT"
+    ) {
       throw new HttpError(409, `artifact source file not found: ${sourcePath}`);
     }
 
@@ -75,7 +97,13 @@ async function readArtifactContent(input: z.infer<typeof artifactCreateSchema>) 
 function buildDerivedDiffSummary(rawDiff: string, truncated: boolean) {
   const fileSummaries: Array<{
     path: string;
-    changeType: "added" | "modified" | "deleted" | "renamed" | "copied" | "unknown";
+    changeType:
+      | "added"
+      | "modified"
+      | "deleted"
+      | "renamed"
+      | "copied"
+      | "unknown";
     additions: number;
     deletions: number;
     summary: string | null;
@@ -83,7 +111,7 @@ function buildDerivedDiffSummary(rawDiff: string, truncated: boolean) {
     providerUrl: null;
   }> = [];
   const lines = rawDiff.split(/\r?\n/);
-  let currentFile: typeof fileSummaries[number] | null = null;
+  let currentFile: (typeof fileSummaries)[number] | null = null;
 
   const pushCurrentFile = () => {
     if (!currentFile) {
@@ -107,7 +135,7 @@ function buildDerivedDiffSummary(rawDiff: string, truncated: boolean) {
         deletions: 0,
         summary: null,
         previousPath: null,
-        providerUrl: null
+        providerUrl: null,
       };
       continue;
     }
@@ -164,35 +192,57 @@ function buildDerivedDiffSummary(rawDiff: string, truncated: boolean) {
 
   pushCurrentFile();
 
-  const insertions = fileSummaries.reduce((total, file) => total + file.additions, 0);
-  const deletions = fileSummaries.reduce((total, file) => total + file.deletions, 0);
+  const insertions = fileSummaries.reduce(
+    (total, file) => total + file.additions,
+    0,
+  );
+  const deletions = fileSummaries.reduce(
+    (total, file) => total + file.deletions,
+    0,
+  );
   const filesChanged = fileSummaries.length;
 
   return artifactDiffSummarySchema.parse({
-    title: filesChanged === 0 ? "Stored diff artifact" : `${filesChanged} file${filesChanged === 1 ? "" : "s"} changed`,
-    changeSummary: filesChanged === 0
-      ? "Stored diff artifact without file-level summary metadata."
-      : `${filesChanged} file${filesChanged === 1 ? "" : "s"} changed, ${insertions} insertions, ${deletions} deletions`,
+    title:
+      filesChanged === 0
+        ? "Stored diff artifact"
+        : `${filesChanged} file${filesChanged === 1 ? "" : "s"} changed`,
+    changeSummary:
+      filesChanged === 0
+        ? "Stored diff artifact without file-level summary metadata."
+        : `${filesChanged} file${filesChanged === 1 ? "" : "s"} changed, ${insertions} insertions, ${deletions} deletions`,
     filesChanged,
     insertions,
     deletions,
     truncated,
     fileSummaries,
     diffPreview: rawDiff.slice(0, MAX_DIFF_PREVIEW_CHARS),
-    rawDiff: truncated ? null : rawDiff
+    rawDiff: truncated ? null : rawDiff,
   });
 }
 
-function buildDiffSummary(artifact: Artifact, bodyText: string | null, truncated: boolean) {
+function buildDiffSummary(
+  artifact: Artifact,
+  bodyText: string | null,
+  truncated: boolean,
+) {
   const metadata = asRecord(artifact.metadata);
   const candidate = metadata ? asRecord(metadata.diffSummary) : null;
 
   if (candidate) {
     const parsed = artifactDiffSummarySchema.safeParse({
       ...candidate,
-      ...(candidate.diffPreview ? {} : bodyText ? { diffPreview: bodyText.slice(0, MAX_DIFF_PREVIEW_CHARS) } : {}),
-      ...(candidate.rawDiff ? {} : bodyText && !truncated ? { rawDiff: bodyText } : {}),
-      ...(candidate.truncated === undefined ? { truncated } : {})
+      ...(candidate.diffPreview
+        ? {}
+        : bodyText
+          ? { diffPreview: bodyText.slice(0, MAX_DIFF_PREVIEW_CHARS) }
+          : {}),
+      ...(candidate.rawDiff
+        ? {}
+        : bodyText && !truncated
+          ? { rawDiff: bodyText }
+          : {}),
+      ...(candidate.truncated === undefined ? { truncated } : {}),
     });
 
     if (parsed.success) {
@@ -203,16 +253,23 @@ function buildDiffSummary(artifact: Artifact, bodyText: string | null, truncated
   return bodyText ? buildDerivedDiffSummary(bodyText, truncated) : null;
 }
 
-async function buildArtifactDetail(config: Parameters<typeof readArtifactBlob>[0], artifact: Artifact) {
+async function buildArtifactDetail(
+  config: Parameters<typeof readArtifactBlob>[0],
+  artifact: Artifact,
+) {
   const metadata = asRecord(artifact.metadata);
-  const storageKey = typeof metadata?.storageKey === "string" ? metadata.storageKey : null;
+  const storageKey =
+    typeof metadata?.storageKey === "string" ? metadata.storageKey : null;
 
   if (!storageKey) {
     return artifactDetailSchema.parse({
       artifact,
       contentState: "missing",
       bodyText: null,
-      diffSummary: artifact.kind === "diff" ? buildDiffSummary(artifact, null, false) : null
+      diffSummary:
+        artifact.kind === "diff"
+          ? buildDiffSummary(artifact, null, false)
+          : null,
     });
   }
 
@@ -221,20 +278,28 @@ async function buildArtifactDetail(config: Parameters<typeof readArtifactBlob>[0
       artifact,
       contentState: "binary",
       bodyText: null,
-      diffSummary: artifact.kind === "diff" ? buildDiffSummary(artifact, null, false) : null
+      diffSummary:
+        artifact.kind === "diff"
+          ? buildDiffSummary(artifact, null, false)
+          : null,
     });
   }
 
   try {
     const { content, sizeBytes } = await readArtifactBlob(config, storageKey);
     const truncated = sizeBytes > MAX_ARTIFACT_DETAIL_BYTES;
-    const bodyText = content.subarray(0, MAX_ARTIFACT_DETAIL_BYTES).toString("utf8");
+    const bodyText = content
+      .subarray(0, MAX_ARTIFACT_DETAIL_BYTES)
+      .toString("utf8");
 
     return artifactDetailSchema.parse({
       artifact,
       contentState: truncated ? "truncated" : "available",
       bodyText,
-      diffSummary: artifact.kind === "diff" ? buildDiffSummary(artifact, bodyText, truncated) : null
+      diffSummary:
+        artifact.kind === "diff"
+          ? buildDiffSummary(artifact, bodyText, truncated)
+          : null,
     });
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") {
@@ -242,7 +307,10 @@ async function buildArtifactDetail(config: Parameters<typeof readArtifactBlob>[0
         artifact,
         contentState: "missing",
         bodyText: null,
-        diffSummary: artifact.kind === "diff" ? buildDiffSummary(artifact, null, false) : null
+        diffSummary:
+          artifact.kind === "diff"
+            ? buildDiffSummary(artifact, null, false)
+            : null,
       });
     }
 
@@ -258,20 +326,35 @@ export const artifactRoutes: FastifyPluginAsync = async (app) => {
 
   app.get("/artifacts/:id", async (request) => {
     const { id } = paramsSchema.parse(request.params);
-    const artifact = await app.controlPlane.getArtifact(id, request.authContext);
+    const artifact = await app.controlPlane.getArtifact(
+      id,
+      request.authContext,
+    );
     return buildArtifactDetail(app.config, artifact);
   });
 
   app.get("/artifacts/:id/content", async (request, reply) => {
     const { id } = paramsSchema.parse(request.params);
-    const artifact = await app.controlPlane.getArtifact(id, request.authContext);
-    const storageKey = typeof artifact.metadata.storageKey === "string" ? artifact.metadata.storageKey : null;
+    const artifact = await app.controlPlane.getArtifact(
+      id,
+      request.authContext,
+    );
+    const storageKey =
+      typeof artifact.metadata.storageKey === "string"
+        ? artifact.metadata.storageKey
+        : null;
 
     if (!storageKey) {
-      throw new HttpError(409, `artifact ${id} does not have persisted blob storage`);
+      throw new HttpError(
+        409,
+        `artifact ${id} does not have persisted blob storage`,
+      );
     }
 
-    const { content, sizeBytes } = await readArtifactBlob(app.config, storageKey);
+    const { content, sizeBytes } = await readArtifactBlob(
+      app.config,
+      storageKey,
+    );
 
     return reply
       .header("content-type", artifact.contentType)
@@ -279,33 +362,46 @@ export const artifactRoutes: FastifyPluginAsync = async (app) => {
       .send(content);
   });
 
-  app.post("/artifacts", { bodyLimit: ARTIFACT_ROUTE_BODY_LIMIT_BYTES }, async (request, reply) => {
-    return app.observability.withTrace("api.artifacts.create", async () => {
-      const input = artifactCreateSchema.parse(request.body);
-      const content = await readArtifactContent(input);
-      const artifact = requireValue(
-        await app.controlPlane.createArtifact({
-          ...input,
-          metadata: {
-            ...input.metadata
-          }
-        }, request.authContext),
-        "control plane returned no artifact"
-      );
-      const storedArtifact = await app.controlPlane.attachArtifactStorage(
-        artifact.id,
-        await persistArtifactBlob(app.config, artifact.id, content)
-      );
+  app.post(
+    "/artifacts",
+    { bodyLimit: ARTIFACT_ROUTE_BODY_LIMIT_BYTES },
+    async (request, reply) => {
+      return app.observability.withTrace(
+        "api.artifacts.create",
+        async () => {
+          const input = artifactCreateSchema.parse(request.body);
+          const content = await readArtifactContent(input);
+          const artifact = requireValue(
+            await app.controlPlane.createArtifact(
+              {
+                ...input,
+                metadata: {
+                  ...input.metadata,
+                },
+              },
+              request.authContext,
+            ),
+            "control plane returned no artifact",
+          );
+          const storedArtifact = await app.controlPlane.attachArtifactStorage(
+            artifact.id,
+            await persistArtifactBlob(app.config, artifact.id, content),
+          );
 
-      await app.observability.recordTimelineEvent(timelineEvent(controlPlaneEvents.artifactCreated, {
-        runId: storedArtifact.runId,
-        taskId: storedArtifact.taskId,
-        entityId: storedArtifact.id,
-        status: storedArtifact.kind,
-        summary: `Artifact ${storedArtifact.kind} published`
-      }));
+          await app.observability.recordTimelineEvent(
+            timelineEvent(controlPlaneEvents.artifactCreated, {
+              runId: storedArtifact.runId,
+              taskId: storedArtifact.taskId,
+              entityId: storedArtifact.id,
+              status: storedArtifact.kind,
+              summary: `Artifact ${storedArtifact.kind} published`,
+            }),
+          );
 
-      return reply.code(201).send(storedArtifact);
-    }, { route: "artifacts.create" });
-  });
+          return reply.code(201).send(storedArtifact);
+        },
+        { route: "artifacts.create" },
+      );
+    },
+  );
 };

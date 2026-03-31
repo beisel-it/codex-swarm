@@ -139,9 +139,9 @@ Each verification task must:
 97. Verify deliverable: `One-click PR handoff`
 98. Verify deliverable: `Budget-aware run controls`
 99. Verify deliverable: `Reusable role and skill starter packs`
-100. Verify exit criterion: `start from a GitHub or GitLab repo and end with a PR`
-101. Verify exit criterion: `budget caps and concurrency caps are enforced during real runs`
-102. Verify exit criterion: `curated skills and roles reduce prompt/setup overhead`
+100.  Verify exit criterion: `start from a GitHub or GitLab repo and end with a PR`
+101.  Verify exit criterion: `budget caps and concurrency caps are enforced during real runs`
+102.  Verify exit criterion: `curated skills and roles reduce prompt/setup overhead`
 
 ### Distributed execution
 

@@ -21,7 +21,7 @@ export const CONTROL_PLANE_TABLES = [
   "approvals",
   "validations",
   "artifacts",
-  "control_plane_events"
+  "control_plane_events",
 ];
 
 const TABLE_ORDER_BY = {
@@ -39,11 +39,11 @@ const TABLE_ORDER_BY = {
   approvals: "id",
   validations: "id",
   artifacts: "id",
-  control_plane_events: "id"
+  control_plane_events: "id",
 };
 
 function quoteIdentifier(identifier) {
-  return `"${identifier.replaceAll("\"", "\"\"")}"`;
+  return `"${identifier.replaceAll('"', '""')}"`;
 }
 
 function getTableOrderBy(tableName) {
@@ -63,24 +63,29 @@ function getTableOrderBy(tableName) {
 
 export function createPool(connectionString) {
   return new Pool({
-    connectionString
+    connectionString,
   });
 }
 
 export function applySchemaMigrations(connectionString) {
-  const apiDirectory = resolve(dirname(new URL(import.meta.url).pathname), "../..");
+  const apiDirectory = resolve(
+    dirname(new URL(import.meta.url).pathname),
+    "../..",
+  );
   const result = spawnSync("corepack", ["pnpm", "db:migrate"], {
     cwd: apiDirectory,
     env: {
       ...process.env,
-      DATABASE_URL: connectionString
+      DATABASE_URL: connectionString,
     },
     stdio: "pipe",
-    encoding: "utf8"
+    encoding: "utf8",
   });
 
   if (result.status !== 0) {
-    throw new Error(result.stderr || result.stdout || "schema migration failed");
+    throw new Error(
+      result.stderr || result.stdout || "schema migration failed",
+    );
   }
 }
 
@@ -94,7 +99,7 @@ export async function createControlPlaneSnapshot(connectionString) {
     for (const tableName of CONTROL_PLANE_TABLES) {
       const result = await pool.query(
         `select coalesce(json_agg(to_jsonb(snapshot_row) order by ${getTableOrderBy(tableName)}), '[]'::json) as rows
-         from (select * from ${quoteIdentifier(tableName)} order by ${getTableOrderBy(tableName)}) as snapshot_row`
+         from (select * from ${quoteIdentifier(tableName)} order by ${getTableOrderBy(tableName)}) as snapshot_row`,
       );
       const rows = result.rows[0]?.rows ?? [];
       tables[tableName] = rows;
@@ -104,9 +109,9 @@ export async function createControlPlaneSnapshot(connectionString) {
       metadata: {
         capturedAt: capturedAt.toISOString(),
         tableCount: CONTROL_PLANE_TABLES.length,
-        schema: "codex-swarm-control-plane-v2"
+        schema: "codex-swarm-control-plane-v2",
       },
-      tables
+      tables,
     };
   } finally {
     await pool.end();
@@ -118,7 +123,9 @@ export async function restoreControlPlaneSnapshot(connectionString, snapshot) {
 
   try {
     await pool.query("begin");
-    await pool.query(`truncate table ${CONTROL_PLANE_TABLES.map(quoteIdentifier).join(", ")} restart identity cascade`);
+    await pool.query(
+      `truncate table ${CONTROL_PLANE_TABLES.map(quoteIdentifier).join(", ")} restart identity cascade`,
+    );
 
     for (const tableName of CONTROL_PLANE_TABLES) {
       const rows = snapshot.tables?.[tableName] ?? [];
@@ -130,7 +137,7 @@ export async function restoreControlPlaneSnapshot(connectionString, snapshot) {
       await pool.query(
         `insert into ${quoteIdentifier(tableName)}
          select * from json_populate_recordset(null::${quoteIdentifier(tableName)}, $1::json)`,
-        [JSON.stringify(rows)]
+        [JSON.stringify(rows)],
       );
     }
 
@@ -145,14 +152,21 @@ export async function restoreControlPlaneSnapshot(connectionString, snapshot) {
 
 export function summarizeSnapshot(snapshot) {
   return Object.fromEntries(
-    CONTROL_PLANE_TABLES.map((tableName) => [tableName, snapshot.tables?.[tableName]?.length ?? 0])
+    CONTROL_PLANE_TABLES.map((tableName) => [
+      tableName,
+      snapshot.tables?.[tableName]?.length ?? 0,
+    ]),
   );
 }
 
 export async function writeSnapshotFile(filePath, snapshot) {
   const resolvedPath = resolve(filePath);
   await mkdir(dirname(resolvedPath), { recursive: true });
-  await writeFile(resolvedPath, `${JSON.stringify(snapshot, null, 2)}\n`, "utf8");
+  await writeFile(
+    resolvedPath,
+    `${JSON.stringify(snapshot, null, 2)}\n`,
+    "utf8",
+  );
   return resolvedPath;
 }
 

@@ -8,14 +8,18 @@ import { buildApp } from "../src/app.js";
 import type { ControlPlaneService } from "../src/services/control-plane-service.js";
 
 const headers = {
-  authorization: "Bearer codex-swarm-dev-token"
+  authorization: "Bearer codex-swarm-dev-token",
 };
 
 describe("artifact detail routes", () => {
   const cleanupPaths: string[] = [];
 
   afterEach(async () => {
-    await Promise.all(cleanupPaths.splice(0).map((path) => rm(path, { recursive: true, force: true })));
+    await Promise.all(
+      cleanupPaths
+        .splice(0)
+        .map((path) => rm(path, { recursive: true, force: true })),
+    );
   });
 
   it("returns reviewer-facing diff detail for stored diff artifacts", async () => {
@@ -25,16 +29,21 @@ describe("artifact detail routes", () => {
     const artifactPath = join(storageRoot, storageKey);
     cleanupPaths.push(storageRoot);
 
-    await mkdir(join(storageRoot, artifactId.slice(0, 2), artifactId), { recursive: true });
-    await writeFile(artifactPath, [
-      "diff --git a/apps/api/src/routes/artifacts.ts b/apps/api/src/routes/artifacts.ts",
-      "--- a/apps/api/src/routes/artifacts.ts",
-      "+++ b/apps/api/src/routes/artifacts.ts",
-      "@@ -1,2 +1,4 @@",
-      "+import { artifactDetailSchema } from \"@codex-swarm/contracts\";",
-      "-import { artifactCreateSchema } from \"../http/schemas.js\";",
-      "+import { artifactCreateSchema } from \"../http/schemas.js\";"
-    ].join("\n"));
+    await mkdir(join(storageRoot, artifactId.slice(0, 2), artifactId), {
+      recursive: true,
+    });
+    await writeFile(
+      artifactPath,
+      [
+        "diff --git a/apps/api/src/routes/artifacts.ts b/apps/api/src/routes/artifacts.ts",
+        "--- a/apps/api/src/routes/artifacts.ts",
+        "+++ b/apps/api/src/routes/artifacts.ts",
+        "@@ -1,2 +1,4 @@",
+        '+import { artifactDetailSchema } from "@codex-swarm/contracts";',
+        '-import { artifactCreateSchema } from "../http/schemas.js";',
+        '+import { artifactCreateSchema } from "../http/schemas.js";',
+      ].join("\n"),
+    );
 
     const controlPlane = {
       getArtifact: vi.fn().mockResolvedValue({
@@ -60,27 +69,27 @@ describe("artifact detail routes", () => {
                 path: "apps/api/src/routes/artifacts.ts",
                 changeType: "modified",
                 additions: 2,
-                deletions: 1
-              }
-            ]
-          }
+                deletions: 1,
+              },
+            ],
+          },
         },
-        createdAt: new Date("2026-03-29T00:00:00.000Z")
-      })
+        createdAt: new Date("2026-03-29T00:00:00.000Z"),
+      }),
     } satisfies Pick<ControlPlaneService, "getArtifact">;
 
     const app = await buildApp({
       config: {
-        ARTIFACT_STORAGE_ROOT: storageRoot
+        ARTIFACT_STORAGE_ROOT: storageRoot,
       },
-      controlPlane: controlPlane as unknown as ControlPlaneService
+      controlPlane: controlPlane as unknown as ControlPlaneService,
     });
 
     try {
       const response = await app.inject({
         method: "GET",
         url: `/api/v1/artifacts/${artifactId}`,
-        headers
+        headers,
       });
 
       expect(response.statusCode).toBe(200);
@@ -96,11 +105,11 @@ describe("artifact detail routes", () => {
           fileSummaries: [
             expect.objectContaining({
               path: "apps/api/src/routes/artifacts.ts",
-              changeType: "modified"
-            })
+              changeType: "modified",
+            }),
           ],
-          rawDiff: expect.stringContaining("diff --git")
-        }
+          rawDiff: expect.stringContaining("diff --git"),
+        },
       });
     } finally {
       await app.close();
@@ -120,27 +129,29 @@ describe("artifact detail routes", () => {
         sizeBytes: null,
         sha256: null,
         metadata: {},
-        createdAt: new Date("2026-03-29T00:00:00.000Z")
-      })
+        createdAt: new Date("2026-03-29T00:00:00.000Z"),
+      }),
     } satisfies Pick<ControlPlaneService, "getArtifact">;
 
     const app = await buildApp({
-      controlPlane: controlPlane as unknown as ControlPlaneService
+      controlPlane: controlPlane as unknown as ControlPlaneService,
     });
 
     try {
       const response = await app.inject({
         method: "GET",
         url: "/api/v1/artifacts/550e8400-e29b-41d4-a716-446655440002",
-        headers
+        headers,
       });
 
       expect(response.statusCode).toBe(200);
-      expect(response.json()).toEqual(expect.objectContaining({
-        contentState: "missing",
-        bodyText: null,
-        diffSummary: null
-      }));
+      expect(response.json()).toEqual(
+        expect.objectContaining({
+          contentState: "missing",
+          bodyText: null,
+          diffSummary: null,
+        }),
+      );
     } finally {
       await app.close();
     }

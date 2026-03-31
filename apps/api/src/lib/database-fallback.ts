@@ -3,7 +3,7 @@ const recoverableDatabaseCodes = new Set([
   "ENOTFOUND",
   "42P01",
   "3D000",
-  "57P03"
+  "57P03",
 ]);
 
 export function isRecoverableDatabaseError(error: unknown) {
@@ -11,13 +11,16 @@ export function isRecoverableDatabaseError(error: unknown) {
     return false;
   }
 
-  const code = "code" in error && typeof error.code === "string" ? error.code : undefined;
+  const code =
+    "code" in error && typeof error.code === "string" ? error.code : undefined;
   const message = error.message.toLowerCase();
 
-  return recoverableDatabaseCodes.has(code ?? "")
-    || message.includes("connect econnrefused")
-    || message.includes("connection refused")
-    || message.includes("does not exist")
-    || message.includes("relation")
-    || message.includes("failed to connect");
+  return (
+    recoverableDatabaseCodes.has(code ?? "") ||
+    message.includes("connect econnrefused") ||
+    message.includes("connection refused") ||
+    message.includes("does not exist") ||
+    message.includes("relation") ||
+    message.includes("failed to connect")
+  );
 }

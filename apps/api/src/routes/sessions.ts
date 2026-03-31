@@ -1,6 +1,9 @@
 import type { FastifyPluginAsync } from "fastify";
 
-import { idParamSchema, sessionTranscriptAppendSchema } from "../http/schemas.js";
+import {
+  idParamSchema,
+  sessionTranscriptAppendSchema,
+} from "../http/schemas.js";
 
 export const sessionRoutes: FastifyPluginAsync = async (app) => {
   app.get("/sessions/:id/transcript", async (request) => {
@@ -11,7 +14,11 @@ export const sessionRoutes: FastifyPluginAsync = async (app) => {
   app.post("/sessions/:id/transcript", async (request, reply) => {
     const { id } = idParamSchema.parse(request.params);
     const input = sessionTranscriptAppendSchema.parse(request.body);
-    const transcript = await app.controlPlane.appendSessionTranscript(id, input.entries, request.authContext);
+    const transcript = await app.controlPlane.appendSessionTranscript(
+      id,
+      input.entries,
+      request.authContext,
+    );
     return reply.code(201).send(transcript);
   });
 };

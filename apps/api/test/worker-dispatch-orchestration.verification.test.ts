@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest";
 import type {
   Repository,
   RunDetail,
-  WorkerDispatchAssignment
+  WorkerDispatchAssignment,
 } from "@codex-swarm/contracts";
 
 import { runManagedWorkerDispatch } from "../src/lib/worker-dispatch-orchestration.js";
@@ -30,10 +30,10 @@ function createRepository(url: string): Repository {
       defaultBranch: "main",
       branches: ["main"],
       providerRepoUrl: url,
-      lastError: null
+      lastError: null,
     },
     createdAt: new Date("2026-03-31T09:00:00.000Z"),
-    updatedAt: new Date("2026-03-31T09:00:00.000Z")
+    updatedAt: new Date("2026-03-31T09:00:00.000Z"),
   };
 }
 
@@ -69,13 +69,13 @@ function createRunDetail(): RunDetail {
       autoPublishBranch: false,
       autoCreatePullRequest: false,
       titleTemplate: null,
-      bodyTemplate: null
+      bodyTemplate: null,
     },
     handoffExecution: {
       state: "idle",
       failureReason: null,
       attemptedAt: null,
-      completedAt: null
+      completedAt: null,
     },
     metadata: {},
     context: {
@@ -87,7 +87,7 @@ function createRunDetail(): RunDetail {
       jobId: null,
       jobName: null,
       externalInput: null,
-      values: {}
+      values: {},
     },
     completedAt: null,
     createdBy: "leader",
@@ -99,14 +99,16 @@ function createRunDetail(): RunDetail {
         runId: "run-1",
         parentTaskId: null,
         title: "Verify review gating",
-        description: "Inspect the worker result against the stored task contract.",
+        description:
+          "Inspect the worker result against the stored task contract.",
         role: "backend-developer",
         status: "awaiting_review",
         priority: 1,
         ownerAgentId: "verifier-agent-1",
         verificationStatus: "requested",
         verifierAgentId: "verifier-agent-1",
-        latestVerificationSummary: "Verification requested after worker completion: Worker says the slice is ready.",
+        latestVerificationSummary:
+          "Verification requested after worker completion: Worker says the slice is ready.",
         latestVerificationFindings: [],
         latestVerificationChangeRequests: [],
         latestVerificationEvidence: [],
@@ -118,12 +120,12 @@ function createRunDetail(): RunDetail {
             name: "typecheck",
             command: "pnpm typecheck",
             summary: "Run typecheck before verification",
-            artifactPath: "artifacts/validations/typecheck.json"
-          }
+            artifactPath: "artifacts/validations/typecheck.json",
+          },
         ],
         createdAt: new Date("2026-03-31T09:00:00.000Z"),
-        updatedAt: new Date("2026-03-31T09:00:00.000Z")
-      }
+        updatedAt: new Date("2026-03-31T09:00:00.000Z"),
+      },
     ],
     agents: [
       {
@@ -145,10 +147,10 @@ function createRunDetail(): RunDetail {
           visibleTranscriptSessionId: null,
           visibleTranscriptSessionState: null,
           visibleTranscriptUpdatedAt: null,
-          lineageSource: "not_started"
+          lineageSource: "not_started",
         },
         createdAt: new Date("2026-03-31T09:00:00.000Z"),
-        updatedAt: new Date("2026-03-31T09:00:00.000Z")
+        updatedAt: new Date("2026-03-31T09:00:00.000Z"),
       },
       {
         id: "verifier-agent-1",
@@ -169,11 +171,11 @@ function createRunDetail(): RunDetail {
           visibleTranscriptSessionId: null,
           visibleTranscriptSessionState: null,
           visibleTranscriptUpdatedAt: null,
-          lineageSource: "not_started"
+          lineageSource: "not_started",
         },
         createdAt: new Date("2026-03-31T09:00:00.000Z"),
-        updatedAt: new Date("2026-03-31T09:00:00.000Z")
-      }
+        updatedAt: new Date("2026-03-31T09:00:00.000Z"),
+      },
     ],
     sessions: [
       {
@@ -192,8 +194,8 @@ function createRunDetail(): RunDetail {
         staleReason: null,
         metadata: {},
         createdAt: new Date("2026-03-31T09:00:00.000Z"),
-        updatedAt: new Date("2026-03-31T09:00:00.000Z")
-      }
+        updatedAt: new Date("2026-03-31T09:00:00.000Z"),
+      },
     ],
     taskDag: {
       nodes: [
@@ -207,18 +209,20 @@ function createRunDetail(): RunDetail {
           dependentTaskIds: [],
           blockedByTaskIds: [],
           isRoot: true,
-          isBlocked: false
-        }
+          isBlocked: false,
+        },
       ],
       edges: [],
       rootTaskIds: ["task-1"],
       blockedTaskIds: [],
-      unblockPaths: []
-    }
+      unblockPaths: [],
+    },
   };
 }
 
-function createVerificationAssignment(worktreePath: string): WorkerDispatchAssignment {
+function createVerificationAssignment(
+  worktreePath: string,
+): WorkerDispatchAssignment {
   return {
     id: "dispatch-verifier-1",
     runId: "run-1",
@@ -245,16 +249,18 @@ function createVerificationAssignment(worktreePath: string): WorkerDispatchAssig
       workerAssignmentId: "dispatch-worker-1",
       workerAgentId: "worker-agent-1",
       workerSummary: "Worker says the slice is ready.",
-      workerOutcomeStatus: "completed"
+      workerOutcomeStatus: "completed",
     },
     attempt: 0,
     maxAttempts: 3,
     leaseTtlSeconds: 300,
-    createdAt: new Date("2026-03-31T09:00:00.000Z")
+    createdAt: new Date("2026-03-31T09:00:00.000Z"),
   };
 }
 
-function createWorkerAssignment(worktreePath: string): WorkerDispatchAssignment {
+function createWorkerAssignment(
+  worktreePath: string,
+): WorkerDispatchAssignment {
   return {
     id: "dispatch-worker-1",
     runId: "run-1",
@@ -277,27 +283,50 @@ function createWorkerAssignment(worktreePath: string): WorkerDispatchAssignment 
     approvalPolicy: "on-request",
     includePlanTool: false,
     metadata: {
-      assignmentKind: "worker"
+      assignmentKind: "worker",
     },
     attempt: 0,
     maxAttempts: 3,
     leaseTtlSeconds: 300,
-    createdAt: new Date("2026-03-31T09:00:00.000Z")
+    createdAt: new Date("2026-03-31T09:00:00.000Z"),
   };
 }
 
 describe("runManagedWorkerDispatch verification prompts", () => {
   it("uploads worker outcome artifacts with inline content instead of path-only references", async () => {
-    const repoRoot = await mkdtemp(join(tmpdir(), "codex-swarm-worker-artifact-repo-"));
-    const worktreeRoot = await mkdtemp(join(tmpdir(), "codex-swarm-worker-artifact-worktree-"));
+    const repoRoot = await mkdtemp(
+      join(tmpdir(), "codex-swarm-worker-artifact-repo-"),
+    );
+    const worktreeRoot = await mkdtemp(
+      join(tmpdir(), "codex-swarm-worker-artifact-worktree-"),
+    );
 
     try {
-      await writeFile(join(repoRoot, "README.md"), "worker artifact fixture\n", "utf8");
-      execFileSync("git", ["init", "--initial-branch=main"], { cwd: repoRoot, stdio: "pipe" });
-      execFileSync("git", ["config", "user.name", "Codex Swarm"], { cwd: repoRoot, stdio: "pipe" });
-      execFileSync("git", ["config", "user.email", "codex-swarm@example.com"], { cwd: repoRoot, stdio: "pipe" });
-      execFileSync("git", ["add", "README.md"], { cwd: repoRoot, stdio: "pipe" });
-      execFileSync("git", ["commit", "-m", "initial"], { cwd: repoRoot, stdio: "pipe" });
+      await writeFile(
+        join(repoRoot, "README.md"),
+        "worker artifact fixture\n",
+        "utf8",
+      );
+      execFileSync("git", ["init", "--initial-branch=main"], {
+        cwd: repoRoot,
+        stdio: "pipe",
+      });
+      execFileSync("git", ["config", "user.name", "Codex Swarm"], {
+        cwd: repoRoot,
+        stdio: "pipe",
+      });
+      execFileSync("git", ["config", "user.email", "codex-swarm@example.com"], {
+        cwd: repoRoot,
+        stdio: "pipe",
+      });
+      execFileSync("git", ["add", "README.md"], {
+        cwd: repoRoot,
+        stdio: "pipe",
+      });
+      execFileSync("git", ["commit", "-m", "initial"], {
+        cwd: repoRoot,
+        stdio: "pipe",
+      });
 
       const repository = createRepository(repoRoot);
       const runDetail = createRunDetail();
@@ -307,13 +336,20 @@ describe("runManagedWorkerDispatch verification prompts", () => {
         ownerAgentId: "worker-agent-1",
         verificationStatus: "pending",
         verifierAgentId: null,
-        latestVerificationSummary: null
+        latestVerificationSummary: null,
       };
       const assignment = createWorkerAssignment(join(worktreeRoot, "shared"));
       const artifactPosts: Array<Record<string, unknown>> = [];
 
-      const request = async <T>(method: string, path: string, payload?: Record<string, unknown>) => {
-        if (method === "POST" && path === "/api/v1/worker-nodes/node-1/claim-dispatch") {
+      const request = async <T>(
+        method: string,
+        path: string,
+        payload?: Record<string, unknown>,
+      ) => {
+        if (
+          method === "POST" &&
+          path === "/api/v1/worker-nodes/node-1/claim-dispatch"
+        ) {
           return assignment as T;
         }
 
@@ -329,17 +365,23 @@ describe("runManagedWorkerDispatch verification prompts", () => {
           return [] as T;
         }
 
-        if (method === "POST" && path === "/api/v1/runs/run-1/budget-checkpoints") {
+        if (
+          method === "POST" &&
+          path === "/api/v1/runs/run-1/budget-checkpoints"
+        ) {
           return {
             decision: "within_budget",
             exceeded: [],
             updatedAt: new Date("2026-03-31T09:02:00.000Z").toISOString(),
             approvalId: null,
-            continueAllowed: true
+            continueAllowed: true,
           } as T;
         }
 
-        if (method === "POST" && path === "/api/v1/agents/worker-agent-1/session") {
+        if (
+          method === "POST" &&
+          path === "/api/v1/agents/worker-agent-1/session"
+        ) {
           return {
             id: "session-worker-1",
             agentId: "worker-agent-1",
@@ -356,15 +398,22 @@ describe("runManagedWorkerDispatch verification prompts", () => {
             staleReason: null,
             metadata: {},
             createdAt: new Date("2026-03-31T09:00:00.000Z"),
-            updatedAt: new Date("2026-03-31T09:00:00.000Z")
+            updatedAt: new Date("2026-03-31T09:00:00.000Z"),
           } as T;
         }
 
-        if (method === "POST" && path === "/api/v1/worker-dispatch-assignments/dispatch-worker-1/session") {
+        if (
+          method === "POST" &&
+          path ===
+            "/api/v1/worker-dispatch-assignments/dispatch-worker-1/session"
+        ) {
           return { ok: true } as T;
         }
 
-        if (method === "POST" && path === "/api/v1/sessions/session-worker-1/transcript") {
+        if (
+          method === "POST" &&
+          path === "/api/v1/sessions/session-worker-1/transcript"
+        ) {
           return { ok: true } as T;
         }
 
@@ -373,11 +422,14 @@ describe("runManagedWorkerDispatch verification prompts", () => {
           return { id: "artifact-1", ...(payload ?? {}) } as T;
         }
 
-        if (method === "PATCH" && path === "/api/v1/worker-dispatch-assignments/dispatch-worker-1") {
+        if (
+          method === "PATCH" &&
+          path === "/api/v1/worker-dispatch-assignments/dispatch-worker-1"
+        ) {
           return {
             ...assignment,
             state: "completed",
-            metadata: payload?.outcome ?? assignment.metadata
+            metadata: payload?.outcome ?? assignment.metadata,
           } as T;
         }
 
@@ -392,7 +444,7 @@ describe("runManagedWorkerDispatch verification prompts", () => {
           process.execPath,
           "--input-type=module",
           "-e",
-          "setInterval(() => {}, 1000);"
+          "setInterval(() => {}, 1000);",
         ],
         executeTool: async () => {
           const artifactDir = join(assignment.worktreePath, "artifacts");
@@ -411,32 +463,39 @@ describe("runManagedWorkerDispatch verification prompts", () => {
                 {
                   kind: "report",
                   path: "artifacts/report.txt",
-                  contentType: "text/plain"
-                }
-              ]
-            })
+                  contentType: "text/plain",
+                },
+              ],
+            }),
           };
-        }
+        },
       });
 
       expect(result).toMatchObject({
         assignmentId: "dispatch-worker-1",
-        status: "completed"
+        status: "completed",
       });
-      expect(artifactPosts).toEqual(expect.arrayContaining([
-        expect.objectContaining({
-          runId: "run-1",
-          taskId: "task-1",
-          kind: "report",
-          path: "artifacts/report.txt",
-          contentType: "text/plain",
-          contentBase64: Buffer.from("worker artifact\n", "utf8").toString("base64"),
-          metadata: expect.objectContaining({
-            source: "worker-outcome",
-            resolvedArtifactPath: join(assignment.worktreePath, "artifacts/report.txt")
-          })
-        })
-      ]));
+      expect(artifactPosts).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            runId: "run-1",
+            taskId: "task-1",
+            kind: "report",
+            path: "artifacts/report.txt",
+            contentType: "text/plain",
+            contentBase64: Buffer.from("worker artifact\n", "utf8").toString(
+              "base64",
+            ),
+            metadata: expect.objectContaining({
+              source: "worker-outcome",
+              resolvedArtifactPath: join(
+                assignment.worktreePath,
+                "artifacts/report.txt",
+              ),
+            }),
+          }),
+        ]),
+      );
     } finally {
       await rm(worktreeRoot, { recursive: true, force: true });
       await rm(repoRoot, { recursive: true, force: true });
@@ -444,25 +503,57 @@ describe("runManagedWorkerDispatch verification prompts", () => {
   });
 
   it("injects validation evidence, artifacts, and relevant messages into the verifier prompt", async () => {
-    const repoRoot = await mkdtemp(join(tmpdir(), "codex-swarm-verifier-repo-"));
-    const worktreeRoot = await mkdtemp(join(tmpdir(), "codex-swarm-verifier-worktree-"));
+    const repoRoot = await mkdtemp(
+      join(tmpdir(), "codex-swarm-verifier-repo-"),
+    );
+    const worktreeRoot = await mkdtemp(
+      join(tmpdir(), "codex-swarm-verifier-worktree-"),
+    );
 
     try {
-      await writeFile(join(repoRoot, "README.md"), "verification prompt fixture\n", "utf8");
-      execFileSync("git", ["init", "--initial-branch=main"], { cwd: repoRoot, stdio: "pipe" });
-      execFileSync("git", ["config", "user.name", "Codex Swarm"], { cwd: repoRoot, stdio: "pipe" });
-      execFileSync("git", ["config", "user.email", "codex-swarm@example.com"], { cwd: repoRoot, stdio: "pipe" });
-      execFileSync("git", ["add", "README.md"], { cwd: repoRoot, stdio: "pipe" });
-      execFileSync("git", ["commit", "-m", "initial"], { cwd: repoRoot, stdio: "pipe" });
+      await writeFile(
+        join(repoRoot, "README.md"),
+        "verification prompt fixture\n",
+        "utf8",
+      );
+      execFileSync("git", ["init", "--initial-branch=main"], {
+        cwd: repoRoot,
+        stdio: "pipe",
+      });
+      execFileSync("git", ["config", "user.name", "Codex Swarm"], {
+        cwd: repoRoot,
+        stdio: "pipe",
+      });
+      execFileSync("git", ["config", "user.email", "codex-swarm@example.com"], {
+        cwd: repoRoot,
+        stdio: "pipe",
+      });
+      execFileSync("git", ["add", "README.md"], {
+        cwd: repoRoot,
+        stdio: "pipe",
+      });
+      execFileSync("git", ["commit", "-m", "initial"], {
+        cwd: repoRoot,
+        stdio: "pipe",
+      });
 
       const repository = createRepository(repoRoot);
       const runDetail = createRunDetail();
-      const assignment = createVerificationAssignment(join(worktreeRoot, "shared"));
+      const assignment = createVerificationAssignment(
+        join(worktreeRoot, "shared"),
+      );
       let seenPrompt = "";
       let transcriptPrompt = "";
 
-      const request = async <T>(method: string, path: string, payload?: Record<string, unknown>) => {
-        if (method === "POST" && path === "/api/v1/worker-nodes/node-1/claim-dispatch") {
+      const request = async <T>(
+        method: string,
+        path: string,
+        payload?: Record<string, unknown>,
+      ) => {
+        if (
+          method === "POST" &&
+          path === "/api/v1/worker-nodes/node-1/claim-dispatch"
+        ) {
           return assignment as T;
         }
 
@@ -483,8 +574,8 @@ describe("runManagedWorkerDispatch verification prompts", () => {
               recipientAgentId: "verifier-agent-1",
               kind: "direct",
               body: "Validation output is attached to the task.",
-              createdAt: new Date("2026-03-31T09:01:00.000Z")
-            }
+              createdAt: new Date("2026-03-31T09:01:00.000Z"),
+            },
           ] as T;
         }
 
@@ -501,8 +592,8 @@ describe("runManagedWorkerDispatch verification prompts", () => {
               sizeBytes: 128,
               sha256: "sha256",
               metadata: {},
-              createdAt: new Date("2026-03-31T09:01:00.000Z")
-            }
+              createdAt: new Date("2026-03-31T09:01:00.000Z"),
+            },
           ] as T;
         }
 
@@ -520,32 +611,43 @@ describe("runManagedWorkerDispatch verification prompts", () => {
               artifactIds: ["artifact-1"],
               artifacts: [],
               createdAt: new Date("2026-03-31T09:01:00.000Z"),
-              updatedAt: new Date("2026-03-31T09:01:00.000Z")
-            }
+              updatedAt: new Date("2026-03-31T09:01:00.000Z"),
+            },
           ] as T;
         }
 
-        if (method === "POST" && path === "/api/v1/runs/run-1/budget-checkpoints") {
+        if (
+          method === "POST" &&
+          path === "/api/v1/runs/run-1/budget-checkpoints"
+        ) {
           return {
             decision: "within_budget",
             exceeded: [],
             updatedAt: new Date("2026-03-31T09:02:00.000Z").toISOString(),
             approvalId: null,
-            continueAllowed: true
+            continueAllowed: true,
           } as T;
         }
 
-        if (method === "POST" && path === "/api/v1/sessions/session-verifier-1/transcript") {
-          const entries = (payload?.entries as Array<{ kind: string; text: string }>) ?? [];
-          transcriptPrompt = entries.find((entry) => entry.kind === "prompt")?.text ?? "";
+        if (
+          method === "POST" &&
+          path === "/api/v1/sessions/session-verifier-1/transcript"
+        ) {
+          const entries =
+            (payload?.entries as Array<{ kind: string; text: string }>) ?? [];
+          transcriptPrompt =
+            entries.find((entry) => entry.kind === "prompt")?.text ?? "";
           return { ok: true } as T;
         }
 
-        if (method === "PATCH" && path === "/api/v1/worker-dispatch-assignments/dispatch-verifier-1") {
+        if (
+          method === "PATCH" &&
+          path === "/api/v1/worker-dispatch-assignments/dispatch-verifier-1"
+        ) {
           return {
             ...assignment,
             state: "completed",
-            metadata: payload?.outcome ?? assignment.metadata
+            metadata: payload?.outcome ?? assignment.metadata,
           } as T;
         }
 
@@ -560,10 +662,13 @@ describe("runManagedWorkerDispatch verification prompts", () => {
           process.execPath,
           "--input-type=module",
           "-e",
-          "setInterval(() => {}, 1000);"
+          "setInterval(() => {}, 1000);",
         ],
         executeTool: async (toolRequest: any) => {
-          seenPrompt = toolRequest.input?.prompt ?? toolRequest.message?.params?.prompt ?? "";
+          seenPrompt =
+            toolRequest.input?.prompt ??
+            toolRequest.message?.params?.prompt ??
+            "";
 
           return {
             threadId: "thread-verifier-1",
@@ -573,21 +678,25 @@ describe("runManagedWorkerDispatch verification prompts", () => {
               findings: [],
               changeRequests: [],
               messages: [],
-              blockingIssues: []
-            })
+              blockingIssues: [],
+            }),
           };
-        }
+        },
       });
 
       expect(result).toMatchObject({
         assignmentId: "dispatch-verifier-1",
-        status: "completed"
+        status: "completed",
       });
-      expect(seenPrompt).toContain("Worker summary: Worker says the slice is ready.");
+      expect(seenPrompt).toContain(
+        "Worker summary: Worker says the slice is ready.",
+      );
       expect(seenPrompt).toContain("typecheck: passed");
       expect(seenPrompt).toContain("Typecheck passed before verification.");
       expect(seenPrompt).toContain("artifacts/validations/typecheck.json");
-      expect(seenPrompt).toContain("Validation output is attached to the task.");
+      expect(seenPrompt).toContain(
+        "Validation output is attached to the task.",
+      );
       expect(transcriptPrompt).toContain("typecheck: passed");
       expect(transcriptPrompt).toContain("Definition of done:");
     } finally {
@@ -597,16 +706,39 @@ describe("runManagedWorkerDispatch verification prompts", () => {
   });
 
   it("creates leader-authored follow-on tasks from failed verification change requests", async () => {
-    const repoRoot = await mkdtemp(join(tmpdir(), "codex-swarm-verifier-reslice-repo-"));
-    const worktreeRoot = await mkdtemp(join(tmpdir(), "codex-swarm-verifier-reslice-worktree-"));
+    const repoRoot = await mkdtemp(
+      join(tmpdir(), "codex-swarm-verifier-reslice-repo-"),
+    );
+    const worktreeRoot = await mkdtemp(
+      join(tmpdir(), "codex-swarm-verifier-reslice-worktree-"),
+    );
 
     try {
-      await writeFile(join(repoRoot, "README.md"), "verification reslice fixture\n", "utf8");
-      execFileSync("git", ["init", "--initial-branch=main"], { cwd: repoRoot, stdio: "pipe" });
-      execFileSync("git", ["config", "user.name", "Codex Swarm"], { cwd: repoRoot, stdio: "pipe" });
-      execFileSync("git", ["config", "user.email", "codex-swarm@example.com"], { cwd: repoRoot, stdio: "pipe" });
-      execFileSync("git", ["add", "README.md"], { cwd: repoRoot, stdio: "pipe" });
-      execFileSync("git", ["commit", "-m", "initial"], { cwd: repoRoot, stdio: "pipe" });
+      await writeFile(
+        join(repoRoot, "README.md"),
+        "verification reslice fixture\n",
+        "utf8",
+      );
+      execFileSync("git", ["init", "--initial-branch=main"], {
+        cwd: repoRoot,
+        stdio: "pipe",
+      });
+      execFileSync("git", ["config", "user.name", "Codex Swarm"], {
+        cwd: repoRoot,
+        stdio: "pipe",
+      });
+      execFileSync("git", ["config", "user.email", "codex-swarm@example.com"], {
+        cwd: repoRoot,
+        stdio: "pipe",
+      });
+      execFileSync("git", ["add", "README.md"], {
+        cwd: repoRoot,
+        stdio: "pipe",
+      });
+      execFileSync("git", ["commit", "-m", "initial"], {
+        cwd: repoRoot,
+        stdio: "pipe",
+      });
 
       const repository = createRepository(repoRoot);
       const runDetail = createRunDetail();
@@ -629,10 +761,10 @@ describe("runManagedWorkerDispatch verification prompts", () => {
           visibleTranscriptSessionId: null,
           visibleTranscriptSessionState: null,
           visibleTranscriptUpdatedAt: null,
-          lineageSource: "not_started"
+          lineageSource: "not_started",
         },
         createdAt: new Date("2026-03-31T09:00:00.000Z"),
-        updatedAt: new Date("2026-03-31T09:00:00.000Z")
+        updatedAt: new Date("2026-03-31T09:00:00.000Z"),
       });
       runDetail.sessions.unshift({
         id: "session-leader-1",
@@ -650,16 +782,25 @@ describe("runManagedWorkerDispatch verification prompts", () => {
         staleReason: null,
         metadata: {},
         createdAt: new Date("2026-03-31T09:00:00.000Z"),
-        updatedAt: new Date("2026-03-31T09:00:00.000Z")
+        updatedAt: new Date("2026-03-31T09:00:00.000Z"),
       });
 
-      const assignment = createVerificationAssignment(join(worktreeRoot, "shared"));
+      const assignment = createVerificationAssignment(
+        join(worktreeRoot, "shared"),
+      );
       const createdTasks: Array<Record<string, unknown>> = [];
       const postedMessages: Array<Record<string, unknown>> = [];
       const leaderPrompts: string[] = [];
 
-      const request = async <T>(method: string, path: string, payload?: Record<string, unknown>) => {
-        if (method === "POST" && path === "/api/v1/worker-nodes/node-1/claim-dispatch") {
+      const request = async <T>(
+        method: string,
+        path: string,
+        payload?: Record<string, unknown>,
+      ) => {
+        if (
+          method === "POST" &&
+          path === "/api/v1/worker-nodes/node-1/claim-dispatch"
+        ) {
           return assignment as T;
         }
 
@@ -683,24 +824,31 @@ describe("runManagedWorkerDispatch verification prompts", () => {
           return [] as T;
         }
 
-        if (method === "POST" && path === "/api/v1/runs/run-1/budget-checkpoints") {
+        if (
+          method === "POST" &&
+          path === "/api/v1/runs/run-1/budget-checkpoints"
+        ) {
           return {
             decision: "within_budget",
             exceeded: [],
             updatedAt: new Date("2026-03-31T09:02:00.000Z").toISOString(),
             approvalId: null,
-            continueAllowed: true
+            continueAllowed: true,
           } as T;
         }
 
         if (method === "POST" && path === "/api/v1/messages") {
           postedMessages.push(payload ?? {});
-          return { id: `message-${postedMessages.length}`, ...(payload ?? {}) } as T;
+          return {
+            id: `message-${postedMessages.length}`,
+            ...(payload ?? {}),
+          } as T;
         }
 
         if (
-          method === "POST"
-          && (path === "/api/v1/sessions/session-verifier-1/transcript" || path === "/api/v1/sessions/session-leader-1/transcript")
+          method === "POST" &&
+          (path === "/api/v1/sessions/session-verifier-1/transcript" ||
+            path === "/api/v1/sessions/session-leader-1/transcript")
         ) {
           return { ok: true } as T;
         }
@@ -722,22 +870,28 @@ describe("runManagedWorkerDispatch verification prompts", () => {
             latestVerificationFindings: [],
             latestVerificationChangeRequests: [],
             latestVerificationEvidence: [],
-            dependencyIds: (payload?.dependencyIds as string[] | undefined) ?? [],
-            definitionOfDone: (payload?.definitionOfDone as string[] | undefined) ?? [],
-            acceptanceCriteria: (payload?.acceptanceCriteria as string[] | undefined) ?? [],
+            dependencyIds:
+              (payload?.dependencyIds as string[] | undefined) ?? [],
+            definitionOfDone:
+              (payload?.definitionOfDone as string[] | undefined) ?? [],
+            acceptanceCriteria:
+              (payload?.acceptanceCriteria as string[] | undefined) ?? [],
             validationTemplates: [],
             createdAt: new Date("2026-03-31T09:03:00.000Z"),
-            updatedAt: new Date("2026-03-31T09:03:00.000Z")
+            updatedAt: new Date("2026-03-31T09:03:00.000Z"),
           };
           createdTasks.push(createdTask);
           return createdTask as T;
         }
 
-        if (method === "PATCH" && path === "/api/v1/worker-dispatch-assignments/dispatch-verifier-1") {
+        if (
+          method === "PATCH" &&
+          path === "/api/v1/worker-dispatch-assignments/dispatch-verifier-1"
+        ) {
           return {
             ...assignment,
             state: "completed",
-            metadata: payload?.outcome ?? assignment.metadata
+            metadata: payload?.outcome ?? assignment.metadata,
           } as T;
         }
 
@@ -752,12 +906,19 @@ describe("runManagedWorkerDispatch verification prompts", () => {
           process.execPath,
           "--input-type=module",
           "-e",
-          "setInterval(() => {}, 1000);"
+          "setInterval(() => {}, 1000);",
         ],
         executeTool: async (toolRequest: any) => {
-          const prompt = toolRequest.input?.prompt ?? toolRequest.message?.params?.prompt ?? "";
+          const prompt =
+            toolRequest.input?.prompt ??
+            toolRequest.message?.params?.prompt ??
+            "";
 
-          if (prompt.includes("You are continuing the leader orchestration session")) {
+          if (
+            prompt.includes(
+              "You are continuing the leader orchestration session",
+            )
+          ) {
             leaderPrompts.push(prompt);
 
             return {
@@ -769,22 +930,30 @@ describe("runManagedWorkerDispatch verification prompts", () => {
                     key: "fix-dag-highlighting",
                     title: "Fix unblock-path highlighting",
                     role: "frontend-developer",
-                    description: "Use unblock-path metadata to render full blocking ancestry.",
-                    definitionOfDone: ["Selected blocked tasks render the full unblock path."],
+                    description:
+                      "Use unblock-path metadata to render full blocking ancestry.",
+                    definitionOfDone: [
+                      "Selected blocked tasks render the full unblock path.",
+                    ],
                     acceptanceCriteria: ["Blocked ancestry is fully visible."],
-                    dependencyKeys: []
+                    dependencyKeys: [],
                   },
                   {
                     key: "cover-partial-data",
                     title: "Add partial-data DAG coverage",
                     role: "frontend-developer",
-                    description: "Cover partial dependency data and unblock-path behavior in tests.",
-                    definitionOfDone: ["Partial-data and branching unblock-path cases are covered by tests."],
-                    acceptanceCriteria: ["Representative DAG edge cases are covered."],
-                    dependencyKeys: ["fix-dag-highlighting"]
-                  }
-                ]
-              })
+                    description:
+                      "Cover partial dependency data and unblock-path behavior in tests.",
+                    definitionOfDone: [
+                      "Partial-data and branching unblock-path cases are covered by tests.",
+                    ],
+                    acceptanceCriteria: [
+                      "Representative DAG edge cases are covered.",
+                    ],
+                    dependencyKeys: ["fix-dag-highlighting"],
+                  },
+                ],
+              }),
             };
           }
 
@@ -794,43 +963,47 @@ describe("runManagedWorkerDispatch verification prompts", () => {
               summary: "Definition of done is not satisfied.",
               status: "failed",
               findings: [
-                "Blocked ancestry highlighting only covers the final hop."
+                "Blocked ancestry highlighting only covers the final hop.",
               ],
               changeRequests: [
                 "Use unblock-path metadata when deriving related nodes and edges.",
-                "Add tests for branching and partial-data DAG scenarios."
+                "Add tests for branching and partial-data DAG scenarios.",
               ],
               messages: [
                 {
                   target: "leader",
-                  body: "Please open rework for unblock-path rendering and missing DAG coverage."
-                }
+                  body: "Please open rework for unblock-path rendering and missing DAG coverage.",
+                },
               ],
-              blockingIssues: []
-            })
+              blockingIssues: [],
+            }),
           };
-        }
+        },
       });
 
       expect(result).toMatchObject({
         assignmentId: "dispatch-verifier-1",
-        status: "completed"
+        status: "completed",
       });
       expect(leaderPrompts).toHaveLength(1);
       expect(leaderPrompts[0]).toContain("Parent task: Verify review gating");
-      expect(leaderPrompts[0]).toContain("Definition of done is not satisfied.");
-      expect(leaderPrompts[0]).toContain("Use unblock-path metadata when deriving related nodes and edges.");
+      expect(leaderPrompts[0]).toContain(
+        "Definition of done is not satisfied.",
+      );
+      expect(leaderPrompts[0]).toContain(
+        "Use unblock-path metadata when deriving related nodes and edges.",
+      );
       expect(createdTasks).toEqual([
         expect.objectContaining({
           title: "Fix unblock-path highlighting",
           parentTaskId: "task-1",
-          dependencyIds: []
+          dependencyIds: [],
         }),
         expect.objectContaining({
           title: "Add partial-data DAG coverage",
           parentTaskId: "task-1",
-          dependencyIds: ["child-task-1"]
-        })
+          dependencyIds: ["child-task-1"],
+        }),
       ]);
       expect(postedMessages).toEqual(
         expect.arrayContaining([
@@ -839,16 +1012,16 @@ describe("runManagedWorkerDispatch verification prompts", () => {
             senderAgentId: "verifier-agent-1",
             recipientAgentId: "leader-agent-1",
             kind: "direct",
-            body: "[blocked] Definition of done is not satisfied."
+            body: "[blocked] Definition of done is not satisfied.",
           }),
           expect.objectContaining({
             runId: "run-1",
             senderAgentId: "verifier-agent-1",
             recipientAgentId: "leader-agent-1",
             kind: "direct",
-            body: "Please open rework for unblock-path rendering and missing DAG coverage."
-          })
-        ])
+            body: "Please open rework for unblock-path rendering and missing DAG coverage.",
+          }),
+        ]),
       );
     } finally {
       await rm(worktreeRoot, { recursive: true, force: true });
@@ -857,16 +1030,39 @@ describe("runManagedWorkerDispatch verification prompts", () => {
   });
 
   it("keeps verification completion successful when leader rework planning fails", async () => {
-    const repoRoot = await mkdtemp(join(tmpdir(), "codex-swarm-verifier-reslice-failure-repo-"));
-    const worktreeRoot = await mkdtemp(join(tmpdir(), "codex-swarm-verifier-reslice-failure-worktree-"));
+    const repoRoot = await mkdtemp(
+      join(tmpdir(), "codex-swarm-verifier-reslice-failure-repo-"),
+    );
+    const worktreeRoot = await mkdtemp(
+      join(tmpdir(), "codex-swarm-verifier-reslice-failure-worktree-"),
+    );
 
     try {
-      await writeFile(join(repoRoot, "README.md"), "verification reslice failure fixture\n", "utf8");
-      execFileSync("git", ["init", "--initial-branch=main"], { cwd: repoRoot, stdio: "pipe" });
-      execFileSync("git", ["config", "user.name", "Codex Swarm"], { cwd: repoRoot, stdio: "pipe" });
-      execFileSync("git", ["config", "user.email", "codex-swarm@example.com"], { cwd: repoRoot, stdio: "pipe" });
-      execFileSync("git", ["add", "README.md"], { cwd: repoRoot, stdio: "pipe" });
-      execFileSync("git", ["commit", "-m", "initial"], { cwd: repoRoot, stdio: "pipe" });
+      await writeFile(
+        join(repoRoot, "README.md"),
+        "verification reslice failure fixture\n",
+        "utf8",
+      );
+      execFileSync("git", ["init", "--initial-branch=main"], {
+        cwd: repoRoot,
+        stdio: "pipe",
+      });
+      execFileSync("git", ["config", "user.name", "Codex Swarm"], {
+        cwd: repoRoot,
+        stdio: "pipe",
+      });
+      execFileSync("git", ["config", "user.email", "codex-swarm@example.com"], {
+        cwd: repoRoot,
+        stdio: "pipe",
+      });
+      execFileSync("git", ["add", "README.md"], {
+        cwd: repoRoot,
+        stdio: "pipe",
+      });
+      execFileSync("git", ["commit", "-m", "initial"], {
+        cwd: repoRoot,
+        stdio: "pipe",
+      });
 
       const repository = createRepository(repoRoot);
       const runDetail = createRunDetail();
@@ -889,10 +1085,10 @@ describe("runManagedWorkerDispatch verification prompts", () => {
           visibleTranscriptSessionId: null,
           visibleTranscriptSessionState: null,
           visibleTranscriptUpdatedAt: null,
-          lineageSource: "not_started"
+          lineageSource: "not_started",
         },
         createdAt: new Date("2026-03-31T09:00:00.000Z"),
-        updatedAt: new Date("2026-03-31T09:00:00.000Z")
+        updatedAt: new Date("2026-03-31T09:00:00.000Z"),
       });
       runDetail.sessions.unshift({
         id: "session-leader-1",
@@ -910,15 +1106,24 @@ describe("runManagedWorkerDispatch verification prompts", () => {
         staleReason: null,
         metadata: {},
         createdAt: new Date("2026-03-31T09:00:00.000Z"),
-        updatedAt: new Date("2026-03-31T09:00:00.000Z")
+        updatedAt: new Date("2026-03-31T09:00:00.000Z"),
       });
 
-      const assignment = createVerificationAssignment(join(worktreeRoot, "shared"));
+      const assignment = createVerificationAssignment(
+        join(worktreeRoot, "shared"),
+      );
       const postedMessages: Array<Record<string, unknown>> = [];
       const patchPayloads: Array<Record<string, unknown>> = [];
 
-      const request = async <T>(method: string, path: string, payload?: Record<string, unknown>) => {
-        if (method === "POST" && path === "/api/v1/worker-nodes/node-1/claim-dispatch") {
+      const request = async <T>(
+        method: string,
+        path: string,
+        payload?: Record<string, unknown>,
+      ) => {
+        if (
+          method === "POST" &&
+          path === "/api/v1/worker-nodes/node-1/claim-dispatch"
+        ) {
           return assignment as T;
         }
 
@@ -942,34 +1147,44 @@ describe("runManagedWorkerDispatch verification prompts", () => {
           return [] as T;
         }
 
-        if (method === "POST" && path === "/api/v1/runs/run-1/budget-checkpoints") {
+        if (
+          method === "POST" &&
+          path === "/api/v1/runs/run-1/budget-checkpoints"
+        ) {
           return {
             decision: "within_budget",
             exceeded: [],
             updatedAt: new Date("2026-03-31T09:02:00.000Z").toISOString(),
             approvalId: null,
-            continueAllowed: true
+            continueAllowed: true,
           } as T;
         }
 
         if (method === "POST" && path === "/api/v1/messages") {
           postedMessages.push(payload ?? {});
-          return { id: `message-${postedMessages.length}`, ...(payload ?? {}) } as T;
+          return {
+            id: `message-${postedMessages.length}`,
+            ...(payload ?? {}),
+          } as T;
         }
 
         if (
-          method === "POST"
-          && (path === "/api/v1/sessions/session-verifier-1/transcript" || path === "/api/v1/sessions/session-leader-1/transcript")
+          method === "POST" &&
+          (path === "/api/v1/sessions/session-verifier-1/transcript" ||
+            path === "/api/v1/sessions/session-leader-1/transcript")
         ) {
           return { ok: true } as T;
         }
 
-        if (method === "PATCH" && path === "/api/v1/worker-dispatch-assignments/dispatch-verifier-1") {
+        if (
+          method === "PATCH" &&
+          path === "/api/v1/worker-dispatch-assignments/dispatch-verifier-1"
+        ) {
           patchPayloads.push(payload ?? {});
           return {
             ...assignment,
             state: "completed",
-            metadata: payload?.outcome ?? assignment.metadata
+            metadata: payload?.outcome ?? assignment.metadata,
           } as T;
         }
 
@@ -984,15 +1199,22 @@ describe("runManagedWorkerDispatch verification prompts", () => {
           process.execPath,
           "--input-type=module",
           "-e",
-          "setInterval(() => {}, 1000);"
+          "setInterval(() => {}, 1000);",
         ],
         executeTool: async (toolRequest: any) => {
-          const prompt = toolRequest.input?.prompt ?? toolRequest.message?.params?.prompt ?? "";
+          const prompt =
+            toolRequest.input?.prompt ??
+            toolRequest.message?.params?.prompt ??
+            "";
 
-          if (prompt.includes("You are continuing the leader orchestration session")) {
+          if (
+            prompt.includes(
+              "You are continuing the leader orchestration session",
+            )
+          ) {
             return {
               threadId: "thread-leader-1",
-              output: "{not valid json"
+              output: "{not valid json",
             };
           }
 
@@ -1002,26 +1224,26 @@ describe("runManagedWorkerDispatch verification prompts", () => {
               summary: "Definition of done is not satisfied.",
               status: "failed",
               findings: [
-                "Blocked ancestry highlighting only covers the final hop."
+                "Blocked ancestry highlighting only covers the final hop.",
               ],
               changeRequests: [
-                "Use unblock-path metadata when deriving related nodes and edges."
+                "Use unblock-path metadata when deriving related nodes and edges.",
               ],
               messages: [
                 {
                   target: "leader",
-                  body: "Please open rework for unblock-path rendering."
-                }
+                  body: "Please open rework for unblock-path rendering.",
+                },
               ],
-              blockingIssues: []
-            })
+              blockingIssues: [],
+            }),
           };
-        }
+        },
       });
 
       expect(result).toMatchObject({
         assignmentId: "dispatch-verifier-1",
-        status: "completed"
+        status: "completed",
       });
       expect(patchPayloads).toEqual([
         expect.objectContaining({
@@ -1030,9 +1252,11 @@ describe("runManagedWorkerDispatch verification prompts", () => {
           outcome: expect.objectContaining({
             kind: "verification",
             outcomeStatus: "failed",
-            changeRequests: ["Use unblock-path metadata when deriving related nodes and edges."]
-          })
-        })
+            changeRequests: [
+              "Use unblock-path metadata when deriving related nodes and edges.",
+            ],
+          }),
+        }),
       ]);
       expect(postedMessages).toEqual(
         expect.arrayContaining([
@@ -1041,9 +1265,9 @@ describe("runManagedWorkerDispatch verification prompts", () => {
             senderAgentId: "verifier-agent-1",
             recipientAgentId: "leader-agent-1",
             kind: "direct",
-            body: "Leader follow-up planning failed after verification outcome: output must be exactly one JSON object"
-          })
-        ])
+            body: "Leader follow-up planning failed after verification outcome: output must be exactly one JSON object",
+          }),
+        ]),
       );
     } finally {
       await rm(worktreeRoot, { recursive: true, force: true });

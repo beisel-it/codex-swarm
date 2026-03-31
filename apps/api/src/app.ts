@@ -56,112 +56,126 @@ function resolveFrontendDistRoot(config: ReturnType<typeof getConfig>) {
   return join(appRoot, "..", "..", "frontend", "dist");
 }
 
-function createNoopObservability(config: ReturnType<typeof getConfig>): Pick<
+function createNoopObservability(
+  config: ReturnType<typeof getConfig>,
+): Pick<
   ObservabilityService,
-  "beginRequest" | "clearActorContext" | "getMetrics" | "listEvents" | "recordRecoverableDatabaseFallback" | "recordRequestFailure" | "recordTimelineEvent" | "setActorContext" | "subscribeToRunEvents" | "withTrace"
+  | "beginRequest"
+  | "clearActorContext"
+  | "getMetrics"
+  | "listEvents"
+  | "recordRecoverableDatabaseFallback"
+  | "recordRequestFailure"
+  | "recordTimelineEvent"
+  | "setActorContext"
+  | "subscribeToRunEvents"
+  | "withTrace"
 > {
-  return Object.assign(Object.create(ObservabilityService.prototype) as ObservabilityService, {
-    beginRequest: () => undefined,
-    clearActorContext: () => undefined,
-    getMetrics: async () => ({
-      queueDepth: {
-        runsPending: 0,
-        tasksPending: 0,
-        tasksBlocked: 0,
-        approvalsPending: 0,
-        busyAgents: 0
-      },
-      retries: {
-        recoverableDatabaseFallbacks: 0,
-        taskUnblocks: 0
-      },
-      failures: {
-        runsFailed: 0,
-        tasksFailed: 0,
-        agentsFailed: 0,
-        validationsFailed: 0,
-        requestFailures: 0
-      },
-      usage: {
-        repositories: 0,
-        runsTotal: 0,
-        runsActive: 0,
-        runsCompleted: 0,
-        tasksTotal: 0,
-        approvalsTotal: 0,
-        validationsTotal: 0,
-        artifactsTotal: 0,
-        workerNodesOnline: 0,
-        workerNodesDraining: 0
-      },
-      cost: {
-        runsWithBudget: 0,
-        totalBudgetedRunCostUsd: 0,
-        averageBudgetedRunCostUsd: 0,
-        maxBudgetedRunCostUsd: 0
-      },
-      performance: {
-        completedRunsMeasured: 0,
-        approvalsMeasured: 0,
-        validationsMeasured: 0,
-        runDurationMs: {
-          p50: 0,
-          p95: 0,
-          max: 0
+  return Object.assign(
+    Object.create(ObservabilityService.prototype) as ObservabilityService,
+    {
+      beginRequest: () => undefined,
+      clearActorContext: () => undefined,
+      getMetrics: async () => ({
+        queueDepth: {
+          runsPending: 0,
+          tasksPending: 0,
+          tasksBlocked: 0,
+          approvalsPending: 0,
+          busyAgents: 0,
         },
-        approvalResolutionMs: {
-          p50: 0,
-          p95: 0,
-          max: 0
+        retries: {
+          recoverableDatabaseFallbacks: 0,
+          taskUnblocks: 0,
         },
-        validationTurnaroundMs: {
-          p50: 0,
-          p95: 0,
-          max: 0
-        }
-      },
-      slo: {
-        objectives: {
-          pendingApprovalMaxMinutes: config.SLO_PENDING_APPROVAL_MAX_MINUTES,
-          activeRunMaxMinutes: config.SLO_ACTIVE_RUN_MAX_MINUTES,
-          taskQueueMax: config.SLO_TASK_QUEUE_MAX,
-          supportResponseHours: config.SLO_SUPPORT_RESPONSE_HOURS
+        failures: {
+          runsFailed: 0,
+          tasksFailed: 0,
+          agentsFailed: 0,
+          validationsFailed: 0,
+          requestFailures: 0,
         },
-        support: {
-          hoursUtc: config.SUPPORT_HOURS_UTC,
-          escalation: config.SUPPORT_ESCALATION
+        usage: {
+          repositories: 0,
+          runsTotal: 0,
+          runsActive: 0,
+          runsCompleted: 0,
+          tasksTotal: 0,
+          approvalsTotal: 0,
+          validationsTotal: 0,
+          artifactsTotal: 0,
+          workerNodesOnline: 0,
+          workerNodesDraining: 0,
         },
-        status: {
-          pendingApprovalsWithinTarget: true,
-          activeRunsWithinTarget: true,
-          queueDepthWithinTarget: true,
-          withinEnvelope: true
+        cost: {
+          runsWithBudget: 0,
+          totalBudgetedRunCostUsd: 0,
+          averageBudgetedRunCostUsd: 0,
+          maxBudgetedRunCostUsd: 0,
         },
-        measurements: {
-          oldestPendingApprovalAgeMinutes: null,
-          oldestActiveRunAgeMinutes: null,
-          pendingApprovals: 0,
-          activeRuns: 0,
-          tasksPending: 0
-        }
-      },
-      eventsRecorded: 0,
-      recordedAt: new Date()
-    }),
-    listEvents: async () => [],
-    recordRecoverableDatabaseFallback: () => undefined,
-    recordRequestFailure: () => undefined,
-    recordTimelineEvent: async () => null,
-    setActorContext: () => undefined,
-    subscribeToRunEvents: () => () => undefined,
-    withTrace: async <T>(_name: string, fn: () => Promise<T>) => fn()
-  });
+        performance: {
+          completedRunsMeasured: 0,
+          approvalsMeasured: 0,
+          validationsMeasured: 0,
+          runDurationMs: {
+            p50: 0,
+            p95: 0,
+            max: 0,
+          },
+          approvalResolutionMs: {
+            p50: 0,
+            p95: 0,
+            max: 0,
+          },
+          validationTurnaroundMs: {
+            p50: 0,
+            p95: 0,
+            max: 0,
+          },
+        },
+        slo: {
+          objectives: {
+            pendingApprovalMaxMinutes: config.SLO_PENDING_APPROVAL_MAX_MINUTES,
+            activeRunMaxMinutes: config.SLO_ACTIVE_RUN_MAX_MINUTES,
+            taskQueueMax: config.SLO_TASK_QUEUE_MAX,
+            supportResponseHours: config.SLO_SUPPORT_RESPONSE_HOURS,
+          },
+          support: {
+            hoursUtc: config.SUPPORT_HOURS_UTC,
+            escalation: config.SUPPORT_ESCALATION,
+          },
+          status: {
+            pendingApprovalsWithinTarget: true,
+            activeRunsWithinTarget: true,
+            queueDepthWithinTarget: true,
+            withinEnvelope: true,
+          },
+          measurements: {
+            oldestPendingApprovalAgeMinutes: null,
+            oldestActiveRunAgeMinutes: null,
+            pendingApprovals: 0,
+            activeRuns: 0,
+            tasksPending: 0,
+          },
+        },
+        eventsRecorded: 0,
+        recordedAt: new Date(),
+      }),
+      listEvents: async () => [],
+      recordRecoverableDatabaseFallback: () => undefined,
+      recordRequestFailure: () => undefined,
+      recordTimelineEvent: async () => null,
+      setActorContext: () => undefined,
+      subscribeToRunEvents: () => () => undefined,
+      withTrace: async <T>(_name: string, fn: () => Promise<T>) => fn(),
+    },
+  );
 }
 
 export async function buildApp(options: BuildAppOptions = {}) {
   const config = getConfig(options.config);
   const app = Fastify({
-    logger: false
+    logger: false,
   });
   const frontendDistRoot = resolveFrontendDistRoot(config);
 
@@ -171,16 +185,19 @@ export async function buildApp(options: BuildAppOptions = {}) {
     if (error instanceof HttpError) {
       reply.status(error.statusCode).send({
         error: error.message,
-        details: error.details ?? null
+        details: error.details ?? null,
       });
 
       return;
     }
 
-    if (error instanceof ZodError || (typeof error === "object" && error !== null && "issues" in error)) {
+    if (
+      error instanceof ZodError ||
+      (typeof error === "object" && error !== null && "issues" in error)
+    ) {
       reply.status(400).send({
         error: "validation_error",
-        details: "issues" in error ? error.issues : []
+        details: "issues" in error ? error.issues : [],
       });
 
       return;
@@ -188,19 +205,23 @@ export async function buildApp(options: BuildAppOptions = {}) {
 
     if (typeof (error as { statusCode?: number }).statusCode === "number") {
       reply.status((error as { statusCode: number }).statusCode).send({
-        error: getErrorMessage(error)
+        error: getErrorMessage(error),
       });
 
       return;
     }
 
     reply.status(500).send({
-      error: "internal_server_error"
+      error: "internal_server_error",
     });
   });
 
   if (options.controlPlane) {
-    app.decorate("observability", (options.observability ?? createNoopObservability(config)) as ObservabilityService);
+    app.decorate(
+      "observability",
+      (options.observability ??
+        createNoopObservability(config)) as ObservabilityService,
+    );
     app.decorate("controlPlane", options.controlPlane);
   } else {
     await app.register(dependenciesPlugin);
@@ -236,11 +257,14 @@ export async function buildApp(options: BuildAppOptions = {}) {
     await app.register(fastifyStatic, {
       root: frontendDistRoot,
       prefix: "/",
-      wildcard: false
+      wildcard: false,
     });
 
     app.get("/*", async (request, reply) => {
-      if (request.url.startsWith("/api/") || request.url.startsWith("/webhooks/")) {
+      if (
+        request.url.startsWith("/api/") ||
+        request.url.startsWith("/webhooks/")
+      ) {
         reply.status(404).send({ error: "not_found" });
         return;
       }

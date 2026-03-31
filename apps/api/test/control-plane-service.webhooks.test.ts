@@ -1,9 +1,14 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { externalEventReceipts, repeatableRunTriggers } from "../src/db/schema.js";
+import {
+  externalEventReceipts,
+  repeatableRunTriggers,
+} from "../src/db/schema.js";
 import { ControlPlaneService } from "../src/services/control-plane-service.js";
 
-function extractTargetId(condition: { queryChunks: Array<{ value?: string[] } | { value?: string }> }) {
+function extractTargetId(condition: {
+  queryChunks: Array<{ value?: string[] } | { value?: string }>;
+}) {
   const chunk = condition.queryChunks[3] as { value?: string };
 
   if (!chunk || typeof chunk.value !== "string") {
@@ -25,26 +30,30 @@ class FakeWebhookDb {
           }
 
           const record = {
-            ...values
+            ...values,
           };
           this.receiptStore.push(record);
           return [record];
-        }
-      })
+        },
+      }),
     };
   }
 
   update(table: unknown) {
     return {
       set: (values: Record<string, unknown>) => ({
-        where: (condition: { queryChunks: Array<{ value?: string[] } | { value?: string }> }) => {
+        where: (condition: {
+          queryChunks: Array<{ value?: string[] } | { value?: string }>;
+        }) => {
           const resolveRecord = () => {
             if (table !== externalEventReceipts) {
               throw new Error("unexpected update table");
             }
 
             const id = extractTargetId(condition);
-            const record = this.receiptStore.find((candidate) => candidate.id === id);
+            const record = this.receiptStore.find(
+              (candidate) => candidate.id === id,
+            );
 
             if (!record) {
               throw new Error(`unknown receipt ${id}`);
@@ -57,14 +66,21 @@ class FakeWebhookDb {
           return {
             returning: async () => resolveRecord(),
             then<TResult1 = any, TResult2 = never>(
-              onfulfilled?: ((value: any) => TResult1 | PromiseLike<TResult1>) | null,
-              onrejected?: ((reason: unknown) => TResult2 | PromiseLike<TResult2>) | null
+              onfulfilled?:
+                | ((value: any) => TResult1 | PromiseLike<TResult1>)
+                | null,
+              onrejected?:
+                | ((reason: unknown) => TResult2 | PromiseLike<TResult2>)
+                | null,
             ) {
-              return Promise.resolve(resolveRecord()).then(onfulfilled, onrejected);
-            }
+              return Promise.resolve(resolveRecord()).then(
+                onfulfilled,
+                onrejected,
+              );
+            },
           };
-        }
-      })
+        },
+      }),
     };
   }
 }
@@ -81,26 +97,30 @@ class FakeTriggerDb {
           }
 
           const record = {
-            ...values
+            ...values,
           };
           this.triggerStore.push(record);
           return [record];
-        }
-      })
+        },
+      }),
     };
   }
 
   update(table: unknown) {
     return {
       set: (values: Record<string, unknown>) => ({
-        where: (condition: { queryChunks: Array<{ value?: string[] } | { value?: string }> }) => ({
+        where: (condition: {
+          queryChunks: Array<{ value?: string[] } | { value?: string }>;
+        }) => ({
           returning: async () => {
             if (table !== repeatableRunTriggers) {
               throw new Error("unexpected update table");
             }
 
             const id = extractTargetId(condition);
-            const record = this.triggerStore.find((candidate) => candidate.id === id);
+            const record = this.triggerStore.find(
+              (candidate) => candidate.id === id,
+            );
 
             if (!record) {
               throw new Error(`unknown trigger ${id}`);
@@ -108,9 +128,9 @@ class FakeTriggerDb {
 
             Object.assign(record, values);
             return [record];
-          }
-        })
-      })
+          },
+        }),
+      }),
     };
   }
 }
@@ -125,7 +145,7 @@ describe("ControlPlaneService webhook ingestion", () => {
     process.env.TEST_WEBHOOK_SECRET = "top-secret";
     const db = new FakeWebhookDb();
     const service = new ControlPlaneService(db as never, {
-      now: () => new Date("2026-03-30T10:00:00.000Z")
+      now: () => new Date("2026-03-30T10:00:00.000Z"),
     });
     const createRun = vi.fn(async (input) => ({
       id: "99999999-9999-4999-8999-999999999999",
@@ -153,7 +173,7 @@ describe("ControlPlaneService webhook ingestion", () => {
       completedAt: null,
       createdBy: "external-trigger",
       createdAt: new Date("2026-03-30T10:00:00.000Z"),
-      updatedAt: new Date("2026-03-30T10:00:00.000Z")
+      updatedAt: new Date("2026-03-30T10:00:00.000Z"),
     }));
 
     vi.spyOn(service as any, "resolveWebhookTriggerByPath").mockResolvedValue({
@@ -175,16 +195,19 @@ describe("ControlPlaneService webhook ingestion", () => {
           eventNames: ["pull_request"],
           actions: ["opened"],
           branches: ["main"],
-          metadata: {}
+          metadata: {},
         },
         metadata: {
-          source: "test"
-        }
+          source: "test",
+        },
       },
       createdAt: new Date("2026-03-30T09:55:00.000Z"),
-      updatedAt: new Date("2026-03-30T09:55:00.000Z")
+      updatedAt: new Date("2026-03-30T09:55:00.000Z"),
     });
-    vi.spyOn(service as any, "assertRepeatableRunDefinitionExists").mockResolvedValue({
+    vi.spyOn(
+      service as any,
+      "assertRepeatableRunDefinitionExists",
+    ).mockResolvedValue({
       id: "22222222-2222-4222-8222-222222222222",
       repositoryId: "33333333-3333-4333-8333-333333333333",
       workspaceId: "workspace-1",
@@ -201,18 +224,18 @@ describe("ControlPlaneService webhook ingestion", () => {
         concurrencyCap: 1,
         policyProfile: "standard",
         metadata: {
-          preset: "pr-review"
-        }
+          preset: "pr-review",
+        },
       },
       createdAt: new Date("2026-03-30T09:55:00.000Z"),
-      updatedAt: new Date("2026-03-30T09:55:00.000Z")
+      updatedAt: new Date("2026-03-30T09:55:00.000Z"),
     });
     vi.spyOn(service as any, "assertRepositoryExists").mockResolvedValue({
       id: "33333333-3333-4333-8333-333333333333",
       workspaceId: "workspace-1",
       teamId: "team-1",
       trustLevel: "trusted",
-      approvalProfile: "standard"
+      approvalProfile: "standard",
     });
     vi.spyOn(service, "createRun").mockImplementation(createRun as never);
 
@@ -222,7 +245,7 @@ describe("ControlPlaneService webhook ingestion", () => {
       headers: {
         "x-webhook-secret": "top-secret",
         "x-event-name": "pull_request",
-        "x-delivery-id": "delivery-1"
+        "x-delivery-id": "delivery-1",
       },
       query: {},
       body: {
@@ -230,47 +253,55 @@ describe("ControlPlaneService webhook ingestion", () => {
         pull_request: {
           number: 42,
           base: {
-            ref: "main"
-          }
-        }
+            ref: "main",
+          },
+        },
       },
       contentType: "application/json",
       contentLengthBytes: 256,
       remoteAddress: "127.0.0.1",
-      userAgent: "vitest"
+      userAgent: "vitest",
     });
 
-    expect(createRun).toHaveBeenCalledWith(expect.objectContaining({
-      repositoryId: "33333333-3333-4333-8333-333333333333",
-      goal: "Review the new PR",
-      context: expect.objectContaining({
-        externalInput: expect.objectContaining({
-          kind: "webhook",
-          trigger: expect.objectContaining({
-            id: "11111111-1111-4111-8111-111111111111"
+    expect(createRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        repositoryId: "33333333-3333-4333-8333-333333333333",
+        goal: "Review the new PR",
+        context: expect.objectContaining({
+          externalInput: expect.objectContaining({
+            kind: "webhook",
+            trigger: expect.objectContaining({
+              id: "11111111-1111-4111-8111-111111111111",
+            }),
+            event: expect.objectContaining({
+              eventId: "delivery-1",
+              eventName: "pull_request",
+              action: "opened",
+              payload: expect.objectContaining({
+                action: "opened",
+              }),
+            }),
           }),
-          event: expect.objectContaining({
-            eventId: "delivery-1",
-            eventName: "pull_request",
-            action: "opened",
-            payload: expect.objectContaining({
-              action: "opened"
-            })
-          })
-        })
-      })
-    }), "external-trigger", expect.any(Object));
-    expect(result.run?.context.externalInput?.metadata).toEqual(expect.objectContaining({
-      receiptId: result.receipt.id
-    }));
+        }),
+      }),
+      "external-trigger",
+      expect.any(Object),
+    );
+    expect(result.run?.context.externalInput?.metadata).toEqual(
+      expect.objectContaining({
+        receiptId: result.receipt.id,
+      }),
+    );
     expect(result.receipt.status).toBe("run_created");
-    expect(result.receipt.createdRunId).toBe("99999999-9999-4999-8999-999999999999");
+    expect(result.receipt.createdRunId).toBe(
+      "99999999-9999-4999-8999-999999999999",
+    );
   });
 
   it("rejects requests that do not satisfy the configured trigger filters while keeping an audit receipt", async () => {
     const db = new FakeWebhookDb();
     const service = new ControlPlaneService(db as never, {
-      now: () => new Date("2026-03-30T10:00:00.000Z")
+      now: () => new Date("2026-03-30T10:00:00.000Z"),
     });
 
     vi.spyOn(service as any, "resolveWebhookTriggerByPath").mockResolvedValue({
@@ -292,14 +323,17 @@ describe("ControlPlaneService webhook ingestion", () => {
           eventNames: ["pull_request"],
           actions: ["opened"],
           branches: [],
-          metadata: {}
+          metadata: {},
         },
-        metadata: {}
+        metadata: {},
       },
       createdAt: new Date("2026-03-30T09:55:00.000Z"),
-      updatedAt: new Date("2026-03-30T09:55:00.000Z")
+      updatedAt: new Date("2026-03-30T09:55:00.000Z"),
     });
-    vi.spyOn(service as any, "assertRepeatableRunDefinitionExists").mockResolvedValue({
+    vi.spyOn(
+      service as any,
+      "assertRepeatableRunDefinitionExists",
+    ).mockResolvedValue({
       id: "22222222-2222-4222-8222-222222222222",
       repositoryId: "33333333-3333-4333-8333-333333333333",
       workspaceId: "workspace-1",
@@ -315,17 +349,17 @@ describe("ControlPlaneService webhook ingestion", () => {
         budgetCostUsd: null,
         concurrencyCap: 1,
         policyProfile: "standard",
-        metadata: {}
+        metadata: {},
       },
       createdAt: new Date("2026-03-30T09:55:00.000Z"),
-      updatedAt: new Date("2026-03-30T09:55:00.000Z")
+      updatedAt: new Date("2026-03-30T09:55:00.000Z"),
     });
     vi.spyOn(service as any, "assertRepositoryExists").mockResolvedValue({
       id: "33333333-3333-4333-8333-333333333333",
       workspaceId: "workspace-1",
       teamId: "team-1",
       trustLevel: "trusted",
-      approvalProfile: "standard"
+      approvalProfile: "standard",
     });
     const createRun = vi.spyOn(service, "createRun");
 
@@ -334,14 +368,14 @@ describe("ControlPlaneService webhook ingestion", () => {
       method: "POST",
       headers: {
         "x-event-name": "pull_request",
-        "x-delivery-id": "delivery-2"
+        "x-delivery-id": "delivery-2",
       },
       query: {},
       body: {
-        action: "edited"
+        action: "edited",
       },
       contentType: "application/json",
-      contentLengthBytes: 128
+      contentLengthBytes: 128,
     });
 
     expect(createRun).not.toHaveBeenCalled();
@@ -356,10 +390,13 @@ describe("ControlPlaneService repeatable run triggers", () => {
   it("generates a stable endpoint path on create", async () => {
     const db = new FakeTriggerDb();
     const service = new ControlPlaneService(db as never, {
-      now: () => new Date("2026-03-30T10:00:00.000Z")
+      now: () => new Date("2026-03-30T10:00:00.000Z"),
     });
 
-    vi.spyOn(service as any, "assertRepeatableRunDefinitionExists").mockResolvedValue({
+    vi.spyOn(
+      service as any,
+      "assertRepeatableRunDefinitionExists",
+    ).mockResolvedValue({
       id: "22222222-2222-4222-8222-222222222222",
       repositoryId: "33333333-3333-4333-8333-333333333333",
       workspaceId: "workspace-1",
@@ -375,12 +412,14 @@ describe("ControlPlaneService repeatable run triggers", () => {
         budgetCostUsd: null,
         concurrencyCap: 1,
         policyProfile: "standard",
-        metadata: {}
+        metadata: {},
       },
       createdAt: new Date("2026-03-30T09:55:00.000Z"),
-      updatedAt: new Date("2026-03-30T09:55:00.000Z")
+      updatedAt: new Date("2026-03-30T09:55:00.000Z"),
     });
-    vi.spyOn(crypto, "randomUUID").mockReturnValue("11111111-1111-4111-8111-111111111111");
+    vi.spyOn(crypto, "randomUUID").mockReturnValue(
+      "11111111-1111-4111-8111-111111111111",
+    );
 
     const trigger = await service.createRepeatableRunTrigger({
       repeatableRunId: "22222222-2222-4222-8222-222222222222",
@@ -399,14 +438,18 @@ describe("ControlPlaneService repeatable run triggers", () => {
           eventNames: ["pull_request"],
           actions: ["opened"],
           branches: [],
-          metadata: {}
+          metadata: {},
         },
-        metadata: {}
-      }
+        metadata: {},
+      },
     });
 
-    expect(trigger.config.endpointPath).toBe("/webhooks/triggers/11111111-1111-4111-8111-111111111111");
-    expect(db.triggerStore[0]?.config.endpointPath).toBe("/webhooks/triggers/11111111-1111-4111-8111-111111111111");
+    expect(trigger.config.endpointPath).toBe(
+      "/webhooks/triggers/11111111-1111-4111-8111-111111111111",
+    );
+    expect(db.triggerStore[0]?.config.endpointPath).toBe(
+      "/webhooks/triggers/11111111-1111-4111-8111-111111111111",
+    );
   });
 
   it("keeps the generated endpoint path stable on update", async () => {
@@ -432,20 +475,26 @@ describe("ControlPlaneService repeatable run triggers", () => {
           eventNames: [],
           actions: [],
           branches: [],
-          metadata: {}
+          metadata: {},
         },
-        metadata: {}
+        metadata: {},
       },
       createdAt: new Date("2026-03-30T09:55:00.000Z"),
-      updatedAt: new Date("2026-03-30T09:55:00.000Z")
+      updatedAt: new Date("2026-03-30T09:55:00.000Z"),
     });
 
     const service = new ControlPlaneService(db as never, {
-      now: () => new Date("2026-03-30T10:00:00.000Z")
+      now: () => new Date("2026-03-30T10:00:00.000Z"),
     });
 
-    vi.spyOn(service as any, "assertRepeatableRunTriggerExists").mockResolvedValue(db.triggerStore[0]);
-    vi.spyOn(service as any, "assertRepeatableRunDefinitionExists").mockResolvedValue({
+    vi.spyOn(
+      service as any,
+      "assertRepeatableRunTriggerExists",
+    ).mockResolvedValue(db.triggerStore[0]);
+    vi.spyOn(
+      service as any,
+      "assertRepeatableRunDefinitionExists",
+    ).mockResolvedValue({
       id: "22222222-2222-4222-8222-222222222222",
       repositoryId: "33333333-3333-4333-8333-333333333333",
       workspaceId: "workspace-1",
@@ -461,21 +510,26 @@ describe("ControlPlaneService repeatable run triggers", () => {
         budgetCostUsd: null,
         concurrencyCap: 1,
         policyProfile: "standard",
-        metadata: {}
+        metadata: {},
       },
       createdAt: new Date("2026-03-30T09:55:00.000Z"),
-      updatedAt: new Date("2026-03-30T09:55:00.000Z")
+      updatedAt: new Date("2026-03-30T09:55:00.000Z"),
     });
 
-    const trigger = await service.updateRepeatableRunTrigger("11111111-1111-4111-8111-111111111111", {
-      name: "PR opened updated",
-      config: {
-        eventNameHeader: "x-event-name"
-      }
-    });
+    const trigger = await service.updateRepeatableRunTrigger(
+      "11111111-1111-4111-8111-111111111111",
+      {
+        name: "PR opened updated",
+        config: {
+          eventNameHeader: "x-event-name",
+        },
+      },
+    );
 
     expect(trigger.name).toBe("PR opened updated");
-    expect(trigger.config.endpointPath).toBe("/webhooks/triggers/11111111-1111-4111-8111-111111111111");
+    expect(trigger.config.endpointPath).toBe(
+      "/webhooks/triggers/11111111-1111-4111-8111-111111111111",
+    );
     expect(trigger.config.eventNameHeader).toBe("x-event-name");
   });
 });

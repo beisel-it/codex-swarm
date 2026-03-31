@@ -5,7 +5,7 @@ import {
   artifactCreateSchema,
   messageCreateSchema,
   sessionTranscriptAppendSchema,
-  validationCreateSchema
+  validationCreateSchema,
 } from "../src/http/schemas.js";
 
 describe("messageCreateSchema", () => {
@@ -14,8 +14,8 @@ describe("messageCreateSchema", () => {
       messageCreateSchema.parse({
         runId: "550e8400-e29b-41d4-a716-446655440000",
         kind: "direct",
-        body: "Please pick this up"
-      })
+        body: "Please pick this up",
+      }),
     ).toThrowError(ZodError);
   });
 
@@ -23,7 +23,7 @@ describe("messageCreateSchema", () => {
     const message = messageCreateSchema.parse({
       runId: "550e8400-e29b-41d4-a716-446655440000",
       kind: "broadcast",
-      body: "Daily summary"
+      body: "Daily summary",
     });
 
     expect(message.kind).toBe("broadcast");
@@ -36,7 +36,7 @@ describe("validationCreateSchema", () => {
     const validation = validationCreateSchema.parse({
       runId: "550e8400-e29b-41d4-a716-446655440000",
       name: "unit",
-      command: "pnpm test"
+      command: "pnpm test",
     });
 
     expect(validation.status).toBe("pending");
@@ -50,7 +50,7 @@ describe("artifactCreateSchema", () => {
       runId: "550e8400-e29b-41d4-a716-446655440000",
       kind: "log",
       path: "artifacts/test.log",
-      contentType: "text/plain"
+      contentType: "text/plain",
     });
 
     expect(artifact.metadata).toEqual({});
@@ -63,9 +63,9 @@ describe("sessionTranscriptAppendSchema", () => {
       entries: [
         {
           kind: "response",
-          text: "Done."
-        }
-      ]
+          text: "Done.",
+        },
+      ],
     });
 
     expect(transcript.entries[0]?.metadata).toEqual({});

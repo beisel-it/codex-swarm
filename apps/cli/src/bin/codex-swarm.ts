@@ -1,7 +1,17 @@
 #!/usr/bin/env node
 
 import { spawn } from "node:child_process";
-import { access, constants, mkdir, mkdtemp, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
+import {
+  access,
+  constants,
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  rename,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { createInterface } from "node:readline/promises";
@@ -15,7 +25,7 @@ import {
   RELEASE_METADATA_FILE,
   renderSingleHostEnvTemplate,
   renderSystemdUnitTemplate,
-  SINGLE_HOST_UNIT_NAMES
+  SINGLE_HOST_UNIT_NAMES,
 } from "../lib/single-host.js";
 
 type CommandResult = number | void | Promise<number | void>;
@@ -194,7 +204,7 @@ function parseInstallOptions(argv: string[]): InstallOptions {
     version,
     dryRun,
     yes,
-    start
+    start,
   };
 }
 
@@ -213,7 +223,8 @@ function defaultEnvFile() {
 async function runDoctor(options: SharedOptions) {
   const installRoot = options.installRoot ?? defaultInstallRoot();
   const releaseMetadataPath = path.join(installRoot, RELEASE_METADATA_FILE);
-  const releaseMetadata = await readJsonFile<Record<string, unknown>>(releaseMetadataPath);
+  const releaseMetadata =
+    await readJsonFile<Record<string, unknown>>(releaseMetadataPath);
   const checks = await Promise.all([
     commandCheck("node"),
     commandCheck("docker"),
@@ -223,20 +234,47 @@ async function runDoctor(options: SharedOptions) {
     commandCheck("tar"),
     fileCheck(options.envFile, "env file"),
     fileCheck(releaseMetadataPath, "release metadata"),
-    fileCheck(path.join(installRoot, "apps", "api", "dist", "src", "server.js"), "api build"),
-    fileCheck(path.join(installRoot, "apps", "api", "dist", "src", "ops", "local-worker-daemon.js"), "worker build"),
-    fileCheck(path.join(installRoot, "apps", "api", "dist", "src", "db", "migrate.js"), "db migrate build"),
-    fileCheck(path.join(installRoot, "apps", "tui", "dist", "index.js"), "tui build"),
-    fileCheck(path.join(installRoot, "frontend", "dist", "index.html"), "frontend build")
+    fileCheck(
+      path.join(installRoot, "apps", "api", "dist", "src", "server.js"),
+      "api build",
+    ),
+    fileCheck(
+      path.join(
+        installRoot,
+        "apps",
+        "api",
+        "dist",
+        "src",
+        "ops",
+        "local-worker-daemon.js",
+      ),
+      "worker build",
+    ),
+    fileCheck(
+      path.join(installRoot, "apps", "api", "dist", "src", "db", "migrate.js"),
+      "db migrate build",
+    ),
+    fileCheck(
+      path.join(installRoot, "apps", "tui", "dist", "index.js"),
+      "tui build",
+    ),
+    fileCheck(
+      path.join(installRoot, "frontend", "dist", "index.html"),
+      "frontend build",
+    ),
   ]);
 
   output.write("Codex Swarm doctor\n\n");
   output.write(`Install root: ${installRoot}\n`);
   output.write(`Env file: ${options.envFile}\n`);
-  output.write(`Release metadata: ${releaseMetadata ? JSON.stringify(releaseMetadata) : "not found"}\n\n`);
+  output.write(
+    `Release metadata: ${releaseMetadata ? JSON.stringify(releaseMetadata) : "not found"}\n\n`,
+  );
 
   for (const check of checks) {
-    output.write(`${check.ok ? "OK" : "MISS"}  ${check.label}: ${check.detail}\n`);
+    output.write(
+      `${check.ok ? "OK" : "MISS"}  ${check.label}: ${check.detail}\n`,
+    );
   }
 
   return checks.every((check) => check.ok) ? 0 : 1;
@@ -252,8 +290,8 @@ async function runInstall(options: InstallOptions) {
       `- source: ${options.bundlePath ? options.bundlePath : `github release (${options.version ?? "latest"})`}`,
       `- dry run: ${options.dryRun ? "yes" : "no"}`,
       `- start services: ${options.start ? "yes" : "no"}`,
-      ""
-    ].join("\n")
+      "",
+    ].join("\n"),
   );
 
   const preflight = await Promise.all([
@@ -262,17 +300,21 @@ async function runInstall(options: InstallOptions) {
     commandCheck("systemctl"),
     commandCheck("loginctl"),
     commandCheck("codex"),
-    commandCheck("tar")
+    commandCheck("tar"),
   ]);
 
   for (const check of preflight) {
-    output.write(`${check.ok ? "OK" : "MISS"}  ${check.label}: ${check.detail}\n`);
+    output.write(
+      `${check.ok ? "OK" : "MISS"}  ${check.label}: ${check.detail}\n`,
+    );
   }
   output.write("\n");
 
   const failures = preflight.filter((check) => !check.ok);
   if (failures.length > 0) {
-    throw new Error(`Preflight failed for ${failures.map((check) => check.label).join(", ")}`);
+    throw new Error(
+      `Preflight failed for ${failures.map((check) => check.label).join(", ")}`,
+    );
   }
 
   if (!options.yes) {
@@ -287,8 +329,11 @@ async function runInstall(options: InstallOptions) {
   const systemdDir = path.join(os.homedir(), ".config", "systemd", "user");
   const workersDir = path.join(configDir, "workers");
   const envTemplatePath = path.join(TEMPLATE_ROOT, "single-host.env.example");
-  const renderedEnvTemplate = renderSingleHostEnvTemplate(await readFile(envTemplatePath, "utf8"));
-  const bundlePath = options.bundlePath ?? await downloadReleaseBundle(options.version);
+  const renderedEnvTemplate = renderSingleHostEnvTemplate(
+    await readFile(envTemplatePath, "utf8"),
+  );
+  const bundlePath =
+    options.bundlePath ?? (await downloadReleaseBundle(options.version));
 
   output.write(`Bundle ready: ${bundlePath}\n`);
 
@@ -312,14 +357,19 @@ async function runInstall(options: InstallOptions) {
   for (const unitName of SINGLE_HOST_UNIT_NAMES) {
     const sourcePath = path.join(TEMPLATE_ROOT, "systemd-user", unitName);
     const targetPath = path.join(systemdDir, unitName);
-    const rendered = renderSystemdUnitTemplate(await readFile(sourcePath, "utf8"), {
-      installRoot: options.installRoot,
-      envFile: options.envFile
-    });
+    const rendered = renderSystemdUnitTemplate(
+      await readFile(sourcePath, "utf8"),
+      {
+        installRoot: options.installRoot,
+        envFile: options.envFile,
+      },
+    );
     await writeWithDryRun(targetPath, rendered, options.dryRun);
   }
 
-  const currentEnv = await readFile(options.envFile, "utf8").catch(() => renderedEnvTemplate);
+  const currentEnv = await readFile(options.envFile, "utf8").catch(
+    () => renderedEnvTemplate,
+  );
   const hasPlaceholders = envContainsInstallPlaceholders(currentEnv);
 
   for (const dataDir of getSingleHostDataDirs(currentEnv)) {
@@ -329,33 +379,49 @@ async function runInstall(options: InstallOptions) {
   await runShellCommand("systemctl", ["--user", "daemon-reload"], {
     cwd: options.installRoot,
     dryRun: options.dryRun,
-    label: "reload systemd user units"
+    label: "reload systemd user units",
   });
-  await runShellCommand("systemctl", ["--user", "enable", "codex-swarm.target"], {
-    cwd: options.installRoot,
-    dryRun: options.dryRun,
-    label: "enable codex-swarm.target"
-  });
+  await runShellCommand(
+    "systemctl",
+    ["--user", "enable", "codex-swarm.target"],
+    {
+      cwd: options.installRoot,
+      dryRun: options.dryRun,
+      label: "enable codex-swarm.target",
+    },
+  );
 
   if (options.start) {
     if (hasPlaceholders) {
-      throw new Error(`Refusing to start services while ${options.envFile} still contains placeholder values`);
+      throw new Error(
+        `Refusing to start services while ${options.envFile} still contains placeholder values`,
+      );
     }
 
-    await runShellCommand("systemctl", ["--user", "restart", "codex-swarm.target"], {
-      cwd: options.installRoot,
-      dryRun: options.dryRun,
-      label: "restart codex-swarm.target"
-    });
+    await runShellCommand(
+      "systemctl",
+      ["--user", "restart", "codex-swarm.target"],
+      {
+        cwd: options.installRoot,
+        dryRun: options.dryRun,
+        label: "restart codex-swarm.target",
+      },
+    );
   } else {
-    output.write(`\nServices were not started. Edit ${options.envFile} and rerun with --start when ready.\n`);
+    output.write(
+      `\nServices were not started. Edit ${options.envFile} and rerun with --start when ready.\n`,
+    );
   }
 
   output.write("\nNext steps:\n");
   output.write(`- review ${options.envFile}\n`);
-  output.write(`- run codex-swarm doctor --install-root ${options.installRoot} --env-file ${options.envFile}\n`);
+  output.write(
+    `- run codex-swarm doctor --install-root ${options.installRoot} --env-file ${options.envFile}\n`,
+  );
   if (!options.start) {
-    output.write(`- rerun codex-swarm install --install-root ${options.installRoot} --env-file ${options.envFile} --start --yes\n`);
+    output.write(
+      `- rerun codex-swarm install --install-root ${options.installRoot} --env-file ${options.envFile} --start --yes\n`,
+    );
   }
   return 0;
 }
@@ -364,24 +430,32 @@ async function downloadReleaseBundle(version: string | null) {
   const releaseInfo = version
     ? await fetchReleaseByTag(`codex-swarm@${version}`)
     : await fetchLatestRelease();
-  const asset = (releaseInfo.assets as Array<{ name: string; browser_download_url: string }>).find((candidate) =>
-    candidate.name.startsWith(RELEASE_BUNDLE_ASSET_PREFIX) && candidate.name.endsWith(".tar.gz")
+  const asset = (
+    releaseInfo.assets as Array<{ name: string; browser_download_url: string }>
+  ).find(
+    (candidate) =>
+      candidate.name.startsWith(RELEASE_BUNDLE_ASSET_PREFIX) &&
+      candidate.name.endsWith(".tar.gz"),
   );
 
   if (!asset) {
-    throw new Error(`No ${RELEASE_BUNDLE_ASSET_PREFIX} bundle asset found on release ${releaseInfo.tag_name}`);
+    throw new Error(
+      `No ${RELEASE_BUNDLE_ASSET_PREFIX} bundle asset found on release ${releaseInfo.tag_name}`,
+    );
   }
 
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "codex-swarm-bundle-"));
   const targetPath = path.join(tempDir, asset.name);
   const response = await fetch(asset.browser_download_url, {
     headers: {
-      "User-Agent": "codex-swarm-cli"
-    }
+      "User-Agent": "codex-swarm-cli",
+    },
   });
 
   if (!response.ok) {
-    throw new Error(`Failed to download release bundle: ${response.status} ${response.statusText}`);
+    throw new Error(
+      `Failed to download release bundle: ${response.status} ${response.statusText}`,
+    );
   }
   const bytes = Buffer.from(await response.arrayBuffer());
   await writeFile(targetPath, bytes);
@@ -390,30 +464,40 @@ async function downloadReleaseBundle(version: string | null) {
 }
 
 async function fetchLatestRelease() {
-  const response = await fetch(`https://api.github.com/repos/${GITHUB_REPO}/releases/latest`, {
-    headers: {
-      Accept: "application/vnd.github+json",
-      "User-Agent": "codex-swarm-cli"
-    }
-  });
+  const response = await fetch(
+    `https://api.github.com/repos/${GITHUB_REPO}/releases/latest`,
+    {
+      headers: {
+        Accept: "application/vnd.github+json",
+        "User-Agent": "codex-swarm-cli",
+      },
+    },
+  );
 
   if (!response.ok) {
-    throw new Error(`Failed to fetch latest release: ${response.status} ${response.statusText}`);
+    throw new Error(
+      `Failed to fetch latest release: ${response.status} ${response.statusText}`,
+    );
   }
 
   return response.json() as Promise<Record<string, any>>;
 }
 
 async function fetchReleaseByTag(tag: string) {
-  const response = await fetch(`https://api.github.com/repos/${GITHUB_REPO}/releases/tags/${encodeURIComponent(tag)}`, {
-    headers: {
-      Accept: "application/vnd.github+json",
-      "User-Agent": "codex-swarm-cli"
-    }
-  });
+  const response = await fetch(
+    `https://api.github.com/repos/${GITHUB_REPO}/releases/tags/${encodeURIComponent(tag)}`,
+    {
+      headers: {
+        Accept: "application/vnd.github+json",
+        "User-Agent": "codex-swarm-cli",
+      },
+    },
+  );
 
   if (!response.ok) {
-    throw new Error(`Failed to fetch release ${tag}: ${response.status} ${response.statusText}`);
+    throw new Error(
+      `Failed to fetch release ${tag}: ${response.status} ${response.statusText}`,
+    );
   }
 
   return response.json() as Promise<Record<string, any>>;
@@ -424,12 +508,14 @@ async function installBundle(bundlePath: string, installRoot: string) {
   await runShellCommand("tar", ["-xzf", bundlePath, "-C", tempDir], {
     cwd: process.cwd(),
     dryRun: false,
-    label: "extract release bundle"
+    label: "extract release bundle",
   });
   const entries = await readDirNames(tempDir);
 
   if (entries.length !== 1) {
-    throw new Error(`Expected a single top-level directory in ${bundlePath}, found ${entries.length}`);
+    throw new Error(
+      `Expected a single top-level directory in ${bundlePath}, found ${entries.length}`,
+    );
   }
 
   const extractedRoot = path.join(tempDir, entries[0]!);
@@ -443,7 +529,9 @@ async function runServiceCommand(group: string, argv: string[]) {
   if (group === "tui") {
     const shared = parseSharedOptions(argv);
     const installRoot = shared.installRoot ?? defaultInstallRoot();
-    return runBuiltNodeEntry(path.join(installRoot, "apps", "tui", "dist", "index.js"));
+    return runBuiltNodeEntry(
+      path.join(installRoot, "apps", "tui", "dist", "index.js"),
+    );
   }
 
   const [subcommand, ...rest] = argv;
@@ -451,19 +539,35 @@ async function runServiceCommand(group: string, argv: string[]) {
   const installRoot = shared.installRoot ?? defaultInstallRoot();
 
   if (group === "api" && subcommand === "start") {
-    return runBuiltNodeEntry(path.join(installRoot, "apps", "api", "dist", "src", "server.js"));
+    return runBuiltNodeEntry(
+      path.join(installRoot, "apps", "api", "dist", "src", "server.js"),
+    );
   }
 
   if (group === "worker" && subcommand === "start") {
-    return runBuiltNodeEntry(path.join(installRoot, "apps", "api", "dist", "src", "ops", "local-worker-daemon.js"));
+    return runBuiltNodeEntry(
+      path.join(
+        installRoot,
+        "apps",
+        "api",
+        "dist",
+        "src",
+        "ops",
+        "local-worker-daemon.js",
+      ),
+    );
   }
 
   if (group === "db" && subcommand === "migrate") {
-    return runBuiltNodeEntry(path.join(installRoot, "apps", "api", "dist", "src", "db", "migrate.js"));
+    return runBuiltNodeEntry(
+      path.join(installRoot, "apps", "api", "dist", "src", "db", "migrate.js"),
+    );
   }
 
   output.write(`${HELP_TEXT}\n`);
-  throw new Error(`Unknown command combination: ${group} ${subcommand ?? ""}`.trim());
+  throw new Error(
+    `Unknown command combination: ${group} ${subcommand ?? ""}`.trim(),
+  );
 }
 
 async function runBuiltNodeEntry(entryPath: string) {
@@ -471,7 +575,7 @@ async function runBuiltNodeEntry(entryPath: string) {
   return new Promise<number>((resolve, reject) => {
     const child = spawn(process.execPath, [entryPath], {
       stdio: "inherit",
-      env: process.env
+      env: process.env,
     });
 
     child.on("error", reject);
@@ -487,24 +591,28 @@ async function runBuiltNodeEntry(entryPath: string) {
 }
 
 async function commandCheck(command: string) {
-  const result = await new Promise<{ ok: boolean; detail: string }>((resolve) => {
-    const child = spawn("sh", ["-lc", `command -v ${command}`], {
-      stdio: ["ignore", "pipe", "pipe"]
-    });
-
-    let outputBuffer = "";
-    child.stdout.on("data", (chunk) => {
-      outputBuffer += chunk.toString("utf8");
-    });
-
-    child.on("error", () => resolve({ ok: false, detail: "command lookup failed" }));
-    child.on("exit", (code) => {
-      resolve({
-        ok: code === 0,
-        detail: code === 0 ? outputBuffer.trim() || "available" : "not found"
+  const result = await new Promise<{ ok: boolean; detail: string }>(
+    (resolve) => {
+      const child = spawn("sh", ["-lc", `command -v ${command}`], {
+        stdio: ["ignore", "pipe", "pipe"],
       });
-    });
-  });
+
+      let outputBuffer = "";
+      child.stdout.on("data", (chunk) => {
+        outputBuffer += chunk.toString("utf8");
+      });
+
+      child.on("error", () =>
+        resolve({ ok: false, detail: "command lookup failed" }),
+      );
+      child.on("exit", (code) => {
+        resolve({
+          ok: code === 0,
+          detail: code === 0 ? outputBuffer.trim() || "available" : "not found",
+        });
+      });
+    },
+  );
 
   return { label: command, ...result };
 }
@@ -514,7 +622,7 @@ async function fileCheck(targetPath: string, label: string) {
   return {
     label,
     ok,
-    detail: ok ? targetPath : `missing at ${targetPath}`
+    detail: ok ? targetPath : `missing at ${targetPath}`,
   };
 }
 
@@ -536,7 +644,11 @@ async function mkdirIfNeeded(targetPath: string, dryRun: boolean) {
   await mkdir(targetPath, { recursive: true });
 }
 
-async function writeWithDryRun(targetPath: string, contents: string, dryRun: boolean) {
+async function writeWithDryRun(
+  targetPath: string,
+  contents: string,
+  dryRun: boolean,
+) {
   if (dryRun) {
     output.write(`[dry-run] write ${targetPath}\n`);
     return;
@@ -545,7 +657,11 @@ async function writeWithDryRun(targetPath: string, contents: string, dryRun: boo
   await writeFile(targetPath, contents, "utf8");
 }
 
-async function runShellCommand(command: string, args: string[], options: { cwd: string; dryRun: boolean; label: string }) {
+async function runShellCommand(
+  command: string,
+  args: string[],
+  options: { cwd: string; dryRun: boolean; label: string },
+) {
   if (options.dryRun) {
     output.write(`[dry-run] ${command} ${args.join(" ")} (${options.label})\n`);
     return;
@@ -555,7 +671,7 @@ async function runShellCommand(command: string, args: string[], options: { cwd: 
     const child = spawn(command, args, {
       cwd: options.cwd,
       stdio: "inherit",
-      env: process.env
+      env: process.env,
     });
 
     child.on("error", reject);

@@ -21,11 +21,11 @@ class FakeValidationTemplateDb {
         name: "unit",
         command: "pnpm test --filter api",
         summary: "Run the API test slice",
-        artifactPath: ".swarm/validations/unit.json"
-      }
+        artifactPath: ".swarm/validations/unit.json",
+      },
     ],
     createdAt: new Date("2026-03-28T12:00:00.000Z"),
-    updatedAt: new Date("2026-03-28T12:00:00.000Z")
+    updatedAt: new Date("2026-03-28T12:00:00.000Z"),
   };
 
   validationValues: Array<Record<string, unknown>> = [];
@@ -46,8 +46,8 @@ class FakeValidationTemplateDb {
           }
 
           throw new Error("unexpected ordered select table");
-        }
-      })
+        },
+      }),
     };
   }
 
@@ -61,8 +61,8 @@ class FakeValidationTemplateDb {
 
           this.validationValues.push(values);
           return [values];
-        }
-      })
+        },
+      }),
     };
   }
 }
@@ -80,8 +80,8 @@ class FakeTaskCreationDb {
 
           this.insertedTaskValues.push(values);
           return [values];
-        }
-      })
+        },
+      }),
     };
   }
 }
@@ -90,13 +90,13 @@ describe("ControlPlaneService validation templates", () => {
   it("materializes a validation from a named task template", async () => {
     const db = new FakeValidationTemplateDb();
     const service = new ControlPlaneService(db as never, {
-      now: () => new Date("2026-03-28T12:05:00.000Z")
+      now: () => new Date("2026-03-28T12:05:00.000Z"),
     });
 
     (service as any).assertRunExists = async () => ({
       id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
       workspaceId: "acme",
-      teamId: "platform"
+      teamId: "platform",
     });
 
     const validation = await service.createValidation({
@@ -104,7 +104,7 @@ describe("ControlPlaneService validation templates", () => {
       taskId: "11111111-1111-4111-8111-111111111111",
       templateName: "unit",
       status: "pending",
-      artifactIds: []
+      artifactIds: [],
     });
 
     expect(validation).toMatchObject({
@@ -112,26 +112,26 @@ describe("ControlPlaneService validation templates", () => {
       command: "pnpm test --filter api",
       summary: "Run the API test slice",
       artifactPath: ".swarm/validations/unit.json",
-      artifacts: []
+      artifacts: [],
     });
     expect(db.validationValues.at(-1)).toMatchObject({
       name: "unit",
       command: "pnpm test --filter api",
       summary: "Run the API test slice",
-      artifactPath: ".swarm/validations/unit.json"
+      artifactPath: ".swarm/validations/unit.json",
     });
   });
 
   it("allows explicit validation fields to override the task template", async () => {
     const db = new FakeValidationTemplateDb();
     const service = new ControlPlaneService(db as never, {
-      now: () => new Date("2026-03-28T12:05:00.000Z")
+      now: () => new Date("2026-03-28T12:05:00.000Z"),
     });
 
     (service as any).assertRunExists = async () => ({
       id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
       workspaceId: "acme",
-      teamId: "platform"
+      teamId: "platform",
     });
 
     const validation = await service.createValidation({
@@ -142,32 +142,32 @@ describe("ControlPlaneService validation templates", () => {
       command: "pnpm vitest run",
       summary: "Use the override path",
       status: "passed",
-      artifactIds: []
+      artifactIds: [],
     });
 
     expect(validation).toMatchObject({
       name: "unit-override",
       command: "pnpm vitest run",
-      summary: "Use the override path"
+      summary: "Use the override path",
     });
     expect(db.validationValues.at(-1)).toMatchObject({
       name: "unit-override",
       command: "pnpm vitest run",
-      summary: "Use the override path"
+      summary: "Use the override path",
     });
   });
 
   it("defaults missing task validation templates to an empty array during task creation", async () => {
     const db = new FakeTaskCreationDb();
     const service = new ControlPlaneService(db as never, {
-      now: () => new Date("2026-03-29T15:10:00.000Z")
+      now: () => new Date("2026-03-29T15:10:00.000Z"),
     });
 
     (service as any).assertRunExists = async () => ({
       id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
       workspaceId: "acme",
       teamId: "platform",
-      status: "planning"
+      status: "planning",
     });
     (service as any).assertDependenciesBelongToRun = async () => undefined;
     (service as any).areDependenciesSatisfied = async () => true;
@@ -179,16 +179,16 @@ describe("ControlPlaneService validation templates", () => {
       role: "frontend-developer",
       priority: 3,
       dependencyIds: [],
-      acceptanceCriteria: []
+      acceptanceCriteria: [],
     } as any);
 
     expect(task).toMatchObject({
       title: "Implement dark mode foundation",
-      validationTemplates: []
+      validationTemplates: [],
     });
     expect(db.insertedTaskValues.at(-1)).toMatchObject({
       title: "Implement dark mode foundation",
-      validationTemplates: []
+      validationTemplates: [],
     });
   });
 });

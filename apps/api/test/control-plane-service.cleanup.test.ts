@@ -16,7 +16,9 @@ type CleanupRow = {
   lastHeartbeatAt: Date | null;
 };
 
-function extractTargetId(condition: { queryChunks: Array<{ value?: string[] } | { value?: string }> }) {
+function extractTargetId(condition: {
+  queryChunks: Array<{ value?: string[] } | { value?: string }>;
+}) {
   const chunk = condition.queryChunks[3] as { value?: string };
 
   if (!chunk || typeof chunk.value !== "string") {
@@ -27,20 +29,26 @@ function extractTargetId(condition: { queryChunks: Array<{ value?: string[] } | 
 }
 
 class FakeCleanupDb {
-  readonly sessionStore = new Map<string, {
-    id: string;
-    agentId: string;
-    state: string;
-    staleReason: string | null;
-    updatedAt: Date;
-  }>();
+  readonly sessionStore = new Map<
+    string,
+    {
+      id: string;
+      agentId: string;
+      state: string;
+      staleReason: string | null;
+      updatedAt: Date;
+    }
+  >();
 
-  readonly agentStore = new Map<string, {
-    id: string;
-    runId: string;
-    status: string;
-    updatedAt: Date;
-  }>();
+  readonly agentStore = new Map<
+    string,
+    {
+      id: string;
+      runId: string;
+      status: string;
+      updatedAt: Date;
+    }
+  >();
 
   constructor(private readonly rows: CleanupRow[]) {
     for (const row of rows) {
@@ -49,13 +57,13 @@ class FakeCleanupDb {
         agentId: row.agentId,
         state: row.state,
         staleReason: null,
-        updatedAt: new Date("2026-03-28T11:00:00.000Z")
+        updatedAt: new Date("2026-03-28T11:00:00.000Z"),
       });
       this.agentStore.set(row.agentId, {
         id: row.agentId,
         runId: row.runId,
         status: row.state === "failed" ? "failed" : "busy",
-        updatedAt: new Date("2026-03-28T11:00:00.000Z")
+        updatedAt: new Date("2026-03-28T11:00:00.000Z"),
       });
     }
   }
@@ -65,16 +73,18 @@ class FakeCleanupDb {
       from: () => ({
         innerJoin: () => ({
           where: async () => this.rows,
-          orderBy: async () => this.rows
-        })
-      })
+          orderBy: async () => this.rows,
+        }),
+      }),
     };
   }
 
   update(table: unknown) {
     return {
       set: (values: Record<string, unknown>) => ({
-        where: async (condition: { queryChunks: Array<{ value?: string[] } | { value?: string }> }) => {
+        where: async (condition: {
+          queryChunks: Array<{ value?: string[] } | { value?: string }>;
+        }) => {
           const id = extractTargetId(condition);
 
           if (table === sessions) {
@@ -100,8 +110,8 @@ class FakeCleanupDb {
           }
 
           throw new Error("unexpected table update");
-        }
-      })
+        },
+      }),
     };
   }
 }
@@ -117,7 +127,7 @@ describe("ControlPlaneService.runCleanupJob", () => {
         worktreePath: ".swarm/worktrees/codex-swarm/run-001/agent-resume",
         state: "active",
         threadId: "thread-resume",
-        lastHeartbeatAt: new Date("2026-03-28T12:25:00.000Z")
+        lastHeartbeatAt: new Date("2026-03-28T12:25:00.000Z"),
       },
       {
         sessionId: "22222222-2222-4222-8222-222222222222",
@@ -126,7 +136,7 @@ describe("ControlPlaneService.runCleanupJob", () => {
         worktreePath: ".swarm/worktrees/codex-swarm/run-001/agent-retry",
         state: "pending",
         threadId: null,
-        lastHeartbeatAt: null
+        lastHeartbeatAt: null,
       },
       {
         sessionId: "33333333-3333-4333-8333-333333333333",
@@ -135,7 +145,7 @@ describe("ControlPlaneService.runCleanupJob", () => {
         worktreePath: ".swarm/worktrees/codex-swarm/run-001/agent-stale",
         state: "active",
         threadId: "thread-stale",
-        lastHeartbeatAt: new Date("2026-03-28T11:45:00.000Z")
+        lastHeartbeatAt: new Date("2026-03-28T11:45:00.000Z"),
       },
       {
         sessionId: "44444444-4444-4444-8444-444444444444",
@@ -144,14 +154,11 @@ describe("ControlPlaneService.runCleanupJob", () => {
         worktreePath: ".swarm/worktrees/codex-swarm/run-001/agent-archive",
         state: "failed",
         threadId: "thread-archive",
-        lastHeartbeatAt: new Date("2026-03-28T12:20:00.000Z")
-      }
+        lastHeartbeatAt: new Date("2026-03-28T12:20:00.000Z"),
+      },
     ]);
 
-    const service = new ControlPlaneService(
-      db as never,
-      { now: () => now }
-    );
+    const service = new ControlPlaneService(db as never, { now: () => now });
 
     const report = await service.runCleanupJob({
       runId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
@@ -160,9 +167,9 @@ describe("ControlPlaneService.runCleanupJob", () => {
         ".swarm/worktrees/codex-swarm/run-001/agent-resume",
         ".swarm/worktrees/codex-swarm/run-001/agent-retry",
         ".swarm/worktrees/codex-swarm/run-001/agent-stale",
-        ".swarm/worktrees/codex-swarm/run-001/agent-archive"
+        ".swarm/worktrees/codex-swarm/run-001/agent-archive",
       ],
-      deleteStaleWorktrees: false
+      deleteStaleWorktrees: false,
     });
 
     expect(report).toMatchObject({
@@ -172,7 +179,7 @@ describe("ControlPlaneService.runCleanupJob", () => {
       markedStale: 1,
       archived: 1,
       deletedWorktrees: 0,
-      worktreeDeleteFailures: 0
+      worktreeDeleteFailures: 0,
     });
     expect(report.items).toEqual([
       expect.objectContaining({
@@ -180,72 +187,89 @@ describe("ControlPlaneService.runCleanupJob", () => {
         action: "resume",
         reason: "resume_session",
         worktreeDeleted: false,
-        worktreeDeleteReason: null
+        worktreeDeleteReason: null,
       }),
       expect.objectContaining({
         sessionId: "22222222-2222-4222-8222-222222222222",
         action: "retry",
         reason: "retry_pending_session",
         worktreeDeleted: false,
-        worktreeDeleteReason: null
+        worktreeDeleteReason: null,
       }),
       expect.objectContaining({
         sessionId: "33333333-3333-4333-8333-333333333333",
         action: "mark_stale",
         reason: "heartbeat_timeout",
         worktreeDeleted: false,
-        worktreeDeleteReason: null
+        worktreeDeleteReason: null,
       }),
       expect.objectContaining({
         sessionId: "44444444-4444-4444-8444-444444444444",
         action: "archive",
         reason: "terminal_state",
         worktreeDeleted: false,
-        worktreeDeleteReason: null
-      })
+        worktreeDeleteReason: null,
+      }),
     ]);
 
-    expect(db.sessionStore.get("11111111-1111-4111-8111-111111111111")).toMatchObject({
+    expect(
+      db.sessionStore.get("11111111-1111-4111-8111-111111111111"),
+    ).toMatchObject({
       state: "active",
       staleReason: null,
-      updatedAt: now
+      updatedAt: now,
     });
-    expect(db.sessionStore.get("22222222-2222-4222-8222-222222222222")).toMatchObject({
+    expect(
+      db.sessionStore.get("22222222-2222-4222-8222-222222222222"),
+    ).toMatchObject({
       state: "pending",
       staleReason: "retry_pending_session",
-      updatedAt: now
+      updatedAt: now,
     });
-    expect(db.sessionStore.get("33333333-3333-4333-8333-333333333333")).toMatchObject({
+    expect(
+      db.sessionStore.get("33333333-3333-4333-8333-333333333333"),
+    ).toMatchObject({
       state: "stale",
       staleReason: "heartbeat_timeout",
-      updatedAt: now
+      updatedAt: now,
     });
-    expect(db.sessionStore.get("44444444-4444-4444-8444-444444444444")).toMatchObject({
+    expect(
+      db.sessionStore.get("44444444-4444-4444-8444-444444444444"),
+    ).toMatchObject({
       state: "archived",
       staleReason: null,
-      updatedAt: now
+      updatedAt: now,
     });
 
-    expect(db.agentStore.get("cccccccc-cccc-4ccc-8ccc-cccccccccccc")).toMatchObject({
+    expect(
+      db.agentStore.get("cccccccc-cccc-4ccc-8ccc-cccccccccccc"),
+    ).toMatchObject({
       status: "idle",
-      updatedAt: now
+      updatedAt: now,
     });
-    expect(db.agentStore.get("dddddddd-dddd-4ddd-8ddd-dddddddddddd")).toMatchObject({
+    expect(
+      db.agentStore.get("dddddddd-dddd-4ddd-8ddd-dddddddddddd"),
+    ).toMatchObject({
       status: "failed",
-      updatedAt: now
+      updatedAt: now,
     });
-    expect(db.agentStore.get("eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee")).toMatchObject({
+    expect(
+      db.agentStore.get("eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"),
+    ).toMatchObject({
       status: "stopped",
-      updatedAt: now
+      updatedAt: now,
     });
   });
 
   it("deletes stale and archived worktree directories when the cleanup run opts in", async () => {
     const now = new Date("2026-03-28T12:30:00.000Z");
-    const workspaceRoot = await mkdtemp(join(tmpdir(), "codex-swarm-cleanup-job-"));
+    const workspaceRoot = await mkdtemp(
+      join(tmpdir(), "codex-swarm-cleanup-job-"),
+    );
     const staleWorktree = join(workspaceRoot, "agent-stale");
     const archiveWorktree = join(workspaceRoot, "agent-archive");
-    const previousIsolationSetting = process.env.CODEX_SWARM_ENABLE_WORKSPACE_ISOLATION;
+    const previousIsolationSetting =
+      process.env.CODEX_SWARM_ENABLE_WORKSPACE_ISOLATION;
     process.env.CODEX_SWARM_ENABLE_WORKSPACE_ISOLATION = "true";
 
     try {
@@ -262,7 +286,7 @@ describe("ControlPlaneService.runCleanupJob", () => {
           worktreePath: staleWorktree,
           state: "active",
           threadId: "thread-stale",
-          lastHeartbeatAt: new Date("2026-03-28T11:45:00.000Z")
+          lastHeartbeatAt: new Date("2026-03-28T11:45:00.000Z"),
         },
         {
           sessionId: "44444444-4444-4444-8444-444444444444",
@@ -271,23 +295,17 @@ describe("ControlPlaneService.runCleanupJob", () => {
           worktreePath: archiveWorktree,
           state: "failed",
           threadId: "thread-archive",
-          lastHeartbeatAt: new Date("2026-03-28T12:20:00.000Z")
-        }
+          lastHeartbeatAt: new Date("2026-03-28T12:20:00.000Z"),
+        },
       ]);
 
-      const service = new ControlPlaneService(
-        db as never,
-        { now: () => now }
-      );
+      const service = new ControlPlaneService(db as never, { now: () => now });
 
       const report = await service.runCleanupJob({
         runId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
         staleAfterMinutes: 15,
-        existingWorktreePaths: [
-          staleWorktree,
-          archiveWorktree
-        ],
-        deleteStaleWorktrees: true
+        existingWorktreePaths: [staleWorktree, archiveWorktree],
+        deleteStaleWorktrees: true,
       });
 
       expect(report).toMatchObject({
@@ -295,29 +313,34 @@ describe("ControlPlaneService.runCleanupJob", () => {
         markedStale: 1,
         archived: 1,
         deletedWorktrees: 2,
-        worktreeDeleteFailures: 0
+        worktreeDeleteFailures: 0,
       });
       expect(report.items).toEqual([
         expect.objectContaining({
           worktreePath: staleWorktree,
           action: "mark_stale",
           worktreeDeleted: true,
-          worktreeDeleteReason: null
+          worktreeDeleteReason: null,
         }),
         expect.objectContaining({
           worktreePath: archiveWorktree,
           action: "archive",
           worktreeDeleted: true,
-          worktreeDeleteReason: null
-        })
+          worktreeDeleteReason: null,
+        }),
       ]);
-      await expect(readFile(join(staleWorktree, "README.md"), "utf8")).rejects.toThrow();
-      await expect(readFile(join(archiveWorktree, "README.md"), "utf8")).rejects.toThrow();
+      await expect(
+        readFile(join(staleWorktree, "README.md"), "utf8"),
+      ).rejects.toThrow();
+      await expect(
+        readFile(join(archiveWorktree, "README.md"), "utf8"),
+      ).rejects.toThrow();
     } finally {
       if (previousIsolationSetting === undefined) {
         delete process.env.CODEX_SWARM_ENABLE_WORKSPACE_ISOLATION;
       } else {
-        process.env.CODEX_SWARM_ENABLE_WORKSPACE_ISOLATION = previousIsolationSetting;
+        process.env.CODEX_SWARM_ENABLE_WORKSPACE_ISOLATION =
+          previousIsolationSetting;
       }
       await rm(workspaceRoot, { recursive: true, force: true });
     }

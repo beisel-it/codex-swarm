@@ -8,5 +8,5 @@ module.exports = {
   operatorJourneyUrl:
     "https://github.com/beisel-it/codex-swarm/blob/main/docs/operator-journey.md",
   quickStartUrl: "https://github.com/beisel-it/codex-swarm#quick-start",
-  year: new Date().getFullYear()
+  year: new Date().getFullYear(),
 };

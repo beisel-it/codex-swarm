@@ -14,12 +14,14 @@ export type RepositoryProviderInspection = {
   lastError: string | null;
 };
 
-function shouldSkipProviderInspection(repository: Pick<Repository, "provider" | "localPath">) {
+function shouldSkipProviderInspection(
+  repository: Pick<Repository, "provider" | "localPath">,
+) {
   return repository.provider === "local" || repository.localPath !== null;
 }
 
 export async function inspectRepositoryProvider(
-  repository: Pick<Repository, "provider" | "url" | "localPath">
+  repository: Pick<Repository, "provider" | "url" | "localPath">,
 ): Promise<RepositoryProviderInspection> {
   if (shouldSkipProviderInspection(repository)) {
     return {
@@ -28,7 +30,7 @@ export async function inspectRepositoryProvider(
       defaultBranch: null,
       branches: [],
       providerRepoUrl: repository.url,
-      lastError: null
+      lastError: null,
     };
   }
 
@@ -38,8 +40,8 @@ export async function inspectRepositoryProvider(
       ["ls-remote", "--symref", repository.url, "HEAD", "refs/heads/*"],
       {
         timeout: 15_000,
-        maxBuffer: 1024 * 1024
-      }
+        maxBuffer: 1024 * 1024,
+      },
     );
 
     const branches = new Set<string>();
@@ -74,7 +76,7 @@ export async function inspectRepositoryProvider(
       defaultBranch,
       branches: [...branches].sort(),
       providerRepoUrl: repository.url,
-      lastError: null
+      lastError: null,
     };
   } catch (error) {
     return {
@@ -83,7 +85,7 @@ export async function inspectRepositoryProvider(
       defaultBranch: null,
       branches: [],
       providerRepoUrl: repository.url,
-      lastError: error instanceof Error ? error.message : String(error)
+      lastError: error instanceof Error ? error.message : String(error),
     };
   }
 }

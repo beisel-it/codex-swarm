@@ -1,11 +1,25 @@
 import { once } from "node:events";
-import { lstat, mkdir, readlink, rm, symlink, writeFile } from "node:fs/promises";
+import {
+  lstat,
+  mkdir,
+  readlink,
+  rm,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
-import { spawn, type ChildProcess, type SpawnOptions } from "node:child_process";
+import {
+  spawn,
+  type ChildProcess,
+  type SpawnOptions,
+} from "node:child_process";
 
 import type { CodexMcpTransport } from "@codex-swarm/contracts";
 
-import { SessionRegistry, type WorkerSessionRecord } from "./session-registry.js";
+import {
+  SessionRegistry,
+  type WorkerSessionRecord,
+} from "./session-registry.js";
 
 export interface WorktreePathInput {
   rootDir: string;
@@ -56,7 +70,7 @@ export interface CodexServerSupervisorOptions {
   spawnImpl?: (
     command: string,
     args: readonly string[],
-    options: SpawnOptions
+    options: SpawnOptions,
   ) => ChildProcess;
   onStdout?: (chunk: string) => void;
   onStderr?: (chunk: string) => void;
@@ -88,7 +102,7 @@ export interface LocalCodexCliExecutorOptions {
   spawnImpl?: (
     command: string,
     args: readonly string[],
-    options: SpawnOptions
+    options: SpawnOptions,
   ) => ChildProcess;
   command?: string | string[];
   env?: NodeJS.ProcessEnv;
@@ -112,7 +126,9 @@ export type CodexToolRequest =
   | ReturnType<typeof buildCodexSessionStartRequest>
   | ReturnType<typeof buildCodexSessionReplyRequest>;
 
-export type CodexToolExecutor = (request: CodexToolRequest) => Promise<CodexToolExecutionResult>;
+export type CodexToolExecutor = (
+  request: CodexToolRequest,
+) => Promise<CodexToolExecutionResult>;
 
 export interface CodexSessionRuntimeOptions {
   registry: SessionRegistry;
@@ -149,7 +165,7 @@ export interface RepositoryMaterializationInput {
   spawnImpl?: (
     command: string,
     args: readonly string[],
-    options: SpawnOptions
+    options: SpawnOptions,
   ) => ChildProcess;
 }
 
@@ -180,7 +196,13 @@ export interface WorkerRecoverySnapshot {
 export interface WorkerSessionRecoveryAction {
   sessionId: string;
   action: "resume" | "retry" | "mark_stale" | "archive";
-  reason: "resume_session" | "retry_pending_session" | "missing_thread" | "missing_worktree" | "heartbeat_timeout" | "terminal_state";
+  reason:
+    | "resume_session"
+    | "retry_pending_session"
+    | "missing_thread"
+    | "missing_worktree"
+    | "heartbeat_timeout"
+    | "terminal_state";
 }
 
 export interface WorktreeCleanupResult {
@@ -228,8 +250,12 @@ async function destinationExists(destinationPath: string) {
   }
 }
 
-export function resolveWorkspaceProvisioningMode(env: NodeJS.ProcessEnv = process.env): WorkspaceProvisioningMode {
-  return env.CODEX_SWARM_ENABLE_WORKSPACE_ISOLATION?.trim() === "true" ? "isolated" : "shared";
+export function resolveWorkspaceProvisioningMode(
+  env: NodeJS.ProcessEnv = process.env,
+): WorkspaceProvisioningMode {
+  return env.CODEX_SWARM_ENABLE_WORKSPACE_ISOLATION?.trim() === "true"
+    ? "isolated"
+    : "shared";
 }
 
 async function runCommand(
@@ -239,12 +265,12 @@ async function runCommand(
   spawnImpl: (
     command: string,
     args: readonly string[],
-    options: SpawnOptions
-  ) => ChildProcess = spawn
+    options: SpawnOptions,
+  ) => ChildProcess = spawn,
 ) {
   const child = spawnImpl(command, args, {
     ...options,
-    stdio: ["ignore", "pipe", "pipe"]
+    stdio: ["ignore", "pipe", "pipe"],
   });
 
   let stderr = "";
@@ -253,22 +279,22 @@ async function runCommand(
     stderr += String(chunk);
   });
 
-  const [code, signal] = await once(child, "exit") as [number | null, NodeJS.Signals | null];
+  const [code, signal] = (await once(child, "exit")) as [
+    number | null,
+    NodeJS.Signals | null,
+  ];
 
   if (code !== 0) {
     const renderedCommand = [command, ...args].join(" ");
     const suffix = stderr.trim().length > 0 ? `: ${stderr.trim()}` : "";
-    throw new Error(`${renderedCommand} failed with code ${code ?? "null"}${signal ? ` signal ${signal}` : ""}${suffix}`);
+    throw new Error(
+      `${renderedCommand} failed with code ${code ?? "null"}${signal ? ` signal ${signal}` : ""}${suffix}`,
+    );
   }
 }
 
 export function buildPlanMarkdown(input: PlanDocumentInput) {
-  const lines = [
-    "# Swarm Plan",
-    "",
-    "## Goal",
-    input.goal
-  ];
+  const lines = ["# Swarm Plan", "", "## Goal", input.goal];
 
   if (input.summary) {
     lines.push("", "## Summary", input.summary);
@@ -315,11 +341,13 @@ export async function materializePlanArtifact(input: PlanMaterializationInput) {
   return {
     path: outputPath,
     relativePath,
-    markdown
+    markdown,
   };
 }
 
-export async function materializeRepositoryWorkspace(input: RepositoryMaterializationInput): Promise<MaterializedRepositoryWorkspace> {
+export async function materializeRepositoryWorkspace(
+  input: RepositoryMaterializationInput,
+): Promise<MaterializedRepositoryWorkspace> {
   await mkdir(dirname(input.destinationPath), { recursive: true });
   const existingDestination = await destinationExists(input.destinationPath);
   const allowReuse = input.reuseExisting ?? false;
@@ -328,18 +356,24 @@ export async function materializeRepositoryWorkspace(input: RepositoryMaterializ
     await ensureDestinationMissing(input.destinationPath);
   }
 
-  const sourcePath = input.repository.localPath ? resolve(input.repository.localPath) : null;
+  const sourcePath = input.repository.localPath
+    ? resolve(input.repository.localPath)
+    : null;
 
   if (sourcePath) {
     if (existingDestination && allowReuse) {
       if (!existingDestination.isSymbolicLink()) {
-        throw new Error(`shared repository mount is not a symlink: ${input.destinationPath}`);
+        throw new Error(
+          `shared repository mount is not a symlink: ${input.destinationPath}`,
+        );
       }
 
       const linkedPath = await readlink(input.destinationPath);
 
       if (resolve(dirname(input.destinationPath), linkedPath) !== sourcePath) {
-        throw new Error(`repository local-path mount target mismatch for ${input.destinationPath}`);
+        throw new Error(
+          `repository local-path mount target mismatch for ${input.destinationPath}`,
+        );
       }
 
       return {
@@ -347,14 +381,16 @@ export async function materializeRepositoryWorkspace(input: RepositoryMaterializ
         mode: "local_path_mount",
         branch: null,
         repositoryUrl: input.repository.url,
-        sourcePath
+        sourcePath,
       };
     }
 
     const sourceStats = await lstat(sourcePath);
 
     if (!sourceStats.isDirectory() && !sourceStats.isSymbolicLink()) {
-      throw new Error(`repository local path must point to a directory-like target: ${sourcePath}`);
+      throw new Error(
+        `repository local path must point to a directory-like target: ${sourcePath}`,
+      );
     }
 
     await symlink(sourcePath, input.destinationPath, "dir");
@@ -362,7 +398,9 @@ export async function materializeRepositoryWorkspace(input: RepositoryMaterializ
     const linkedPath = await readlink(input.destinationPath);
 
     if (resolve(dirname(input.destinationPath), linkedPath) !== sourcePath) {
-      throw new Error(`repository local-path mount target mismatch for ${input.destinationPath}`);
+      throw new Error(
+        `repository local-path mount target mismatch for ${input.destinationPath}`,
+      );
     }
 
     return {
@@ -370,7 +408,7 @@ export async function materializeRepositoryWorkspace(input: RepositoryMaterializ
       mode: "local_path_mount",
       branch: null,
       repositoryUrl: input.repository.url,
-      sourcePath
+      sourcePath,
     };
   }
 
@@ -379,7 +417,9 @@ export async function materializeRepositoryWorkspace(input: RepositoryMaterializ
 
   if (existingDestination && allowReuse) {
     if (!existingDestination.isDirectory()) {
-      throw new Error(`shared repository workspace is not a directory: ${input.destinationPath}`);
+      throw new Error(
+        `shared repository workspace is not a directory: ${input.destinationPath}`,
+      );
     }
 
     return {
@@ -387,7 +427,7 @@ export async function materializeRepositoryWorkspace(input: RepositoryMaterializ
       mode: "git_clone",
       branch,
       repositoryUrl: input.repository.url,
-      sourcePath: null
+      sourcePath: null,
     };
   }
 
@@ -401,12 +441,12 @@ export async function materializeRepositoryWorkspace(input: RepositoryMaterializ
       "--depth",
       String(cloneDepth),
       input.repository.url,
-      input.destinationPath
+      input.destinationPath,
     ],
     {
-      cwd: dirname(input.destinationPath)
+      cwd: dirname(input.destinationPath),
     },
-    input.spawnImpl
+    input.spawnImpl,
   );
 
   return {
@@ -414,11 +454,13 @@ export async function materializeRepositoryWorkspace(input: RepositoryMaterializ
     mode: "git_clone",
     branch,
     repositoryUrl: input.repository.url,
-    sourcePath: null
+    sourcePath: null,
   };
 }
 
-export async function cleanupWorktreePaths(paths: string[]): Promise<WorktreeCleanupResult[]> {
+export async function cleanupWorktreePaths(
+  paths: string[],
+): Promise<WorktreeCleanupResult[]> {
   const seen = new Set<string>();
   const results: WorktreeCleanupResult[] = [];
 
@@ -433,7 +475,7 @@ export async function cleanupWorktreePaths(paths: string[]): Promise<WorktreeCle
       results.push({
         path,
         deleted: false,
-        reason: "placeholder_path"
+        reason: "placeholder_path",
       });
       continue;
     }
@@ -444,7 +486,7 @@ export async function cleanupWorktreePaths(paths: string[]): Promise<WorktreeCle
       results.push({
         path,
         deleted: false,
-        reason: "unsafe_root_path"
+        reason: "unsafe_root_path",
       });
       continue;
     }
@@ -454,13 +496,13 @@ export async function cleanupWorktreePaths(paths: string[]): Promise<WorktreeCle
       results.push({
         path,
         deleted: true,
-        reason: null
+        reason: null,
       });
     } catch (error) {
       results.push({
         path,
         deleted: false,
-        reason: error instanceof Error ? error.message : String(error)
+        reason: error instanceof Error ? error.message : String(error),
       });
     }
   }
@@ -473,7 +515,7 @@ export function createWorktreePath(input: WorktreePathInput) {
   const segments = [
     input.rootDir,
     sanitizePathSegment(input.repositorySlug),
-    sanitizePathSegment(input.runId)
+    sanitizePathSegment(input.runId),
   ];
 
   if (mode === "shared") {
@@ -494,10 +536,7 @@ export function buildCodexServerCommand(config: CodexServerConfig) {
   const transport = getCodexTransport(config);
 
   if (transport.kind === "streamable_http") {
-    return [
-      "streamable_http",
-      transport.url
-    ];
+    return ["streamable_http", transport.url];
   }
 
   const command = [
@@ -510,7 +549,7 @@ export function buildCodexServerCommand(config: CodexServerConfig) {
     "--sandbox",
     config.sandbox,
     "--approval-policy",
-    config.approvalPolicy
+    config.approvalPolicy,
   ];
 
   if (config.includePlanTool) {
@@ -520,7 +559,9 @@ export function buildCodexServerCommand(config: CodexServerConfig) {
   return command;
 }
 
-function createIdleSupervisorState(command: string[]): CodexServerSupervisorState {
+function createIdleSupervisorState(
+  command: string[],
+): CodexServerSupervisorState {
   return {
     status: "idle",
     command,
@@ -529,7 +570,7 @@ function createIdleSupervisorState(command: string[]): CodexServerSupervisorStat
     stoppedAt: null,
     exitCode: null,
     signal: null,
-    failureReason: null
+    failureReason: null,
   };
 }
 
@@ -539,7 +580,7 @@ export class CodexServerSupervisor {
   private readonly spawnImpl: (
     command: string,
     args: readonly string[],
-    options: SpawnOptions
+    options: SpawnOptions,
   ) => ChildProcess;
 
   private process: ChildProcess | null = null;
@@ -549,19 +590,21 @@ export class CodexServerSupervisor {
   constructor(options: CodexServerSupervisorOptions) {
     this.options = options;
     this.spawnImpl = options.spawnImpl ?? spawn;
-    this.state = createIdleSupervisorState(options.command ?? buildCodexServerCommand(options.config));
+    this.state = createIdleSupervisorState(
+      options.command ?? buildCodexServerCommand(options.config),
+    );
   }
 
   snapshot() {
     return {
       ...this.state,
-      command: [...this.state.command]
+      command: [...this.state.command],
     };
   }
 
   getConfig() {
     return {
-      ...this.options.config
+      ...this.options.config,
     };
   }
 
@@ -577,15 +620,18 @@ export class CodexServerSupervisor {
     if (getCodexTransport(this.options.config).kind === "streamable_http") {
       this.process = null;
       this.state = {
-        ...createIdleSupervisorState(buildCodexServerCommand(this.options.config)),
+        ...createIdleSupervisorState(
+          buildCodexServerCommand(this.options.config),
+        ),
         status: "running",
-        startedAt: new Date()
+        startedAt: new Date(),
       };
 
       return this.snapshot();
     }
 
-    const command = this.options.command ?? buildCodexServerCommand(this.options.config);
+    const command =
+      this.options.command ?? buildCodexServerCommand(this.options.config);
     const [executable, ...args] = command;
 
     if (!executable) {
@@ -594,16 +640,16 @@ export class CodexServerSupervisor {
 
     this.state = {
       ...createIdleSupervisorState(command),
-      status: "starting"
+      status: "starting",
     };
 
     const child = this.spawnImpl(executable, args, {
       cwd: this.options.config.cwd,
       env: {
         ...process.env,
-        ...this.options.env
+        ...this.options.env,
       },
-      stdio: ["ignore", "pipe", "pipe"]
+      stdio: ["ignore", "pipe", "pipe"],
     });
 
     this.process = child;
@@ -623,7 +669,7 @@ export class CodexServerSupervisor {
         ...this.state,
         status: "running",
         pid: child.pid ?? null,
-        startedAt: new Date()
+        startedAt: new Date(),
       };
     });
 
@@ -634,14 +680,13 @@ export class CodexServerSupervisor {
         status: "failed",
         pid: child.pid ?? null,
         stoppedAt: new Date(),
-        failureReason: error.message
+        failureReason: error.message,
       };
     });
 
     child.once("exit", (code, signal) => {
-      const failureReason = code && code !== 0
-        ? `codex_mcp_server_exit_${code}`
-        : null;
+      const failureReason =
+        code && code !== 0 ? `codex_mcp_server_exit_${code}` : null;
 
       this.process = null;
       this.state = {
@@ -651,7 +696,7 @@ export class CodexServerSupervisor {
         stoppedAt: new Date(),
         exitCode: code,
         signal,
-        failureReason
+        failureReason,
       };
     });
 
@@ -660,7 +705,7 @@ export class CodexServerSupervisor {
         once(child, "spawn"),
         once(child, "error").then(([error]) => {
           throw error;
-        })
+        }),
       ]);
     } catch (error) {
       if (error instanceof Error) {
@@ -680,7 +725,7 @@ export class CodexServerSupervisor {
         status: "stopped",
         stoppedAt: new Date(),
         signal,
-        pid: null
+        pid: null,
       };
 
       return this.snapshot();
@@ -688,7 +733,12 @@ export class CodexServerSupervisor {
 
     const child = this.process;
 
-    if (!child || child.exitCode !== null || this.state.status === "stopped" || this.state.status === "failed") {
+    if (
+      !child ||
+      child.exitCode !== null ||
+      this.state.status === "stopped" ||
+      this.state.status === "failed"
+    ) {
       return this.snapshot();
     }
 
@@ -700,7 +750,12 @@ export class CodexServerSupervisor {
   async waitForExit() {
     const child = this.process;
 
-    if (!child || child.exitCode !== null || this.state.status === "stopped" || this.state.status === "failed") {
+    if (
+      !child ||
+      child.exitCode !== null ||
+      this.state.status === "stopped" ||
+      this.state.status === "failed"
+    ) {
       return this.snapshot();
     }
 
@@ -715,36 +770,47 @@ export class CodexSessionRuntime {
 
   constructor(private readonly options: CodexSessionRuntimeOptions) {
     this.now = options.now ?? (() => new Date());
-    this.supervisor = options.supervisor ?? new CodexServerSupervisor({
-      config: options.config ?? {
-        cwd: process.cwd(),
-        profile: "default",
-        sandbox: "workspace-write",
-        approvalPolicy: "on-request"
-      }
-    });
+    this.supervisor =
+      options.supervisor ??
+      new CodexServerSupervisor({
+        config: options.config ?? {
+          cwd: process.cwd(),
+          profile: "default",
+          sandbox: "workspace-write",
+          approvalPolicy: "on-request",
+        },
+      });
   }
 
-  async startSession(sessionId: string, prompt: string): Promise<CodexSessionExecutionResult> {
+  async startSession(
+    sessionId: string,
+    prompt: string,
+  ): Promise<CodexSessionExecutionResult> {
     const session = this.options.registry.get(sessionId);
     await this.supervisor.start();
 
     const request = buildCodexSessionStartRequest({
       prompt,
-      config: this.supervisor.getConfig()
+      config: this.supervisor.getConfig(),
     });
     const response = await this.options.executeTool(request);
-    const activated = this.options.registry.activate(session.sessionId, response.threadId);
+    const activated = this.options.registry.activate(
+      session.sessionId,
+      response.threadId,
+    );
 
     return {
       request,
       response,
       session: activated,
-      supervisor: this.supervisor.snapshot()
+      supervisor: this.supervisor.snapshot(),
     };
   }
 
-  async continueSession(sessionId: string, prompt: string): Promise<CodexSessionExecutionResult> {
+  async continueSession(
+    sessionId: string,
+    prompt: string,
+  ): Promise<CodexSessionExecutionResult> {
     const session = this.options.registry.get(sessionId);
 
     if (!session.threadId) {
@@ -756,12 +822,14 @@ export class CodexSessionRuntime {
     const request = buildCodexSessionReplyRequest({
       threadId: session.threadId,
       prompt,
-      config: this.supervisor.getConfig()
+      config: this.supervisor.getConfig(),
     });
     const response = await this.options.executeTool(request);
 
     if (response.threadId !== session.threadId) {
-      throw new Error(`session ${sessionId} reply returned mismatched threadId ${response.threadId}`);
+      throw new Error(
+        `session ${sessionId} reply returned mismatched threadId ${response.threadId}`,
+      );
     }
 
     const updated = this.options.registry.heartbeat(sessionId, this.now());
@@ -770,7 +838,7 @@ export class CodexSessionRuntime {
       request,
       response,
       session: updated,
-      supervisor: this.supervisor.snapshot()
+      supervisor: this.supervisor.snapshot(),
     };
   }
 
@@ -780,7 +848,7 @@ export class CodexSessionRuntime {
 
     return {
       session: this.options.registry.stop(session.sessionId),
-      supervisor: this.supervisor.snapshot()
+      supervisor: this.supervisor.snapshot(),
     };
   }
 }
@@ -796,7 +864,7 @@ export function buildCodexSessionStartRequest(input: CodexSessionStartInput) {
         Accept: "application/json, text/event-stream",
         "Content-Type": "application/json",
         "MCP-Protocol-Version": transport.protocolVersion,
-        ...transport.headers
+        ...transport.headers,
       },
       message: {
         jsonrpc: "2.0",
@@ -808,9 +876,9 @@ export function buildCodexSessionStartRequest(input: CodexSessionStartInput) {
           profile: input.config.profile,
           sandbox: input.config.sandbox,
           approvalPolicy: input.config.approvalPolicy,
-          includePlanTool: input.config.includePlanTool ?? false
-        }
-      }
+          includePlanTool: input.config.includePlanTool ?? false,
+        },
+      },
     } as const;
   }
 
@@ -822,8 +890,8 @@ export function buildCodexSessionStartRequest(input: CodexSessionStartInput) {
       profile: input.config.profile,
       sandbox: input.config.sandbox,
       approvalPolicy: input.config.approvalPolicy,
-      includePlanTool: input.config.includePlanTool ?? false
-    }
+      includePlanTool: input.config.includePlanTool ?? false,
+    },
   } as const;
 }
 
@@ -831,7 +899,6 @@ export function buildCodexSessionReplyRequest(input: CodexSessionReplyInput) {
   const transport = input.config ? getCodexTransport(input.config) : null;
 
   if (transport?.kind === "streamable_http") {
-
     return {
       transport: "streamable_http",
       endpoint: transport.url,
@@ -839,7 +906,7 @@ export function buildCodexSessionReplyRequest(input: CodexSessionReplyInput) {
         Accept: "application/json, text/event-stream",
         "Content-Type": "application/json",
         "MCP-Protocol-Version": transport.protocolVersion,
-        ...transport.headers
+        ...transport.headers,
       },
       message: {
         jsonrpc: "2.0",
@@ -847,9 +914,9 @@ export function buildCodexSessionReplyRequest(input: CodexSessionReplyInput) {
         method: "codex/session/reply",
         params: {
           threadId: input.threadId,
-          prompt: input.prompt
-        }
-      }
+          prompt: input.prompt,
+        },
+      },
     } as const;
   }
 
@@ -860,8 +927,8 @@ export function buildCodexSessionReplyRequest(input: CodexSessionReplyInput) {
       prompt: input.prompt,
       cwd: input.config?.cwd,
       sandbox: input.config?.sandbox,
-      approvalPolicy: input.config?.approvalPolicy
-    }
+      approvalPolicy: input.config?.approvalPolicy,
+    },
   } as const;
 }
 
@@ -872,15 +939,19 @@ async function parseStreamableHttpBody(response: Response) {
     const body = await response.text();
     const events = body
       .split(/\r?\n\r?\n/)
-      .map((chunk) => chunk
-        .split(/\r?\n/)
-        .filter((line) => line.startsWith("data:"))
-        .map((line) => line.slice("data:".length).trim())
-        .join(""))
+      .map((chunk) =>
+        chunk
+          .split(/\r?\n/)
+          .filter((line) => line.startsWith("data:"))
+          .map((line) => line.slice("data:".length).trim())
+          .join(""),
+      )
       .filter((chunk) => chunk.length > 0);
 
     if (events.length === 0) {
-      throw new Error("streamable HTTP response did not include any data events");
+      throw new Error(
+        "streamable HTTP response did not include any data events",
+      );
     }
 
     return JSON.parse(events.at(-1) ?? "");
@@ -903,13 +974,16 @@ async function collectProcessResult(child: ChildProcess) {
     stderr += String(chunk);
   });
 
-  const [code, signal] = await once(child, "exit") as [number | null, NodeJS.Signals | null];
+  const [code, signal] = (await once(child, "exit")) as [
+    number | null,
+    NodeJS.Signals | null,
+  ];
 
   return {
     code,
     signal,
     stdout,
-    stderr
+    stderr,
   };
 }
 
@@ -936,42 +1010,54 @@ function parseCodexExecJsonl(stdout: string) {
       continue;
     }
 
-    if ((payload as { type?: unknown }).type === "thread.started" && typeof (payload as { thread_id?: unknown }).thread_id === "string") {
+    if (
+      (payload as { type?: unknown }).type === "thread.started" &&
+      typeof (payload as { thread_id?: unknown }).thread_id === "string"
+    ) {
       threadId = (payload as { thread_id: string }).thread_id;
       continue;
     }
 
     if (
-      (payload as { type?: unknown }).type === "item.completed"
-      && (payload as { item?: { type?: unknown; text?: unknown } }).item?.type === "agent_message"
-      && typeof (payload as { item: { text: string } }).item.text === "string"
+      (payload as { type?: unknown }).type === "item.completed" &&
+      (payload as { item?: { type?: unknown; text?: unknown } }).item?.type ===
+        "agent_message" &&
+      typeof (payload as { item: { text: string } }).item.text === "string"
     ) {
       output = (payload as { item: { text: string } }).item.text;
     }
   }
 
   if (!threadId || !output) {
-    throw new Error("codex exec output did not contain thread.started and final agent_message events");
+    throw new Error(
+      "codex exec output did not contain thread.started and final agent_message events",
+    );
   }
 
   return {
     threadId,
-    output
+    output,
   };
 }
 
-function normalizeCodexToolExecutionResult(payload: unknown, response: Response): CodexToolExecutionResult {
-  const normalized = payload && typeof payload === "object" && "result" in payload
-    ? (payload as { result: unknown }).result
-    : payload;
+function normalizeCodexToolExecutionResult(
+  payload: unknown,
+  response: Response,
+): CodexToolExecutionResult {
+  const normalized =
+    payload && typeof payload === "object" && "result" in payload
+      ? (payload as { result: unknown }).result
+      : payload;
 
   if (
-    !normalized
-    || typeof normalized !== "object"
-    || typeof (normalized as { threadId?: unknown }).threadId !== "string"
-    || typeof (normalized as { output?: unknown }).output !== "string"
+    !normalized ||
+    typeof normalized !== "object" ||
+    typeof (normalized as { threadId?: unknown }).threadId !== "string" ||
+    typeof (normalized as { output?: unknown }).output !== "string"
   ) {
-    throw new Error("streamable HTTP response did not contain a valid Codex tool result");
+    throw new Error(
+      "streamable HTTP response did not contain a valid Codex tool result",
+    );
   }
 
   const sessionId = response.headers.get("MCP-Session-Id");
@@ -980,35 +1066,47 @@ function normalizeCodexToolExecutionResult(payload: unknown, response: Response)
     threadId: (normalized as { threadId: string }).threadId,
     output: (normalized as { output: string }).output,
     metadata: {
-      ...(((normalized as { metadata?: Record<string, unknown> }).metadata) ?? {}),
-      ...(sessionId ? { mcpSessionId: sessionId } : {})
-    }
+      ...((normalized as { metadata?: Record<string, unknown> }).metadata ??
+        {}),
+      ...(sessionId ? { mcpSessionId: sessionId } : {}),
+    },
   };
 }
 
-export function createStreamableHttpToolExecutor(options: StreamableHttpExecutorOptions = {}): CodexToolExecutor {
+export function createStreamableHttpToolExecutor(
+  options: StreamableHttpExecutorOptions = {},
+): CodexToolExecutor {
   const fetchImpl = options.fetchImpl ?? fetch;
 
   return async (request) => {
     if (!("transport" in request) || request.transport !== "streamable_http") {
-      throw new Error("streamable HTTP executor requires a streamable_http request");
+      throw new Error(
+        "streamable HTTP executor requires a streamable_http request",
+      );
     }
 
     const response = await fetchImpl(request.endpoint, {
       method: "POST",
       headers: request.headers,
-      body: JSON.stringify(request.message)
+      body: JSON.stringify(request.message),
     });
 
     if (!response.ok) {
-      throw new Error(`streamable HTTP Codex request failed with status ${response.status}`);
+      throw new Error(
+        `streamable HTTP Codex request failed with status ${response.status}`,
+      );
     }
 
-    return normalizeCodexToolExecutionResult(await parseStreamableHttpBody(response), response);
+    return normalizeCodexToolExecutionResult(
+      await parseStreamableHttpBody(response),
+      response,
+    );
   };
 }
 
-export function createLocalCodexCliExecutor(options: LocalCodexCliExecutorOptions = {}): CodexToolExecutor {
+export function createLocalCodexCliExecutor(
+  options: LocalCodexCliExecutorOptions = {},
+): CodexToolExecutor {
   const spawnImpl = options.spawnImpl ?? spawn;
   const configuredCommand = options.command ?? "codex";
   const command = Array.isArray(configuredCommand)
@@ -1022,7 +1120,9 @@ export function createLocalCodexCliExecutor(options: LocalCodexCliExecutorOption
 
   return async (request) => {
     if (!("tool" in request)) {
-      throw new Error("local Codex CLI executor requires a stdio codex request");
+      throw new Error(
+        "local Codex CLI executor requires a stdio codex request",
+      );
     }
 
     const tool = request.tool;
@@ -1036,7 +1136,9 @@ export function createLocalCodexCliExecutor(options: LocalCodexCliExecutorOption
         throw new Error("codex-reply request requires input");
       }
 
-      const bypass = input.sandbox === "danger-full-access" || input.approvalPolicy === "never";
+      const bypass =
+        input.sandbox === "danger-full-access" ||
+        input.approvalPolicy === "never";
 
       args = [
         ...baseArgs,
@@ -1044,9 +1146,11 @@ export function createLocalCodexCliExecutor(options: LocalCodexCliExecutorOption
         "resume",
         "--skip-git-repo-check",
         "--json",
-        ...(bypass ? ["--dangerously-bypass-approvals-and-sandbox"] : ["--full-auto"]),
+        ...(bypass
+          ? ["--dangerously-bypass-approvals-and-sandbox"]
+          : ["--full-auto"]),
         input.threadId,
-        input.prompt
+        input.prompt,
       ];
       cwd = input.cwd ?? cwd;
     } else {
@@ -1056,7 +1160,9 @@ export function createLocalCodexCliExecutor(options: LocalCodexCliExecutorOption
         throw new Error("codex request requires input");
       }
 
-      const bypass = input.sandbox === "danger-full-access" || input.approvalPolicy === "never";
+      const bypass =
+        input.sandbox === "danger-full-access" ||
+        input.approvalPolicy === "never";
       const resolvedCwd = resolve(input.cwd);
 
       args = [
@@ -1064,12 +1170,16 @@ export function createLocalCodexCliExecutor(options: LocalCodexCliExecutorOption
         "exec",
         "--skip-git-repo-check",
         "--json",
-        ...(bypass ? ["--dangerously-bypass-approvals-and-sandbox"] : ["--full-auto"]),
+        ...(bypass
+          ? ["--dangerously-bypass-approvals-and-sandbox"]
+          : ["--full-auto"]),
         "-C",
         resolvedCwd,
-        ...(input.profile && input.profile !== "default" ? ["-p", input.profile] : []),
+        ...(input.profile && input.profile !== "default"
+          ? ["-p", input.profile]
+          : []),
         ...(bypass ? [] : ["-s", input.sandbox]),
-        input.prompt
+        input.prompt,
       ];
       cwd = resolvedCwd;
     }
@@ -1078,17 +1188,20 @@ export function createLocalCodexCliExecutor(options: LocalCodexCliExecutorOption
       cwd,
       env: {
         ...process.env,
-        ...options.env
+        ...options.env,
       },
-      stdio: ["ignore", "pipe", "pipe"]
+      stdio: ["ignore", "pipe", "pipe"],
     });
 
     const result = await collectProcessResult(child);
 
     if (result.code !== 0) {
       const rendered = [executable, ...args].join(" ");
-      const suffix = result.stderr.trim().length > 0 ? `: ${result.stderr.trim()}` : "";
-      throw new Error(`${rendered} failed with code ${result.code ?? "null"}${result.signal ? ` signal ${result.signal}` : ""}${suffix}`);
+      const suffix =
+        result.stderr.trim().length > 0 ? `: ${result.stderr.trim()}` : "";
+      throw new Error(
+        `${rendered} failed with code ${result.code ?? "null"}${result.signal ? ` signal ${result.signal}` : ""}${suffix}`,
+      );
     }
 
     return parseCodexExecJsonl(result.stdout);
@@ -1097,18 +1210,22 @@ export function createLocalCodexCliExecutor(options: LocalCodexCliExecutorOption
 
 export function buildSessionRecoveryPlan(
   sessions: WorkerSessionRecoveryCandidate[],
-  snapshot: WorkerRecoverySnapshot
+  snapshot: WorkerRecoverySnapshot,
 ) {
   const now = snapshot.now ?? new Date();
   const staleAfterMs = snapshot.staleAfterMs ?? 15 * 60 * 1000;
   const existingWorktrees = new Set(snapshot.existingWorktreePaths);
 
   return sessions.map((session): WorkerSessionRecoveryAction => {
-    if (session.state === "stopped" || session.state === "failed" || session.state === "archived") {
+    if (
+      session.state === "stopped" ||
+      session.state === "failed" ||
+      session.state === "archived"
+    ) {
       return {
         sessionId: session.sessionId,
         action: "archive",
-        reason: "terminal_state"
+        reason: "terminal_state",
       };
     }
 
@@ -1116,7 +1233,7 @@ export function buildSessionRecoveryPlan(
       return {
         sessionId: session.sessionId,
         action: "mark_stale",
-        reason: "missing_worktree"
+        reason: "missing_worktree",
       };
     }
 
@@ -1124,22 +1241,28 @@ export function buildSessionRecoveryPlan(
       return {
         sessionId: session.sessionId,
         action: session.state === "pending" ? "retry" : "mark_stale",
-        reason: session.state === "pending" ? "retry_pending_session" : "missing_thread"
+        reason:
+          session.state === "pending"
+            ? "retry_pending_session"
+            : "missing_thread",
       };
     }
 
-    if (session.lastHeartbeatAt && now.getTime() - session.lastHeartbeatAt.getTime() > staleAfterMs) {
+    if (
+      session.lastHeartbeatAt &&
+      now.getTime() - session.lastHeartbeatAt.getTime() > staleAfterMs
+    ) {
       return {
         sessionId: session.sessionId,
         action: "mark_stale",
-        reason: "heartbeat_timeout"
+        reason: "heartbeat_timeout",
       };
     }
 
     return {
       sessionId: session.sessionId,
       action: "resume",
-      reason: "resume_session"
+      reason: "resume_session",
     };
   });
 }

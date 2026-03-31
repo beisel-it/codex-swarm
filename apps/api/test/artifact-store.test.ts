@@ -5,7 +5,11 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import type { AppConfig } from "../src/config.js";
-import { buildArtifactDownloadUrl, persistArtifactBlob, readArtifactBlob } from "../src/lib/artifact-store.js";
+import {
+  buildArtifactDownloadUrl,
+  persistArtifactBlob,
+  readArtifactBlob,
+} from "../src/lib/artifact-store.js";
 
 describe("artifact-store", () => {
   let storageRoot: string | null = null;
@@ -22,8 +26,11 @@ describe("artifact-store", () => {
 
     const config = {
       ARTIFACT_STORAGE_ROOT: storageRoot,
-      ARTIFACT_BASE_URL: "https://swarm.example.com"
-    } as Pick<AppConfig, "ARTIFACT_STORAGE_ROOT" | "ARTIFACT_BASE_URL"> as AppConfig;
+      ARTIFACT_BASE_URL: "https://swarm.example.com",
+    } as Pick<
+      AppConfig,
+      "ARTIFACT_STORAGE_ROOT" | "ARTIFACT_BASE_URL"
+    > as AppConfig;
     const artifactId = "550e8400-e29b-41d4-a716-446655440000";
     const content = Buffer.from("artifact payload");
 
@@ -33,7 +40,7 @@ describe("artifact-store", () => {
     expect(stored).toMatchObject({
       storageKey: "55/550e8400-e29b-41d4-a716-446655440000/content.bin",
       url: "https://swarm.example.com/api/v1/artifacts/550e8400-e29b-41d4-a716-446655440000/content",
-      sizeBytes: content.byteLength
+      sizeBytes: content.byteLength,
     });
     expect(loaded.content.equals(content)).toBe(true);
     expect(loaded.sizeBytes).toBe(content.byteLength);

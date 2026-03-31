@@ -9,17 +9,20 @@ export const SINGLE_HOST_UNIT_NAMES = [
   "codex-swarm-api.service",
   "codex-swarm-worker.service",
   "codex-swarm-worker@.service",
-  "codex-swarm.target"
+  "codex-swarm.target",
 ] as const;
 
-export function renderSingleHostEnvTemplate(template: string, options?: { homeDir?: string }) {
+export function renderSingleHostEnvTemplate(
+  template: string,
+  options?: { homeDir?: string },
+) {
   const homeDir = options?.homeDir ?? os.homedir();
   return template.replaceAll("__HOME__", homeDir);
 }
 
 export function renderSystemdUnitTemplate(
   template: string,
-  options: { installRoot: string; envFile: string }
+  options: { installRoot: string; envFile: string },
 ) {
   return template
     .replaceAll("__INSTALL_ROOT__", options.installRoot)
@@ -39,7 +42,7 @@ export function parseEnvAssignments(envText: string) {
       .map((line) => {
         const separator = line.indexOf("=");
         return [line.slice(0, separator), line.slice(separator + 1)];
-      })
+      }),
   );
 }
 
@@ -49,7 +52,7 @@ export function getSingleHostDataDirs(envText: string) {
     values.CODEX_SWARM_ARTIFACT_STORAGE_ROOT,
     values.CODEX_SWARM_WORKSPACE_ROOT,
     `${os.homedir()}/.local/share/codex-swarm/postgres`,
-    `${os.homedir()}/.local/share/codex-swarm/redis`
+    `${os.homedir()}/.local/share/codex-swarm/redis`,
   ].filter((value): value is string => Boolean(value));
 }
 
