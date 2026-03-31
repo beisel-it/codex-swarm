@@ -42,25 +42,29 @@ The intended release-1 deployment target is:
 - single-host managed deployment
 - installable `codex-swarm` CLI plus GitHub Releases
 
-Install the CLI:
+One-command installer:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/beisel-it/codex-swarm/main/ops/deploy/install-single-host-remote.sh | sh
+```
+
+The remote installer is review-first by default: it resolves the published release bundle, prints the exact URL and delegated command, asks whether you want to continue reviewing, and then asks again before it mutates the host.
+
+Non-interactive install:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/beisel-it/codex-swarm/main/ops/deploy/install-single-host-remote.sh | sh -s -- --yes --start
+```
+
+CLI-first alternative:
 
 ```bash
 npm install -g codex-swarm
-```
-
-Preview the install without mutating the host:
-
-```bash
 codex-swarm install --version latest --dry-run
-```
-
-Install the current release bundle and write the local env + systemd user units:
-
-```bash
 codex-swarm install --version latest
 ```
 
-After reviewing and editing `~/.config/codex-swarm/single-host.env`, start the stack:
+After reviewing and editing `~/.config/codex-swarm/single-host.env`, start the stack if you did not already pass `--start`:
 
 ```bash
 codex-swarm install --install-root ~/.local/share/codex-swarm/install --start --yes
@@ -73,13 +77,13 @@ codex-swarm doctor --install-root ~/.local/share/codex-swarm/install
 curl http://127.0.0.1:4300/health
 ```
 
-If you want a copy-paste-safe shell entrypoint, inspect the wrapper first:
+If you want a checked-in local shell entrypoint instead of the remote one-liner, inspect the wrapper first:
 
 ```bash
 ./ops/deploy/install-single-host.sh
 ```
 
-After review, rerun it with `--run`, or call the CLI directly.
+The local wrapper intentionally does not execute immediately. After review, rerun it with `--run`, or call the CLI directly.
 
 More detail:
 

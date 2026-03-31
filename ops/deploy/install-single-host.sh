@@ -16,6 +16,7 @@ The script delegates to:
 
 Typical usage:
 
+  curl -fsSL https://raw.githubusercontent.com/beisel-it/codex-swarm/main/ops/deploy/install-single-host-remote.sh | sh
   npm install -g codex-swarm
   ./ops/deploy/install-single-host.sh --run --version latest --dry-run
 EOF
