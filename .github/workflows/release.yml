@@ -42,7 +42,7 @@ jobs:
         uses: changesets/action@v1
         with:
           version: corepack pnpm changeset version
-          publish: corepack pnpm ci:build && corepack pnpm release:publish
+          publish: corepack pnpm release:ci
           title: "Release: version packages"
           commit: "Release: version packages"
           createGithubReleases: true

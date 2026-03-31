@@ -37,6 +37,7 @@
     "release:bundle": "node ./scripts/release/create-single-host-bundle.mjs",
     "release:verify-bundle": "node ./scripts/release/verify-single-host-bundle.mjs",
     "release:publish": "changeset publish",
+    "release:ci": "corepack pnpm ci:build && corepack pnpm release:publish",
     "dev:api": "pnpm --dir apps/api dev",
     "dev:cli": "pnpm --dir apps/cli build && node ./apps/cli/dist/bin/codex-swarm.js --help",
     "dev:worker": "pnpm --dir apps/worker dev",
