@@ -18,7 +18,8 @@ class FakeSchedulingDb {
     readonly workerNodeStore: any[],
     readonly assignmentStore: any[],
     readonly sessionStore: any[],
-    readonly agentStore: any[]
+    readonly agentStore: any[],
+    readonly taskStore: any[]
   ) {}
 
   select() {
@@ -39,6 +40,15 @@ class FakeSchedulingDb {
               return this.assignmentStore.filter((candidate) => candidate.state === "queued" || candidate.state === "retrying");
             }
 
+            if (table === tasks) {
+              if (condition.queryChunks) {
+                const id = extractTargetId(condition as { queryChunks: Array<{ value?: string[] } | { value?: string }> });
+                return this.taskStore.filter((candidate) => candidate.id === id);
+              }
+
+              return this.taskStore;
+            }
+
             throw new Error("unexpected ordered select table");
           },
           then: <TResult1 = any[], TResult2 = never>(
@@ -53,6 +63,12 @@ class FakeSchedulingDb {
                 ? this.workerNodeStore
                 : table === workerDispatchAssignments
                   ? this.assignmentStore.filter((candidate) => candidate.state === "queued" || candidate.state === "retrying")
+                  : table === tasks && condition.queryChunks
+                    ? this.taskStore.filter((candidate) => candidate.id === extractTargetId(
+                      condition as { queryChunks: Array<{ value?: string[] } | { value?: string }> }
+                    ))
+                    : table === tasks
+                      ? this.taskStore
                   : [];
 
             return Promise.resolve(rows).then(onfulfilled, onrejected);
@@ -121,7 +137,14 @@ class FakeSchedulingDb {
           }
 
           if (table === tasks) {
-            return Promise.resolve([]);
+            const record = this.taskStore.find((candidate) => candidate.id === id);
+
+            if (!record) {
+              throw new Error(`unknown task ${id}`);
+            }
+
+            Object.assign(record, values);
+            return Promise.resolve([record]);
           }
 
           throw new Error("unexpected update table");
@@ -237,12 +260,22 @@ describe("ControlPlaneService distributed scheduling", () => {
           createdAt: new Date("2026-03-28T12:00:00.000Z"),
           updatedAt: new Date("2026-03-28T12:00:00.000Z")
         }
+      ],
+      [
+        {
+          id: "task-1",
+          runId: "run-1",
+          status: "pending",
+          dependencyIds: [],
+          ownerAgentId: "agent-1"
+        }
       ]
     );
     const service = new ControlPlaneService(db as never, {
       now: () => now
     });
     (service as any).reconcileRunExecutionState = async () => undefined;
+    (service as any).recordControlPlaneEvent = async () => undefined;
 
     const overloadedClaim = await service.claimNextWorkerDispatch("node-a");
 
@@ -267,6 +300,191 @@ describe("ControlPlaneService distributed scheduling", () => {
     expect(db.agentStore[0]).toMatchObject({
       status: "busy",
       updatedAt: now
+    });
+  });
+
+  it("invalidates blocked queued work before claiming the next runnable assignment", async () => {
+    const now = new Date("2026-03-28T12:05:00.000Z");
+    const db = new FakeSchedulingDb(
+      [
+        {
+          id: "node-a",
+          name: "node-a",
+          endpoint: "tcp://node-a.internal:7777",
+          capabilityLabels: ["remote"],
+          status: "online",
+          drainState: "active",
+          lastHeartbeatAt: new Date("2026-03-28T12:05:00.000Z"),
+          metadata: {
+            queueDepth: 1,
+            activeClaims: 0,
+            utilization: {
+              cpu: 0.2
+            }
+          },
+          createdAt: new Date("2026-03-28T11:00:00.000Z"),
+          updatedAt: now
+        }
+      ],
+      [
+        {
+          id: "dispatch-blocked",
+          runId: "run-1",
+          taskId: "task-blocked",
+          agentId: "agent-blocked",
+          sessionId: "session-blocked",
+          repositoryId: "repo-1",
+          repositoryName: "codex-swarm",
+          queue: "worker-dispatch",
+          state: "queued",
+          stickyNodeId: null,
+          preferredNodeId: null,
+          claimedByNodeId: null,
+          requiredCapabilities: ["remote"],
+          worktreePath: "/tmp/codex-swarm/run-1/blocked",
+          branchName: null,
+          prompt: "Blocked task should not launch",
+          profile: "default",
+          sandbox: "workspace-write",
+          approvalPolicy: "on-request",
+          includePlanTool: false,
+          metadata: {},
+          attempt: 0,
+          maxAttempts: 3,
+          leaseTtlSeconds: 300,
+          claimedAt: null,
+          completedAt: null,
+          lastFailureReason: null,
+          createdAt: new Date("2026-03-28T12:00:00.000Z"),
+          updatedAt: new Date("2026-03-28T12:00:00.000Z")
+        },
+        {
+          id: "dispatch-ready",
+          runId: "run-1",
+          taskId: "task-ready",
+          agentId: "agent-ready",
+          sessionId: "session-ready",
+          repositoryId: "repo-1",
+          repositoryName: "codex-swarm",
+          queue: "worker-dispatch",
+          state: "queued",
+          stickyNodeId: null,
+          preferredNodeId: null,
+          claimedByNodeId: null,
+          requiredCapabilities: ["remote"],
+          worktreePath: "/tmp/codex-swarm/run-1/ready",
+          branchName: null,
+          prompt: "Runnable task should claim",
+          profile: "default",
+          sandbox: "workspace-write",
+          approvalPolicy: "on-request",
+          includePlanTool: false,
+          metadata: {},
+          attempt: 0,
+          maxAttempts: 3,
+          leaseTtlSeconds: 300,
+          claimedAt: null,
+          completedAt: null,
+          lastFailureReason: null,
+          createdAt: new Date("2026-03-28T12:01:00.000Z"),
+          updatedAt: new Date("2026-03-28T12:01:00.000Z")
+        }
+      ],
+      [
+        {
+          id: "session-blocked",
+          agentId: "agent-blocked",
+          threadId: "thread-blocked",
+          cwd: "/tmp/codex-swarm/run-1/blocked",
+          sandbox: "workspace-write",
+          approvalPolicy: "on-request",
+          includePlanTool: false,
+          workerNodeId: null,
+          stickyNodeId: null,
+          placementConstraintLabels: ["remote"],
+          lastHeartbeatAt: null,
+          state: "pending",
+          staleReason: null,
+          metadata: {},
+          createdAt: now,
+          updatedAt: now
+        },
+        {
+          id: "session-ready",
+          agentId: "agent-ready",
+          threadId: "thread-ready",
+          cwd: "/tmp/codex-swarm/run-1/ready",
+          sandbox: "workspace-write",
+          approvalPolicy: "on-request",
+          includePlanTool: false,
+          workerNodeId: null,
+          stickyNodeId: null,
+          placementConstraintLabels: ["remote"],
+          lastHeartbeatAt: null,
+          state: "pending",
+          staleReason: null,
+          metadata: {},
+          createdAt: now,
+          updatedAt: now
+        }
+      ],
+      [
+        {
+          id: "agent-blocked",
+          runId: "run-1",
+          taskId: "task-blocked",
+          label: "blocked-agent",
+          role: "backend-dev",
+          status: "idle",
+          createdAt: now,
+          updatedAt: now
+        },
+        {
+          id: "agent-ready",
+          runId: "run-1",
+          taskId: "task-ready",
+          label: "ready-agent",
+          role: "backend-dev",
+          status: "idle",
+          createdAt: now,
+          updatedAt: now
+        }
+      ],
+      [
+        {
+          id: "task-blocked",
+          runId: "run-1",
+          status: "blocked",
+          dependencyIds: [],
+          ownerAgentId: "agent-blocked",
+          updatedAt: now
+        },
+        {
+          id: "task-ready",
+          runId: "run-1",
+          status: "pending",
+          dependencyIds: [],
+          ownerAgentId: "agent-ready",
+          updatedAt: now
+        }
+      ]
+    );
+    const service = new ControlPlaneService(db as never, {
+      now: () => now
+    });
+    (service as any).recordControlPlaneEvent = async () => undefined;
+    (service as any).reconcileRunExecutionState = async () => undefined;
+
+    const claim = await service.claimNextWorkerDispatch("node-a");
+
+    expect(claim?.id).toBe("dispatch-ready");
+    expect(db.assignmentStore.find((assignment) => assignment.id === "dispatch-blocked")).toMatchObject({
+      state: "failed",
+      lastFailureReason: "task_not_runnable",
+      claimedByNodeId: null
+    });
+    expect(db.taskStore.find((task) => task.id === "task-blocked")).toMatchObject({
+      status: "blocked"
     });
   });
 });

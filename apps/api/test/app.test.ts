@@ -4709,6 +4709,67 @@ describe("buildApp", () => {
     }
   });
 
+  it("returns a 409 when the artifact source file does not exist and does not create a row", async () => {
+    const controlPlane = new FakeVerticalSliceControlPlane();
+    const app = await buildApp({
+      config: getConfig({
+        NODE_ENV: "test",
+        PORT: 3000,
+        HOST: "127.0.0.1",
+        DATABASE_URL: "postgres://unused/test",
+        DEV_AUTH_TOKEN: "test-token",
+        OPENAI_TRACING_DISABLED: true
+      }),
+      controlPlane: controlPlane as unknown as ControlPlaneService
+    });
+
+    const headers = {
+      authorization: "Bearer test-token"
+    };
+
+    try {
+      const createRunResponse = await app.inject({
+        method: "POST",
+        url: "/api/v1/runs",
+        headers,
+        payload: {
+          repositoryId: ids.repository,
+          goal: "Reject missing artifact source file",
+          metadata: {}
+        }
+      });
+
+      expect(createRunResponse.statusCode).toBe(201);
+
+      const beforeArtifacts = await controlPlane.listArtifacts(ids.run);
+      const response = await app.inject({
+        method: "POST",
+        url: "/api/v1/artifacts",
+        headers,
+        payload: {
+          runId: ids.run,
+          kind: "report",
+          path: "apps/api:test",
+          contentType: "text/plain",
+          metadata: {
+            source: "worker-outcome",
+            resolvedArtifactPath: "/definitely/missing/apps/api:test"
+          }
+        }
+      });
+      const afterArtifacts = await controlPlane.listArtifacts(ids.run);
+
+      expect(response.statusCode).toBe(409);
+      expect(response.json()).toEqual({
+        error: "artifact source file not found: /definitely/missing/apps/api:test",
+        details: null
+      });
+      expect(afterArtifacts).toHaveLength(beforeArtifacts.length);
+    } finally {
+      await app.close();
+    }
+  });
+
   it("executes a leader planning loop and persists the generated task DAG", async () => {
     const app = await buildApp({
       config: getConfig({

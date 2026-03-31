@@ -112,6 +112,98 @@ class FakeVerificationSchedulingDb {
   }
 }
 
+class FakeRepairDb {
+  constructor(
+    readonly runStore: any[],
+    readonly assignmentStore: any[],
+    readonly agentStore: any[],
+    readonly taskStore: any[],
+    readonly sessionStore: any[]
+  ) {}
+
+  select() {
+    return {
+      from: (table: unknown) => ({
+        where: (condition: { queryChunks?: Array<{ value?: string[] } | { value?: string }> }) => ({
+          orderBy: async () => {
+            const target = condition.queryChunks?.[3]?.value;
+            const ids = Array.isArray(target) ? target : [target];
+
+            if (table === runs) {
+              return this.runStore.filter((candidate) => ids.includes(candidate.id));
+            }
+
+            if (table === tasks) {
+              return this.taskStore.filter((candidate) => ids.includes(candidate.id) || ids.includes(candidate.runId));
+            }
+
+            if (table === workerDispatchAssignments) {
+              return this.assignmentStore.filter((candidate) => ids.includes(candidate.id) || ids.includes(candidate.runId));
+            }
+
+            return [];
+          },
+          then: <TResult1 = any[], TResult2 = never>(
+            onfulfilled?: ((value: any[]) => TResult1 | PromiseLike<TResult1>) | null,
+            onrejected?: ((reason: unknown) => TResult2 | PromiseLike<TResult2>) | null
+          ) => {
+            const target = condition.queryChunks?.[3]?.value;
+            const ids = Array.isArray(target) ? target : [target];
+            const rows = table === runs
+              ? this.runStore.filter((candidate) => ids.includes(candidate.id))
+              : table === tasks
+                ? this.taskStore.filter((candidate) => ids.includes(candidate.id) || ids.includes(candidate.runId))
+                : table === workerDispatchAssignments
+                  ? this.assignmentStore.filter((candidate) => ids.includes(candidate.id) || ids.includes(candidate.runId))
+                  : [];
+
+            return Promise.resolve(rows).then(onfulfilled, onrejected);
+          }
+        })
+      })
+    };
+  }
+
+  update(table: unknown) {
+    return {
+      set: (values: Record<string, unknown>) => ({
+        where: (condition: { queryChunks: Array<{ value?: string[] } | { value?: string }> }) => {
+          const target = condition.queryChunks?.[3]?.value;
+          const ids = Array.isArray(target) ? target : [target];
+          const store = table === runs
+            ? this.runStore
+            : table === workerDispatchAssignments
+              ? this.assignmentStore
+              : table === agents
+                ? this.agentStore
+                : table === tasks
+                  ? this.taskStore
+                  : table === sessions
+                    ? this.sessionStore
+                    : null;
+
+          if (!store) {
+            throw new Error("unexpected update table");
+          }
+
+          const records = store.filter((candidate) => ids.includes(candidate.id));
+          records.forEach((record) => Object.assign(record, values));
+
+          return {
+            returning: async () => records,
+            then<TResult1 = any[], TResult2 = never>(
+              onfulfilled?: ((value: any[]) => TResult1 | PromiseLike<TResult1>) | null,
+              onrejected?: ((reason: unknown) => TResult2 | PromiseLike<TResult2>) | null
+            ) {
+              return Promise.resolve(records).then(onfulfilled, onrejected);
+            }
+          };
+        }
+      })
+    };
+  }
+}
+
 function createWorkerAssignment(overrides: Partial<Record<string, unknown>> = {}) {
   return {
     id: "dispatch-worker-1",
@@ -799,5 +891,75 @@ describe("ControlPlaneService verification lifecycle", () => {
 
     expect(runDetail.status).toBe("completed");
     expect(runDetail.completedAt).toEqual(new Date("2026-03-31T09:40:00.000Z"));
+  });
+
+  it("invalidates stale claimed worker assignments instead of reviving blocked tasks during repair", async () => {
+    const now = new Date("2026-03-31T09:40:00.000Z");
+    const db = new FakeRepairDb(
+      [
+        {
+          id: "run-1",
+          status: "in_progress"
+        }
+      ],
+      [
+        createWorkerAssignment({
+          id: "dispatch-stale",
+          taskId: "task-blocked",
+          agentId: "worker-agent-1",
+          sessionId: "session-worker-1",
+          state: "claimed"
+        })
+      ],
+      [
+        {
+          id: "worker-agent-1",
+          status: "busy",
+          currentTaskId: "task-blocked",
+          updatedAt: now
+        }
+      ],
+      [
+        createTaskRecord({
+          id: "task-blocked",
+          status: "blocked",
+          ownerAgentId: "worker-agent-1",
+          dependencyIds: []
+        })
+      ],
+      [
+        {
+          id: "session-worker-1",
+          state: "active",
+          workerNodeId: "node-1",
+          stickyNodeId: "node-1",
+          staleReason: null,
+          updatedAt: now
+        }
+      ]
+    );
+    const service = new ControlPlaneService(db as never, {
+      now: () => now
+    });
+    (service as any).recordControlPlaneEvent = async () => undefined;
+
+    await (service as any).repairRunStateFromDispatchAssignments("run-1");
+
+    expect(db.assignmentStore[0]).toMatchObject({
+      state: "failed",
+      lastFailureReason: "task_not_runnable",
+      claimedByNodeId: null
+    });
+    expect(db.taskStore[0]).toMatchObject({
+      status: "blocked"
+    });
+    expect(db.agentStore[0]).toMatchObject({
+      status: "idle"
+    });
+    expect(db.sessionStore[0]).toMatchObject({
+      state: "pending",
+      workerNodeId: null,
+      staleReason: "task_not_runnable"
+    });
   });
 });
