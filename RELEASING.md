@@ -19,7 +19,7 @@ Service packages remain private until their artifact boundaries are stable.
 
 - versioning and release PRs: Changesets
 - CI and release automation: GitHub Actions
-- package publication: npm Trusted Publishing with GitHub OIDC
+- package publication: GitHub Packages npm registry via GitHub Actions and `GITHUB_TOKEN`
 - release artifact publication: GitHub Releases
 
 ## Maintainer flow
@@ -32,8 +32,8 @@ Service packages remain private until their artifact boundaries are stable.
    - generated changelog entries
    - package scope and publish intent
 5. Merge the release PR to `main`.
-6. The `Release` workflow publishes non-private packages through trusted
-   publishing, creates GitHub Releases, and uploads the single-host tarball.
+6. The `Release` workflow publishes non-private packages to GitHub Packages,
+   creates GitHub Releases, and uploads the single-host tarball.
 
 ## Common commands
 
@@ -59,11 +59,14 @@ corepack pnpm release:publish
 - the package builds from checked-in source in CI
 - the single-host release bundle builds successfully in CI
 - the supported-version and support-boundary docs are still accurate
+- the package name and package registry docs are aligned for GitHub Packages
 
 ## Current assumptions
 
-- the primary public publish target is the `codex-swarm` CLI package
+- the primary public publish target is the `@beisel-it/codex-swarm` CLI package
 - the primary install artifact is `codex-swarm-single-host-<version>.tar.gz`
 - API, worker, frontend, landing, and database packages remain private for now
 - deployment/install docs must stay aligned with the actual release boundary in
   `docs/operations/supported-versions.md`
+- direct package installs use GitHub Packages, while the one-command installer
+  remains the preferred release path

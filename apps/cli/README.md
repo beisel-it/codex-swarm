@@ -26,7 +26,11 @@ bundle-based install flow documented below.
 Direct CLI usage remains:
 
 ```bash
+npm login --scope=@beisel-it --auth-type=legacy --registry=https://npm.pkg.github.com
+npm install -g @beisel-it/codex-swarm --registry=https://npm.pkg.github.com
 codex-swarm install --version latest --dry-run
 codex-swarm install --version latest
 codex-swarm install --install-root ~/.local/share/codex-swarm/install --start --yes
 ```
+
+Use a GitHub identity with package read access when `npm login` prompts.

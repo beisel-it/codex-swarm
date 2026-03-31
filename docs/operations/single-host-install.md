@@ -52,7 +52,8 @@ curl -fsSL https://raw.githubusercontent.com/beisel-it/codex-swarm/main/ops/depl
 ## Install the CLI
 
 ```bash
-npm install -g codex-swarm
+npm login --scope=@beisel-it --auth-type=legacy --registry=https://npm.pkg.github.com
+npm install -g @beisel-it/codex-swarm --registry=https://npm.pkg.github.com
 ```
 
 The installed command is:
@@ -60,6 +61,9 @@ The installed command is:
 ```bash
 codex-swarm
 ```
+
+This path uses GitHub Packages. Prefer the one-command installer unless you explicitly want the CLI installed globally through the GitHub npm registry.
+Use a GitHub identity with package read access when `npm login` prompts.
 
 ## Review the installer entrypoint
 
