@@ -1,0 +1,51 @@
+<section id="top" class="hero section section--hero">
+  <div class="container hero__grid">
+    <div class="hero__copy">
+      <p class="eyebrow" data-reveal>{{ landing.hero.eyebrow }}</p>
+      <h1 class="hero__title" data-reveal>{{ landing.hero.title }}</h1>
+      <p class="hero__lede" data-reveal>{{ landing.hero.body }}</p>
+      <ul class="hero__support" data-reveal aria-label="Key delivery control-plane outcomes">
+        {% for point in landing.hero.supportingPoints %}
+          <li>{{ point }}</li>
+        {% endfor %}
+      </ul>
+      <div class="hero__actions" data-reveal>
+        <a class="button button--primary" href="{{ landing.hero.primaryCta.href }}">{{ landing.hero.primaryCta.label }}</a>
+        <a class="button button--ghost" href="{{ landing.hero.secondaryCta.href }}">{{ landing.hero.secondaryCta.label }}</a>
+      </div>
+      <div class="hero__subactions" data-reveal>
+        <a class="inline-link" href="{{ landing.hero.tertiaryCta.href }}">{{ landing.hero.tertiaryCta.label }}</a>
+      </div>
+      <ul class="proof-strip" data-reveal aria-label="Proof points">
+        {% for item in landing.hero.proofStrip %}
+          <li>{{ item }}</li>
+        {% endfor %}
+      </ul>
+    </div>
+    <div class="hero-visual" data-reveal>
+      <div class="hero-visual__field" aria-hidden="true">
+        <img class="hero-visual__art" src="{{ landing.hero.art.src }}" alt="">
+        <div class="hero-visual__orbit hero-visual__orbit--outer"></div>
+        <div class="hero-visual__orbit hero-visual__orbit--inner"></div>
+        <div class="hero-visual__node hero-visual__node--alpha"></div>
+        <div class="hero-visual__node hero-visual__node--beta"></div>
+        <div class="hero-visual__node hero-visual__node--gamma"></div>
+      </div>
+      <figure class="console-shot console-shot--hero">
+        <figcaption class="console-shot__rail">
+          <span>{{ landing.hero.screenshot.label }}</span>
+          <strong>{{ landing.hero.screenshot.caption }}</strong>
+        </figcaption>
+        <img src="{{ landing.hero.screenshot.src }}" alt="{{ landing.hero.screenshot.alt }}">
+      </figure>
+      <div class="hero-visual__legend panel-frame panel-frame--compact" data-reveal>
+        <p class="eyebrow eyebrow--compact">Operator Proof</p>
+        <ul class="hero-visual__legend-list" aria-label="Product evidence markers">
+          <li><span>07</span> shipped browser surfaces</li>
+          <li><span>06</span> operator loop phases</li>
+          <li><span>OSS</span> docs, guide, and journey included</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>

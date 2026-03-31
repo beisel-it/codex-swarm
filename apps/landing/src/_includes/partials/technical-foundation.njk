@@ -1,0 +1,33 @@
+<section id="technical-foundation" class="section section--dense section--foundation">
+  <div class="container foundation-grid">
+    <div class="section-heading" data-reveal>
+      <p class="eyebrow">{{ landing.technicalFoundation.eyebrow }}</p>
+      <h2>{{ landing.technicalFoundation.title }}</h2>
+      <p>{{ landing.technicalFoundation.intro }}</p>
+      <div class="foundation-links">
+        {% for link in landing.technicalFoundation.links %}
+          <a class="inline-link" href="{{ link.href }}">{{ link.label }}</a>
+        {% endfor %}
+      </div>
+    </div>
+    <div class="foundation-grid__stack panel-frame" data-reveal style="--reveal-order: 1;">
+      <p class="eyebrow eyebrow--compact">Stack</p>
+      <ul class="stack-tags">
+        {% for item in landing.technicalFoundation.stack %}
+          <li>{{ item }}</li>
+        {% endfor %}
+      </ul>
+      <p class="eyebrow eyebrow--compact">Repo Shape</p>
+      <ul class="module-list">
+        {% for item in landing.technicalFoundation.modules %}
+          <li>{{ item }}</li>
+        {% endfor %}
+      </ul>
+    </div>
+    <div class="foundation-grid__code panel-frame panel-frame--terminal" data-reveal style="--reveal-order: 2;">
+      <p class="eyebrow eyebrow--compact">Quick Start</p>
+      <pre><code>{% for command in landing.technicalFoundation.quickStart %}{{ command }}{% if not loop.last %}
+{% endif %}{% endfor %}</code></pre>
+    </div>
+  </div>
+</section>

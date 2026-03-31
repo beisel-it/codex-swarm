@@ -1,0 +1,32 @@
+<section id="product-surfaces" class="section section--surfaces">
+  <div class="container">
+    <div class="section-heading" data-reveal>
+      <p class="eyebrow">{{ landing.surfaces.eyebrow }}</p>
+      <h2>{{ landing.surfaces.title }}</h2>
+      <p>{{ landing.surfaces.intro }}</p>
+    </div>
+    <div class="surface-spotlights">
+      {% for item in landing.surfaces.spotlight %}
+        <figure class="console-shot console-shot--spotlight" data-reveal style="--reveal-order: {{ loop.index }};">
+          <figcaption class="console-shot__rail">
+            <span>{{ item.title }}</span>
+            <strong>{{ item.role }}</strong>
+            <p>{{ item.body }}</p>
+          </figcaption>
+          <img src="{{ item.src }}" alt="{{ item.alt }}">
+        </figure>
+      {% endfor %}
+    </div>
+    <div class="surface-gallery" aria-label="Additional product surfaces">
+      {% for item in landing.surfaces.gallery %}
+        <figure class="console-shot console-shot--gallery" data-reveal style="--reveal-order: {{ loop.index + 2 }};">
+          <figcaption class="console-shot__rail">
+            <span>{{ item.title }}</span>
+            <strong>{{ item.role }}</strong>
+          </figcaption>
+          <img src="{{ item.src }}" alt="{{ item.alt }}">
+        </figure>
+      {% endfor %}
+    </div>
+  </div>
+</section>

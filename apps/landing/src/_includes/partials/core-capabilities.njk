@@ -1,0 +1,25 @@
+<section id="core-capabilities" class="section section--capabilities">
+  <div class="container capabilities-grid">
+    <div class="section-heading" data-reveal>
+      <p class="eyebrow">{{ landing.capabilities.eyebrow }}</p>
+      <h2>{{ landing.capabilities.title }}</h2>
+      <p>{{ landing.capabilities.intro }}</p>
+    </div>
+    <div class="capabilities-grid__cards">
+      {% for item in landing.capabilities.items %}
+        <article class="panel-frame capability-card" data-reveal style="--reveal-order: {{ loop.index }};">
+          <h3>{{ item.title }}</h3>
+          <p>{{ item.body }}</p>
+        </article>
+      {% endfor %}
+    </div>
+    <div class="capabilities-ribbon panel-frame" data-reveal>
+      <p class="eyebrow eyebrow--compact">Control Surface Signals</p>
+      <ul class="signal-list">
+        {% for item in landing.capabilities.highlights %}
+          <li style="--reveal-order: {{ loop.index }};">{{ item }}</li>
+        {% endfor %}
+      </ul>
+    </div>
+  </div>
+</section>
