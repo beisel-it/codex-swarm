@@ -289,13 +289,30 @@ function shouldRenderRunContext(context?: RunExecutionContextLike | null) {
   return Object.keys(context.values ?? {}).length > 0;
 }
 
+function isWebhookExternalInput(
+  externalInput: RunExecutionContextLike["externalInput"]
+): externalInput is { kind: "webhook" } {
+  return (
+    typeof externalInput === "object" &&
+    externalInput !== null &&
+    "kind" in externalInput &&
+    externalInput.kind === "webhook"
+  );
+}
+
 export function formatRunExecutionContext(context?: RunExecutionContextLike | null) {
   if (!shouldRenderRunContext(context)) {
     return null;
   }
 
+  const webhookNote =
+    isWebhookExternalInput(context?.externalInput)
+      ? "Webhook note: inspect `run.context.externalInput.event.payload` for the full inbound payload and trigger metadata."
+      : null;
+
   return [
     "Run context:",
+    ...(webhookNote ? [webhookNote] : []),
     JSON.stringify(context, null, 2)
   ].join("\n");
 }

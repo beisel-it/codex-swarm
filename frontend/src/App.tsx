@@ -12,6 +12,7 @@ import type {
   RepeatableRunDefinitionCreateInput,
   RepeatableRunTrigger,
   RepeatableRunTriggerCreateInput,
+  RunContext,
 } from '../../packages/contracts/src/index.ts'
 import { RepeatableRunsPanel } from './repeatable-runs-panel'
 import { TaskDagGraphPanel } from './task-dag'
@@ -114,6 +115,7 @@ type Run = {
   createdBy: string
   createdAt: string
   updatedAt: string
+  context: RunContext
   metadata: Record<string, unknown>
 }
 
@@ -520,6 +522,10 @@ function formatLabel(input: string | null | undefined) {
     return 'n/a'
   }
   return input.replace(/_/g, ' ')
+}
+
+function formatJsonValue(input: unknown) {
+  return JSON.stringify(input ?? null, null, 2)
 }
 
 function buildApiUrl(path: string) {
@@ -1349,6 +1355,7 @@ function App() {
     ? data.runs.find((run) => run.id === route.runId) ?? null
     : null
   const selectedRunId = selectedRun?.id ?? null
+  const selectedRunExternalInput = selectedRun?.context.externalInput ?? null
   const isSelectedRunStartPending = selectedRun ? pendingRunStarts.includes(selectedRun.id) : false
   const selectedRepository = selectedRun
     ? data.repositories.find((repository) => repository.id === selectedRun.repositoryId) ?? null
@@ -2258,6 +2265,9 @@ function App() {
               <span>{selectedRepository?.name ?? 'No repository'}</span>
               <span>{selectedRun.branchName ?? 'No branch'}</span>
               <span className={`tone-chip tone-${toneForStatus(selectedRun.status)}`}>{formatLabel(selectedRun.status)}</span>
+              {selectedRunExternalInput?.kind === 'webhook' ? (
+                <span className="tone-chip tone-active">Webhook trigger</span>
+              ) : null}
               <span>{selectedRun.pullRequestNumber ? `PR #${selectedRun.pullRequestNumber}` : formatLabel(selectedRun.handoffStatus)}</span>
               <span>Updated {formatDate(selectedRun.updatedAt)}</span>
             </div>
@@ -3199,6 +3209,29 @@ function App() {
                   </div>
                 </article>
               </section>
+              {selectedRunExternalInput?.kind === 'webhook' ? (
+                <section className="panel split-panel">
+                  <article className="surface-card">
+                    <p className="eyebrow">External trigger</p>
+                    <h3>Webhook delivery</h3>
+                    <ul className="plain-list">
+                      <li>Trigger: {selectedRunExternalInput.trigger.name}</li>
+                      <li>Trigger id: {selectedRunExternalInput.trigger.id}</li>
+                      <li>Event id: {selectedRunExternalInput.event.eventId}</li>
+                      <li>Event name: {selectedRunExternalInput.event.eventName ?? 'n/a'}</li>
+                      <li>Action: {selectedRunExternalInput.event.action ?? 'n/a'}</li>
+                      <li>Received: {formatDate(selectedRunExternalInput.receivedAt.toString())}</li>
+                      <li>Method: {selectedRunExternalInput.event.request.method}</li>
+                      <li>Path: {selectedRunExternalInput.event.request.path}</li>
+                    </ul>
+                  </article>
+                  <article className="surface-card">
+                    <p className="eyebrow">Payload</p>
+                    <h3>Raw webhook JSON</h3>
+                    <pre className="json-card"><code>{formatJsonValue(selectedRunExternalInput.event.payload)}</code></pre>
+                  </article>
+                </section>
+              ) : null}
             </>
           )}
 

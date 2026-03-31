@@ -354,6 +354,7 @@ describe("ControlPlaneService verification lifecycle", () => {
       name: "codex-swarm",
       defaultBranch: "main"
     });
+    (service as any).areDependenciesSatisfied = async () => true;
     (service as any).loadRunProjectTeam = async () => ({
       id: "team-1",
       members: [
@@ -413,6 +414,221 @@ describe("ControlPlaneService verification lifecycle", () => {
       expect.objectContaining({ eventType: "task.verification_requested" }),
       expect.objectContaining({ entityId: "task-1", status: "requested" })
     );
+  });
+
+  it("re-requests verification for a review-blocked task from its completed worker context", async () => {
+    const now = new Date("2026-03-31T09:12:00.000Z");
+    const parentWorkerAssignment = createWorkerAssignment({
+      id: "dispatch-worker-parent",
+      taskId: "task-parent",
+      state: "completed",
+      metadata: {
+        assignmentKind: "worker",
+        workerSummary: "Independent evidence is ready for review.",
+        workerOutcomeStatus: "completed",
+        blockingIssues: []
+      }
+    });
+    const oldBlockedVerificationAssignment = createWorkerAssignment({
+      id: "dispatch-verifier-old",
+      taskId: "task-parent",
+      agentId: "verifier-agent-old",
+      state: "completed",
+      metadata: {
+        assignmentKind: "verification",
+        verificationOutcomeStatus: "blocked",
+        workerSummary: "Independent evidence is ready for review."
+      }
+    });
+    const evidenceWorkerAssignment = createWorkerAssignment({
+      id: "dispatch-worker-evidence",
+      taskId: "task-evidence",
+      agentId: "tester-agent-1",
+      state: "completed",
+      metadata: {
+        assignmentKind: "worker",
+        workerSummary: "Evidence captured.",
+        workerOutcomeStatus: "completed"
+      }
+    });
+    const taskParent = createTaskRecord({
+      id: "task-parent",
+      title: "Verify persisted payload",
+      role: "tester",
+      status: "blocked",
+      ownerAgentId: "verifier-agent-old",
+      verificationStatus: "blocked",
+      verifierAgentId: "verifier-agent-old",
+      dependencyIds: ["task-write", "task-evidence"]
+    });
+    const taskWrite = createTaskRecord({
+      id: "task-write",
+      title: "Write webhook payload",
+      status: "completed",
+      verificationStatus: "passed",
+      ownerAgentId: "worker-agent-1",
+      verifierAgentId: "verifier-agent-1",
+      dependencyIds: []
+    });
+    const taskEvidence = createTaskRecord({
+      id: "task-evidence",
+      parentTaskId: "task-parent",
+      title: "Record independent verification evidence",
+      role: "tester",
+      status: "completed",
+      verificationStatus: "passed",
+      ownerAgentId: "tester-agent-1",
+      verifierAgentId: "reviewer-agent-1",
+      dependencyIds: ["task-write"]
+    });
+    const agentStore: Array<Record<string, unknown>> = [
+      {
+        id: "worker-agent-1",
+        status: "stopped",
+        currentTaskId: null,
+        updatedAt: now
+      }
+    ];
+    const assignmentStore: Array<Record<string, unknown>> = [
+      parentWorkerAssignment,
+      oldBlockedVerificationAssignment,
+      evidenceWorkerAssignment
+    ];
+    const db = new FakeRepairDb(
+      [],
+      assignmentStore,
+      agentStore,
+      [taskParent, taskWrite, taskEvidence],
+      []
+    );
+    const service = new ControlPlaneService(db as never, {
+      now: () => now
+    });
+    const createAgent = vi.fn(async (input: Record<string, unknown>) => {
+      const agent = {
+        id: "verifier-agent-retry",
+        runId: "run-1",
+        name: input.name,
+        role: input.role,
+        profile: input.profile,
+        status: "idle",
+        projectTeamMemberId: input.projectTeamMemberId ?? null,
+        worktreePath: input.worktreePath ?? null,
+        branchName: input.branchName ?? null,
+        currentTaskId: input.currentTaskId ?? null,
+        updatedAt: now,
+        createdAt: now
+      };
+      agentStore.push(agent);
+      return agent;
+    });
+    const createWorkerDispatchAssignment = vi.fn(async (input: Record<string, unknown>) => {
+      const assignment = {
+        id: "dispatch-verifier-retry",
+        ...input,
+        sessionId: undefined,
+        state: "queued",
+        claimedByNodeId: null,
+        stickyNodeId: null,
+        preferredNodeId: null,
+        attempt: 0,
+        createdAt: now,
+        updatedAt: now
+      };
+      assignmentStore.push(assignment);
+      return assignment;
+    });
+    const recordControlPlaneEvent = vi.fn(async () => undefined);
+
+    (service as any).getRun = async () => ({
+      id: "run-1",
+      repositoryId: "repo-1",
+      projectTeamId: "team-1",
+      branchName: "main",
+      goal: "Retry blocked verification after evidence is recorded",
+      context: {
+        externalInput: null,
+        values: {}
+      },
+      agents: [
+        {
+          id: "worker-agent-1",
+          role: "backend-developer",
+          profile: "backend-developer",
+          projectTeamMemberId: "member-backend-1"
+        }
+      ]
+    });
+    (service as any).assertRepositoryExists = async () => ({
+      id: "repo-1",
+      name: "codex-swarm",
+      defaultBranch: "main"
+    });
+    (service as any).loadRunProjectTeam = async () => ({
+      id: "team-1",
+      members: [
+        {
+          id: "member-reviewer-1",
+          name: "Verifier",
+          role: "reviewer",
+          profile: "reviewer",
+          position: 0
+        }
+      ]
+    });
+    (service as any).createAgent = createAgent;
+    (service as any).createWorkerDispatchAssignment = createWorkerDispatchAssignment;
+    (service as any).recordControlPlaneEvent = recordControlPlaneEvent;
+
+    await expect((service as any).retryBlockedVerificationTask("run-1", taskParent)).resolves.toBe(true);
+
+    expect(taskParent.status).toBe("awaiting_review");
+    expect(taskParent.verificationStatus).toBe("requested");
+    expect(taskParent.verifierAgentId).toBe("verifier-agent-retry");
+    expect(taskParent.latestVerificationSummary).toContain("Verification requested after worker completion");
+    expect(createWorkerDispatchAssignment).toHaveBeenCalledWith(expect.objectContaining({
+      taskId: "task-parent",
+      metadata: expect.objectContaining({
+        assignmentKind: "verification",
+        workerAssignmentId: "dispatch-worker-parent",
+        workerSummary: "Independent evidence is ready for review."
+      })
+    }));
+    expect(recordControlPlaneEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ eventType: "task.verification_requested" }),
+      expect.objectContaining({ entityId: "task-parent", status: "requested" })
+    );
+  });
+
+  it("routes a dependency-ready review-blocked task into the verification retry helper", async () => {
+    const service = new ControlPlaneService({} as never, {
+      now: () => new Date("2026-03-31T09:13:00.000Z")
+    });
+    const retryBlockedVerificationTask = vi.fn(async () => true);
+
+    (service as any).db = {
+      select: () => ({
+        from: () => ({
+          where: () => Promise.resolve([
+            createTaskRecord({
+              id: "task-parent",
+              status: "blocked",
+              verificationStatus: "blocked",
+              dependencyIds: ["task-child"]
+            })
+          ])
+        })
+      })
+    };
+    (service as any).areDependenciesSatisfied = async () => true;
+    (service as any).retryBlockedVerificationTask = retryBlockedVerificationTask;
+
+    await (service as any).maybeUnblockDependentTasks("run-1", "task-child", "completed");
+
+    expect(retryBlockedVerificationTask).toHaveBeenCalledWith("run-1", expect.objectContaining({
+      id: "task-parent",
+      verificationStatus: "blocked"
+    }));
   });
 
   it("falls back to a second same-role verifier when no review role is available", async () => {
@@ -961,6 +1177,76 @@ describe("ControlPlaneService verification lifecycle", () => {
       state: "pending",
       workerNodeId: null,
       staleReason: "task_not_runnable"
+    });
+  });
+
+  it("keeps a review task in awaiting_review when a newer verification retry exists", async () => {
+    const now = new Date("2026-03-31T09:42:00.000Z");
+    const db = new FakeRepairDb(
+      [
+        {
+          id: "run-1",
+          status: "in_progress"
+        }
+      ],
+      [
+        createWorkerAssignment({
+          id: "dispatch-verifier-old",
+          taskId: "task-review",
+          agentId: "verifier-agent-old",
+          state: "completed",
+          metadata: {
+            assignmentKind: "verification",
+            verificationOutcomeStatus: "blocked"
+          },
+          createdAt: new Date("2026-03-31T09:40:00.000Z"),
+          updatedAt: new Date("2026-03-31T09:40:00.000Z")
+        }),
+        createWorkerAssignment({
+          id: "dispatch-verifier-retry",
+          taskId: "task-review",
+          agentId: "verifier-agent-new",
+          state: "queued",
+          metadata: {
+            assignmentKind: "verification",
+            workerSummary: "Retry verification with recorded evidence."
+          },
+          createdAt: new Date("2026-03-31T09:41:00.000Z"),
+          updatedAt: new Date("2026-03-31T09:41:00.000Z")
+        })
+      ],
+      [
+        {
+          id: "verifier-agent-new",
+          status: "idle",
+          currentTaskId: "task-review",
+          updatedAt: now
+        }
+      ],
+      [
+        createTaskRecord({
+          id: "task-review",
+          status: "awaiting_review",
+          role: "tester",
+          ownerAgentId: "worker-agent-1",
+          verificationStatus: "requested",
+          verifierAgentId: "verifier-agent-new",
+          dependencyIds: []
+        })
+      ],
+      []
+    );
+    const service = new ControlPlaneService(db as never, {
+      now: () => now
+    });
+    (service as any).recordControlPlaneEvent = async () => undefined;
+
+    await (service as any).repairRunStateFromDispatchAssignments("run-1");
+
+    expect(db.taskStore[0]).toMatchObject({
+      status: "awaiting_review",
+      verificationStatus: "requested",
+      verifierAgentId: "verifier-agent-new"
     });
   });
 });

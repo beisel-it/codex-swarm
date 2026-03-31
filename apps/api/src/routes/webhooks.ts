@@ -1,6 +1,8 @@
+import type { ActorIdentity } from "@codex-swarm/contracts";
 import type { FastifyPluginAsync } from "fastify";
 
 import { controlPlaneEvents, timelineEvent } from "../lib/control-plane-events.js";
+import { startRunNow } from "../lib/start-run.js";
 
 function normalizeHeaders(headers: Record<string, string | string[] | undefined>) {
   return Object.fromEntries(Object.entries(headers).flatMap(([key, value]) => {
@@ -71,6 +73,14 @@ export const webhookRoutes: FastifyPluginAsync = async (app) => {
         });
 
         if (result.run) {
+          const webhookAuthContext: ActorIdentity = {
+            ...request.authContext,
+            workspaceId: result.receipt.workspaceId,
+            workspaceName: request.authContext.workspaceName ?? null,
+            teamId: result.receipt.teamId,
+            teamName: request.authContext.teamName ?? null
+          };
+
           await app.observability.recordTimelineEvent(timelineEvent(controlPlaneEvents.runCreated, {
             runId: result.run.id,
             entityId: result.run.id,
@@ -81,6 +91,19 @@ export const webhookRoutes: FastifyPluginAsync = async (app) => {
               repeatableRunId: result.receipt.repeatableRunId
             }
           }));
+
+          void startRunNow(app, {
+            authContext: webhookAuthContext,
+            runId: result.run.id,
+            startedFrom: `webhook trigger ${result.receipt.repeatableRunTriggerId}`
+          }).catch((error) => {
+            request.log.error({
+              err: error,
+              runId: result.run?.id,
+              receiptId: result.receipt.id,
+              triggerId: result.receipt.repeatableRunTriggerId
+            }, "failed to auto-start webhook-created run");
+          });
         }
 
         return reply.code(202).send({
