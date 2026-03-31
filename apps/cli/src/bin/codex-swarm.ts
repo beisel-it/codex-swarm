@@ -1,7 +1,18 @@
 #!/usr/bin/env node
 
 import { spawn } from "node:child_process";
-import { access, constants, mkdir, mkdtemp, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
+import {
+  access,
+  cp,
+  constants,
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  rename,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { createInterface } from "node:readline/promises";
@@ -361,11 +372,17 @@ async function runInstall(options: InstallOptions) {
 }
 
 async function downloadReleaseBundle(version: string | null) {
-  const releaseInfo = version
-    ? await fetchReleaseByTag(`codex-swarm@${version}`)
-    : await fetchLatestRelease();
-  const asset = (releaseInfo.assets as Array<{ name: string; browser_download_url: string }>).find((candidate) =>
-    candidate.name.startsWith(RELEASE_BUNDLE_ASSET_PREFIX) && candidate.name.endsWith(".tar.gz")
+  const normalizedVersion = version?.trim().toLowerCase() ?? null;
+  const releaseInfo =
+    normalizedVersion === null || normalizedVersion === "latest"
+      ? await fetchLatestRelease()
+      : await fetchReleaseByTag(`codex-swarm@${version}`);
+  const asset = (
+    releaseInfo.assets as Array<{ name: string; browser_download_url: string }>
+  ).find(
+    (candidate) =>
+      candidate.name.startsWith(RELEASE_BUNDLE_ASSET_PREFIX) &&
+      candidate.name.endsWith(".tar.gz"),
   );
 
   if (!asset) {
@@ -421,22 +438,34 @@ async function fetchReleaseByTag(tag: string) {
 
 async function installBundle(bundlePath: string, installRoot: string) {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "codex-swarm-install-"));
-  await runShellCommand("tar", ["-xzf", bundlePath, "-C", tempDir], {
-    cwd: process.cwd(),
-    dryRun: false,
-    label: "extract release bundle"
-  });
-  const entries = await readDirNames(tempDir);
-
-  if (entries.length !== 1) {
-    throw new Error(`Expected a single top-level directory in ${bundlePath}, found ${entries.length}`);
-  }
-
-  const extractedRoot = path.join(tempDir, entries[0]!);
-  await rm(installRoot, { recursive: true, force: true });
   await mkdir(path.dirname(installRoot), { recursive: true });
-  await rename(extractedRoot, installRoot);
-  await rm(tempDir, { recursive: true, force: true });
+  const stagingRoot = await mkdtemp(
+    path.join(path.dirname(installRoot), "codex-swarm-install-"),
+  );
+  const nextInstallRoot = path.join(stagingRoot, "bundle");
+
+  try {
+    await runShellCommand("tar", ["-xzf", bundlePath, "-C", tempDir], {
+      cwd: process.cwd(),
+      dryRun: false,
+      label: "extract release bundle",
+    });
+    const entries = await readDirNames(tempDir);
+
+    if (entries.length !== 1) {
+      throw new Error(
+        `Expected a single top-level directory in ${bundlePath}, found ${entries.length}`,
+      );
+    }
+
+    const extractedRoot = path.join(tempDir, entries[0]!);
+    await cp(extractedRoot, nextInstallRoot, { recursive: true });
+    await rm(installRoot, { recursive: true, force: true });
+    await rename(nextInstallRoot, installRoot);
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+    await rm(stagingRoot, { recursive: true, force: true });
+  }
 }
 
 async function runServiceCommand(group: string, argv: string[]) {
