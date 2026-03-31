@@ -12,8 +12,10 @@ import type {
 import {
   buildVerifierTaskExecutionPrompt,
   buildWorkerTaskExecutionPrompt,
+  type VerifierTaskOutcome,
   parseVerifierTaskOutcome,
-  parseWorkerTaskOutcome
+  parseWorkerTaskOutcome,
+  type WorkerTaskOutcome
 } from "@codex-swarm/orchestration";
 import {
   cleanupWorktreePaths,
@@ -270,6 +272,78 @@ async function publishWorkerOutcomeMessages(
       }
     }
   }
+}
+
+async function runLeaderResliceLoopSafely(
+  request: WorkerDispatchOrchestrationRequest,
+  runDetail: RunDetail,
+  assignment: WorkerDispatchAssignment,
+  workerOutcome: WorkerTaskOutcome,
+  executeTool: CodexToolExecutor,
+  supervisorCommand?: string[]
+) {
+  try {
+    await runLeaderResliceLoop({
+      request,
+      runId: assignment.runId,
+      parentTaskId: assignment.taskId!,
+      actorId: assignment.agentId,
+      workerOutcome,
+      executeTool,
+      ...(supervisorCommand ? { supervisorCommand } : {})
+    })
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error)
+    const leaderAgent = runDetail.agents.find((agent) => agent.role === "tech-lead" && agent.id !== assignment.agentId) ?? null
+    const body = `Leader follow-up planning failed after ${assignment.metadata?.assignmentKind === "verification" ? "verification" : "worker"} outcome: ${detail}`
+
+    await postRunMessage(request, {
+      runId: assignment.runId,
+      senderAgentId: assignment.agentId,
+      ...(leaderAgent ? { recipientAgentId: leaderAgent.id, kind: "direct" as const } : { kind: "system" as const }),
+      body
+    })
+  }
+}
+
+function toLeaderResliceOutcomeFromVerification(outcome: VerifierTaskOutcome): WorkerTaskOutcome | null {
+  if (outcome.status === "passed") {
+    return null;
+  }
+
+  if (outcome.status === "blocked") {
+    const hasActionableBlocker = outcome.blockingIssues.length > 0 || outcome.messages.length > 0;
+
+    if (!hasActionableBlocker) {
+      return null;
+    }
+
+    return {
+      summary: outcome.summary,
+      status: "blocked",
+      blockerKind: "actionable",
+      messages: outcome.messages,
+      blockingIssues: outcome.blockingIssues,
+      ...(outcome.artifacts ? { artifacts: outcome.artifacts } : {})
+    };
+  }
+
+  const hasReworkSignal = outcome.changeRequests.length > 0 || outcome.findings.length > 0;
+
+  if (!hasReworkSignal) {
+    return null;
+  }
+
+  return {
+    summary: outcome.summary,
+    status: "needs_slicing",
+    messages: outcome.messages,
+    blockingIssues: [
+      ...outcome.changeRequests,
+      ...outcome.findings
+    ],
+    ...(outcome.artifacts ? { artifacts: outcome.artifacts } : {})
+  };
 }
 
 async function failAssignment(
@@ -632,6 +706,7 @@ export async function runManagedWorkerDispatch(
     if (responseOutput && assignment.taskId) {
       if (assignmentKind === "verification") {
         const outcome = parseVerifierTaskOutcome(responseOutput);
+        const leaderOutcome = toLeaderResliceOutcomeFromVerification(outcome);
 
         await recordWorkerOutcomeArtifacts(
           input.request,
@@ -668,6 +743,17 @@ export async function runManagedWorkerDispatch(
             ]
           }
         };
+
+        if (leaderOutcome) {
+          await runLeaderResliceLoopSafely(
+            input.request,
+            runDetail,
+            assignment,
+            leaderOutcome,
+            input.executeTool,
+            input.supervisorCommand
+          );
+        }
       } else {
         const outcome = parseWorkerTaskOutcome(responseOutput);
         const synchronizedBranchName = await synchronizeRunBranchContext(input.request, runDetail, workspace.path);
@@ -697,15 +783,14 @@ export async function runManagedWorkerDispatch(
         );
 
         if (outcome.status === "needs_slicing" || (outcome.status === "blocked" && outcome.blockerKind === "actionable")) {
-          await runLeaderResliceLoop({
-            request: input.request,
-            runId: assignment.runId,
-            parentTaskId: assignment.taskId,
-            actorId: assignment.agentId,
-            workerOutcome: outcome,
-            executeTool: input.executeTool,
-            ...(input.supervisorCommand ? { supervisorCommand: input.supervisorCommand } : {})
-          });
+          await runLeaderResliceLoopSafely(
+            input.request,
+            runDetail,
+            assignment,
+            outcome,
+            input.executeTool,
+            input.supervisorCommand
+          );
         }
 
         completionPayload = {
