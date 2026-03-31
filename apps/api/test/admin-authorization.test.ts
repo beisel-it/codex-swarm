@@ -6,11 +6,11 @@ import { buildApp } from "../src/app.js";
 describe("admin authorization", () => {
   it("rejects admin retention writes for non-admin roles with deterministic details", async () => {
     const controlPlane = {
-      reconcileGovernanceRetention: vi.fn()
+      reconcileGovernanceRetention: vi.fn(),
     };
 
     const app = await buildApp({
-      controlPlane: controlPlane as unknown as ControlPlaneService
+      controlPlane: controlPlane as unknown as ControlPlaneService,
     });
 
     const response = await app.inject({
@@ -19,11 +19,11 @@ describe("admin authorization", () => {
       headers: {
         authorization: "Bearer codex-swarm-dev-token",
         "x-codex-role": "member",
-        "x-codex-roles": "member"
+        "x-codex-roles": "member",
       },
       payload: {
-        dryRun: true
-      }
+        dryRun: true,
+      },
     });
 
     expect(response.statusCode).toBe(403);
@@ -33,8 +33,8 @@ describe("admin authorization", () => {
         action: "admin.write",
         roles: ["member"],
         workspaceId: "default-workspace",
-        teamId: "codex-swarm"
-      }
+        teamId: "codex-swarm",
+      },
     });
     expect(controlPlane.reconcileGovernanceRetention).not.toHaveBeenCalled();
 

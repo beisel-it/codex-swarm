@@ -1,15 +1,23 @@
 import { once } from "node:events";
-import { spawn, type ChildProcess, type SpawnOptions } from "node:child_process";
+import {
+  spawn,
+  type ChildProcess,
+  type SpawnOptions,
+} from "node:child_process";
 
 import type {
   Artifact,
   RunDetail,
   Task,
-  Validation
+  Validation,
 } from "@codex-swarm/contracts";
 
 export interface WorkerControlPlaneRequest {
-  <T>(method: string, path: string, payload?: Record<string, unknown>): Promise<T>;
+  <T>(
+    method: string,
+    path: string,
+    payload?: Record<string, unknown>,
+  ): Promise<T>;
 }
 
 export interface ValidationCommandExecutionResult {
@@ -47,7 +55,7 @@ export interface ExecuteTaskValidationTemplateInput {
   spawnImpl?: (
     command: string,
     args: readonly string[],
-    options: SpawnOptions
+    options: SpawnOptions,
   ) => ChildProcess;
   now?: () => Date;
 }
@@ -80,7 +88,11 @@ function getFallbackArtifactPath(taskId: string, templateName: string) {
   return `.swarm/validations/${taskId}/${templateName}.json`;
 }
 
-function createValidationSummary(template: ValidationTemplate, status: "passed" | "failed", exitCode: number) {
+function createValidationSummary(
+  template: ValidationTemplate,
+  status: "passed" | "failed",
+  exitCode: number,
+) {
   if (template.summary) {
     return template.summary;
   }
@@ -99,10 +111,14 @@ function resolveTask(runDetail: RunDetail, taskId: string) {
 }
 
 function resolveValidationTemplate(task: Task, templateName: string) {
-  const template = task.validationTemplates.find((candidate) => candidate.name === templateName);
+  const template = task.validationTemplates.find(
+    (candidate) => candidate.name === templateName,
+  );
 
   if (!template) {
-    throw new Error(`validation template ${templateName} was not found on task ${task.id}`);
+    throw new Error(
+      `validation template ${templateName} was not found on task ${task.id}`,
+    );
   }
 
   return template;
@@ -117,9 +133,9 @@ export async function executeValidationCommand(
     spawnImpl?: (
       command: string,
       args: readonly string[],
-      options: SpawnOptions
+      options: SpawnOptions,
     ) => ChildProcess;
-  }
+  },
 ): Promise<ValidationCommandExecutionResult> {
   const shell = options.shell ?? getDefaultShell();
   const args = getShellArgs(shell, command);
@@ -127,7 +143,7 @@ export async function executeValidationCommand(
   const child = spawnImpl(shell, args, {
     cwd: options.cwd,
     env: options.env,
-    stdio: ["ignore", "pipe", "pipe"]
+    stdio: ["ignore", "pipe", "pipe"],
   });
 
   let stdout = "";
@@ -142,19 +158,24 @@ export async function executeValidationCommand(
     stderr += String(chunk);
   });
 
-  const [code] = await once(child, "exit") as [number | null, NodeJS.Signals | null];
+  const [code] = (await once(child, "exit")) as [
+    number | null,
+    NodeJS.Signals | null,
+  ];
 
   return {
     exitCode: code ?? 1,
     stdout,
-    stderr
+    stderr,
   };
 }
 
 export async function executeTaskValidationTemplate(
-  input: ExecuteTaskValidationTemplateInput
+  input: ExecuteTaskValidationTemplateInput,
 ): Promise<ExecutedTaskValidationTemplate> {
-  const runDetail = input.runDetail ?? await input.request<RunDetail>("GET", `/api/v1/runs/${input.runId}`);
+  const runDetail =
+    input.runDetail ??
+    (await input.request<RunDetail>("GET", `/api/v1/runs/${input.runId}`));
   const task = resolveTask(runDetail, input.taskId);
   const template = resolveValidationTemplate(task, input.templateName);
   const now = input.now ?? (() => new Date());
@@ -163,11 +184,12 @@ export async function executeTaskValidationTemplate(
     cwd: input.cwd,
     ...(input.env ? { env: input.env } : {}),
     ...(input.shell ? { shell: input.shell } : {}),
-    ...(input.spawnImpl ? { spawnImpl: input.spawnImpl } : {})
+    ...(input.spawnImpl ? { spawnImpl: input.spawnImpl } : {}),
   });
   const completedAt = now();
   const status = commandResult.exitCode === 0 ? "passed" : "failed";
-  const artifactPath = template.artifactPath ?? getFallbackArtifactPath(task.id, template.name);
+  const artifactPath =
+    template.artifactPath ?? getFallbackArtifactPath(task.id, template.name);
   const report: ValidationExecutionReport = {
     runId: input.runId,
     taskId: task.id,
@@ -180,26 +202,25 @@ export async function executeTaskValidationTemplate(
     durationMs: completedAt.getTime() - startedAt.getTime(),
     exitCode: commandResult.exitCode,
     stdout: commandResult.stdout,
-    stderr: commandResult.stderr
+    stderr: commandResult.stderr,
   };
 
-  const artifact = await input.request<Artifact>(
-    "POST",
-    "/api/v1/artifacts",
-    {
-      runId: input.runId,
-      taskId: task.id,
-      kind: "report",
-      path: artifactPath,
-      contentType: "application/json",
-      contentBase64: Buffer.from(JSON.stringify(report, null, 2), "utf8").toString("base64"),
-      metadata: {
-        validationTemplate: template.name,
-        validationStatus: status,
-        exitCode: commandResult.exitCode
-      }
-    }
-  );
+  const artifact = await input.request<Artifact>("POST", "/api/v1/artifacts", {
+    runId: input.runId,
+    taskId: task.id,
+    kind: "report",
+    path: artifactPath,
+    contentType: "application/json",
+    contentBase64: Buffer.from(
+      JSON.stringify(report, null, 2),
+      "utf8",
+    ).toString("base64"),
+    metadata: {
+      validationTemplate: template.name,
+      validationStatus: status,
+      exitCode: commandResult.exitCode,
+    },
+  });
 
   const validation = await input.request<Validation>(
     "POST",
@@ -209,10 +230,14 @@ export async function executeTaskValidationTemplate(
       taskId: task.id,
       templateName: template.name,
       status,
-      summary: createValidationSummary(template, status, commandResult.exitCode),
+      summary: createValidationSummary(
+        template,
+        status,
+        commandResult.exitCode,
+      ),
       artifactPath,
-      artifactIds: [artifact.id]
-    }
+      artifactIds: [artifact.id],
+    },
   );
 
   return {
@@ -220,6 +245,6 @@ export async function executeTaskValidationTemplate(
     template,
     artifact,
     validation,
-    report
+    report,
   };
 }

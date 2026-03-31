@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import type { WorkerDispatchAssignment, WorkerNodeRuntime } from "@codex-swarm/contracts";
+import type {
+  WorkerDispatchAssignment,
+  WorkerNodeRuntime,
+} from "@codex-swarm/contracts";
 
 import {
   buildRedisDispatchQueueKeys,
@@ -10,7 +13,7 @@ import {
   deserializeDispatchAssignment,
   evaluateWorkerRuntimeDependencies,
   RedisDispatchQueue,
-  serializeDispatchAssignment
+  serializeDispatchAssignment,
 } from "../src/dispatch.js";
 
 class InMemoryRedisDispatchClient {
@@ -31,7 +34,7 @@ class InMemoryRedisDispatchClient {
 
   async blPop(
     key: string,
-    _timeoutSeconds: number
+    _timeoutSeconds: number,
   ): Promise<{ key: string; element: string } | null> {
     const list = this.ensureList(key);
     const element = list.shift();
@@ -85,7 +88,9 @@ class InMemoryRedisDispatchClient {
   }
 }
 
-function createAssignment(overrides: Partial<WorkerDispatchAssignment> = {}): WorkerDispatchAssignment {
+function createAssignment(
+  overrides: Partial<WorkerDispatchAssignment> = {},
+): WorkerDispatchAssignment {
   return {
     id: "550e8400-e29b-41d4-a716-446655440010",
     runId: "550e8400-e29b-41d4-a716-446655440001",
@@ -111,11 +116,13 @@ function createAssignment(overrides: Partial<WorkerDispatchAssignment> = {}): Wo
     maxAttempts: 3,
     leaseTtlSeconds: 300,
     createdAt: new Date("2026-03-28T12:00:00.000Z"),
-    ...overrides
+    ...overrides,
   };
 }
 
-function createRuntime(overrides: Partial<WorkerNodeRuntime> = {}): WorkerNodeRuntime {
+function createRuntime(
+  overrides: Partial<WorkerNodeRuntime> = {},
+): WorkerNodeRuntime {
   return {
     nodeId: "node-a",
     nodeName: "node-a",
@@ -126,9 +133,9 @@ function createRuntime(overrides: Partial<WorkerNodeRuntime> = {}): WorkerNodeRu
       kind: "streamable_http",
       url: "https://codex-mcp.internal/mcp",
       headers: {
-        authorization: "Bearer shared-token"
+        authorization: "Bearer shared-token",
       },
-      protocolVersion: "2025-11-25"
+      protocolVersion: "2025-11-25",
     },
     controlPlaneUrl: "https://control-plane.internal",
     postgresUrl: "postgres://postgres:postgres@db.internal:5432/codex",
@@ -137,7 +144,7 @@ function createRuntime(overrides: Partial<WorkerNodeRuntime> = {}): WorkerNodeRu
     capabilities: ["default", "remote"],
     credentialEnvNames: ["OPENAI_API_KEY"],
     heartbeatIntervalSeconds: 30,
-    ...overrides
+    ...overrides,
   };
 }
 
@@ -147,14 +154,16 @@ describe("dispatch helpers", () => {
       pending: "codex-swarm:worker-dispatch:pending",
       inflight: "codex-swarm:worker-dispatch:inflight",
       leases: "codex-swarm:worker-dispatch:leases",
-      nodeState: "codex-swarm:worker-dispatch:node-state"
+      nodeState: "codex-swarm:worker-dispatch:node-state",
     });
   });
 
   it("round-trips dispatch assignments through serialization", () => {
     const assignment = createAssignment();
 
-    expect(deserializeDispatchAssignment(serializeDispatchAssignment(assignment))).toEqual(assignment);
+    expect(
+      deserializeDispatchAssignment(serializeDispatchAssignment(assignment)),
+    ).toEqual(assignment);
   });
 
   it("evaluates runtime dependencies and emits bootstrap environment", () => {
@@ -170,25 +179,28 @@ describe("dispatch helpers", () => {
       CODEX_SWARM_MCP_SERVER_URL: "https://codex-mcp.internal/mcp",
       CODEX_SWARM_MCP_PROTOCOL_VERSION: "2025-11-25",
       CODEX_SWARM_DISPATCH_ID: dispatch.id,
-      CODEX_SWARM_AGENT_ID: dispatch.agentId
+      CODEX_SWARM_AGENT_ID: dispatch.agentId,
     });
     expect(bootstrap.checks).toContainEqual({
       name: "artifact_store",
       status: "missing",
-      detail: "artifactBaseUrl is required for remote workers because artifacts must remain accessible across nodes"
+      detail:
+        "artifactBaseUrl is required for remote workers because artifacts must remain accessible across nodes",
     });
     expect(bootstrap.checks).toContainEqual({
       name: "codex_cli",
       status: "ready",
-      detail: "streamable HTTP transport via https://codex-mcp.internal/mcp"
+      detail: "streamable HTTP transport via https://codex-mcp.internal/mcp",
     });
-    expect(evaluateWorkerRuntimeDependencies(runtime).map((check) => check.name)).toEqual([
+    expect(
+      evaluateWorkerRuntimeDependencies(runtime).map((check) => check.name),
+    ).toEqual([
       "control_plane",
       "postgres",
       "redis",
       "artifact_store",
       "codex_cli",
-      "workspace_root"
+      "workspace_root",
     ]);
   });
 
@@ -196,14 +208,15 @@ describe("dispatch helpers", () => {
     const runtime = createRuntime({
       capabilities: ["default"],
       codexTransport: {
-        kind: "stdio"
-      }
+        kind: "stdio",
+      },
     });
 
     expect(evaluateWorkerRuntimeDependencies(runtime)).toContainEqual({
       name: "artifact_store",
       status: "degraded",
-      detail: "artifactBaseUrl not configured; single-host workers can fall back to local artifact access"
+      detail:
+        "artifactBaseUrl not configured; single-host workers can fall back to local artifact access",
     });
   });
 
@@ -211,19 +224,24 @@ describe("dispatch helpers", () => {
     expect(canNodeAcceptDispatch("active")).toBe(true);
     expect(canNodeAcceptDispatch("draining")).toBe(false);
 
-    expect(buildWorkerDrainStatus({
-      nodeId: "node-a",
-      targetState: "draining",
-      reason: "maintenance window",
-      allowActiveAssignments: true
-    }, "active")).toEqual({
+    expect(
+      buildWorkerDrainStatus(
+        {
+          nodeId: "node-a",
+          targetState: "draining",
+          reason: "maintenance window",
+          allowActiveAssignments: true,
+        },
+        "active",
+      ),
+    ).toEqual({
       nodeId: "node-a",
       previousState: "active",
       targetState: "draining",
       shouldAcceptAssignments: false,
       shouldKeepHeartbeats: true,
       requiresRedisPause: true,
-      reason: "maintenance window"
+      reason: "maintenance window",
     });
   });
 });
@@ -239,12 +257,16 @@ describe("RedisDispatchQueue", () => {
 
     const claimed = await queue.claim({
       nodeId: "node-a",
-      timeoutSeconds: 0
+      timeoutSeconds: 0,
     });
 
     expect(claimed).toEqual(assignment);
-    expect(client.getHashValue(keys.inflight, assignment.id)).toBe(serializeDispatchAssignment(assignment));
-    expect(client.getHashValue(keys.leases, assignment.id)).toContain("\"nodeId\":\"node-a\"");
+    expect(client.getHashValue(keys.inflight, assignment.id)).toBe(
+      serializeDispatchAssignment(assignment),
+    );
+    expect(client.getHashValue(keys.leases, assignment.id)).toContain(
+      '"nodeId":"node-a"',
+    );
   });
 
   it("does not claim work while the node is draining", async () => {
@@ -255,7 +277,9 @@ describe("RedisDispatchQueue", () => {
     await queue.enqueue(assignment);
     await queue.setNodeState("node-a", "draining");
 
-    await expect(queue.claim({ nodeId: "node-a", timeoutSeconds: 0 })).resolves.toBeNull();
+    await expect(
+      queue.claim({ nodeId: "node-a", timeoutSeconds: 0 }),
+    ).resolves.toBeNull();
   });
 
   it("requeues assignments with retry metadata and clears inflight state", async () => {
@@ -269,24 +293,24 @@ describe("RedisDispatchQueue", () => {
 
     const retried = await queue.requeue({
       assignment,
-      reason: "worker lost heartbeat"
+      reason: "worker lost heartbeat",
     });
 
     expect(retried).toMatchObject({
       state: "retrying",
       attempt: 1,
       metadata: {
-        requeueReason: "worker lost heartbeat"
-      }
+        requeueReason: "worker lost heartbeat",
+      },
     });
     expect(client.getHashValue(keys.inflight, assignment.id)).toBeUndefined();
     expect(client.getHashValue(keys.leases, assignment.id)).toBeUndefined();
     expect(client.getList(keys.pending)).toHaveLength(1);
     expect(
-      deserializeDispatchAssignment(client.getList(keys.pending)[0] ?? "")
+      deserializeDispatchAssignment(client.getList(keys.pending)[0] ?? ""),
     ).toMatchObject({
       state: "retrying",
-      attempt: 1
+      attempt: 1,
     });
   });
 });

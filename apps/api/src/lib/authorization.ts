@@ -2,31 +2,76 @@ import type {
   ActorIdentity,
   GovernedAction,
   GovernanceRole,
-  RunStatusUpdateInput
+  RunStatusUpdateInput,
 } from "@codex-swarm/contracts";
 
 import { HttpError } from "./http-error.js";
 
 const permissionMatrix: Record<GovernanceRole, GovernedAction[]> = {
-  org_admin: ["run.create", "run.review", "run.retry", "run.stop", "approval.request", "approval.resolve", "admin.read", "admin.write"],
-  workspace_admin: ["run.create", "run.review", "run.retry", "run.stop", "approval.request", "approval.resolve", "admin.read", "admin.write"],
-  team_admin: ["run.create", "run.review", "run.retry", "run.stop", "approval.request", "approval.resolve", "admin.read"],
+  org_admin: [
+    "run.create",
+    "run.review",
+    "run.retry",
+    "run.stop",
+    "approval.request",
+    "approval.resolve",
+    "admin.read",
+    "admin.write",
+  ],
+  workspace_admin: [
+    "run.create",
+    "run.review",
+    "run.retry",
+    "run.stop",
+    "approval.request",
+    "approval.resolve",
+    "admin.read",
+    "admin.write",
+  ],
+  team_admin: [
+    "run.create",
+    "run.review",
+    "run.retry",
+    "run.stop",
+    "approval.request",
+    "approval.resolve",
+    "admin.read",
+  ],
   member: ["run.create", "approval.request"],
   reviewer: ["run.review", "approval.resolve"],
   operator: ["run.retry", "run.stop"],
   service: [],
-  system: ["run.create", "run.review", "run.retry", "run.stop", "approval.request", "approval.resolve", "admin.read", "admin.write"]
+  system: [
+    "run.create",
+    "run.review",
+    "run.retry",
+    "run.stop",
+    "approval.request",
+    "approval.resolve",
+    "admin.read",
+    "admin.write",
+  ],
 };
 
-export function getActorRoles(actor: Pick<ActorIdentity, "role" | "roles">): GovernanceRole[] {
+export function getActorRoles(
+  actor: Pick<ActorIdentity, "role" | "roles">,
+): GovernanceRole[] {
   return [...new Set([actor.role, ...actor.roles])] as GovernanceRole[];
 }
 
-export function canActorPerformAction(actor: Pick<ActorIdentity, "role" | "roles">, action: GovernedAction) {
-  return getActorRoles(actor).some((role) => permissionMatrix[role]?.includes(action));
+export function canActorPerformAction(
+  actor: Pick<ActorIdentity, "role" | "roles">,
+  action: GovernedAction,
+) {
+  return getActorRoles(actor).some((role) =>
+    permissionMatrix[role]?.includes(action),
+  );
 }
 
-export function requireAuthorizedAction(actor: Pick<ActorIdentity, "role" | "roles" | "workspaceId" | "teamId">, action: GovernedAction) {
+export function requireAuthorizedAction(
+  actor: Pick<ActorIdentity, "role" | "roles" | "workspaceId" | "teamId">,
+  action: GovernedAction,
+) {
   if (canActorPerformAction(actor, action)) {
     return;
   }
@@ -35,11 +80,13 @@ export function requireAuthorizedAction(actor: Pick<ActorIdentity, "role" | "rol
     action,
     roles: getActorRoles(actor),
     workspaceId: actor.workspaceId ?? null,
-    teamId: actor.teamId ?? null
+    teamId: actor.teamId ?? null,
   });
 }
 
-export function resolveRunStatusAction(status: RunStatusUpdateInput["status"]): GovernedAction {
+export function resolveRunStatusAction(
+  status: RunStatusUpdateInput["status"],
+): GovernedAction {
   switch (status) {
     case "pending":
     case "planning":

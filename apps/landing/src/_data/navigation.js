@@ -3,5 +3,5 @@ module.exports = [
   { label: "Why Codex Swarm", href: "#why-codex-swarm" },
   { label: "Capabilities", href: "#core-capabilities" },
   { label: "Surfaces", href: "#product-surfaces" },
-  { label: "Foundation", href: "#technical-foundation" }
+  { label: "Foundation", href: "#technical-foundation" },
 ];

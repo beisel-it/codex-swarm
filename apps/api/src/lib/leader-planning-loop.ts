@@ -1,4 +1,8 @@
-import type { ProjectTeamDetail, RunDetail, Task } from "@codex-swarm/contracts";
+import type {
+  ProjectTeamDetail,
+  RunDetail,
+  Task,
+} from "@codex-swarm/contracts";
 import {
   buildLeaderPlanningPrompt,
   buildLeaderReslicePrompt,
@@ -6,20 +10,24 @@ import {
   type LeaderPlanningRoleOption,
   normalizeLeaderPlanTasks,
   parseLeaderPlanOutput,
-  type WorkerTaskOutcome
+  type WorkerTaskOutcome,
 } from "@codex-swarm/orchestration";
 import {
   CodexServerSupervisor,
   CodexSessionRuntime,
   SessionRegistry,
   type CodexToolExecutor,
-  materializePlanArtifact
+  materializePlanArtifact,
 } from "@codex-swarm/worker";
 
 import { checkpointRunBudget } from "./run-budget-guard.js";
 
 export interface LeaderPlanningLoopRequest {
-  <T>(method: string, path: string, payload?: Record<string, unknown>): Promise<T>;
+  <T>(
+    method: string,
+    path: string,
+    payload?: Record<string, unknown>,
+  ): Promise<T>;
 }
 
 export interface LeaderPlanningLoopInput {
@@ -79,13 +87,13 @@ function buildTranscriptEntries(prompt: string, output: string) {
     {
       kind: "prompt",
       text: prompt,
-      metadata: {}
+      metadata: {},
     },
     {
       kind: "response",
       text: output,
-      metadata: {}
-    }
+      metadata: {},
+    },
   ];
 }
 
@@ -104,22 +112,27 @@ function buildLeaderStartPrompt(runId: string) {
     "",
     "Do not inspect the repository, edit files, or perform planning work in this step.",
     "Reply with exactly one compact JSON object and nothing else.",
-    'Schema: {"status":"ready","runId":"string","summary":"string"}'
+    'Schema: {"status":"ready","runId":"string","summary":"string"}',
   ].join("\n");
 }
 
 async function loadProjectTeamForRun(
   request: LeaderPlanningLoopRequest,
-  runDetail: RunDetail
+  runDetail: RunDetail,
 ): Promise<ProjectTeamDetail | null> {
   if (!runDetail.projectTeamId) {
     return null;
   }
 
-  return request<ProjectTeamDetail>("GET", `/api/v1/project-teams/${runDetail.projectTeamId}`);
+  return request<ProjectTeamDetail>(
+    "GET",
+    `/api/v1/project-teams/${runDetail.projectTeamId}`,
+  );
 }
 
-function toLeaderPlanningRoleOptions(projectTeam: ProjectTeamDetail | null): LeaderPlanningRoleOption[] {
+function toLeaderPlanningRoleOptions(
+  projectTeam: ProjectTeamDetail | null,
+): LeaderPlanningRoleOption[] {
   if (!projectTeam) {
     return [];
   }
@@ -128,14 +141,14 @@ function toLeaderPlanningRoleOptions(projectTeam: ProjectTeamDetail | null): Lea
     role: member.role,
     profile: member.profile,
     name: member.name,
-    responsibility: member.responsibility
+    responsibility: member.responsibility,
   }));
 }
 
 function mapFollowOnDependencyIds(
   parentTask: Task,
   localDependencyKeys: string[],
-  createdTaskIds: Map<string, string>
+  createdTaskIds: Map<string, string>,
 ) {
   return [
     ...parentTask.dependencyIds,
@@ -147,7 +160,7 @@ function mapFollowOnDependencyIds(
       }
 
       return dependencyId;
-    })
+    }),
   ];
 }
 
@@ -157,7 +170,7 @@ async function createFollowOnTasks(
     runId: string;
     parentTask: Task;
     orderedTasks: ReturnType<typeof normalizeLeaderPlanTasks>;
-  }
+  },
 ) {
   const createdTaskIds = new Map<string, string>();
   const createdTasks: Task[] = [];
@@ -173,10 +186,10 @@ async function createFollowOnTasks(
       dependencyIds: mapFollowOnDependencyIds(
         input.parentTask,
         task.dependencyKeys,
-        createdTaskIds
+        createdTaskIds,
       ),
       definitionOfDone: task.definitionOfDone,
-      acceptanceCriteria: task.acceptanceCriteria
+      acceptanceCriteria: task.acceptanceCriteria,
     });
 
     createdTaskIds.set(task.key, createdTask.id);
@@ -186,34 +199,39 @@ async function createFollowOnTasks(
   return createdTasks;
 }
 
-export async function runLeaderPlanningLoop(input: LeaderPlanningLoopInput): Promise<LeaderPlanningLoopResult> {
+export async function runLeaderPlanningLoop(
+  input: LeaderPlanningLoopInput,
+): Promise<LeaderPlanningLoopResult> {
   const registry = new SessionRegistry();
   registry.seed({
     sessionId: `bootstrap-${input.runId}`,
     runId: input.runId,
     agentId: `bootstrap-agent-${input.runId}`,
-    worktreePath: input.workspaceRoot
+    worktreePath: input.workspaceRoot,
   });
 
   const supervisor = new CodexServerSupervisor({
     config: input.runtimeConfig,
-    ...(input.supervisorCommand ? { command: input.supervisorCommand } : {})
+    ...(input.supervisorCommand ? { command: input.supervisorCommand } : {}),
   });
   const runtime = new CodexSessionRuntime({
     registry,
     supervisor,
-    executeTool: input.executeTool
+    executeTool: input.executeTool,
   });
 
   try {
-    const startPrompt = input.startPrompt
-      ?? buildLeaderStartPrompt(input.runId);
-    const started = await runtime.startSession(`bootstrap-${input.runId}`, startPrompt);
+    const startPrompt =
+      input.startPrompt ?? buildLeaderStartPrompt(input.runId);
+    const started = await runtime.startSession(
+      `bootstrap-${input.runId}`,
+      startPrompt,
+    );
     const startBudgetState = await checkpointRunBudget(
       input.request,
       input.runId,
       "leader.start",
-      started.response
+      started.response,
     );
 
     if (!startBudgetState.continueAllowed) {
@@ -234,31 +252,39 @@ export async function runLeaderPlanningLoop(input: LeaderPlanningLoopInput): Pro
         approvalPolicy: input.runtimeConfig.approvalPolicy,
         includePlanTool: input.runtimeConfig.includePlanTool ?? false,
         workerNodeId: input.runtimeConfig.workerNodeId,
-        placementConstraintLabels: input.runtimeConfig.placementConstraintLabels ?? [],
+        placementConstraintLabels:
+          input.runtimeConfig.placementConstraintLabels ?? [],
         metadata: {
           source: "leader-planning-loop",
-          actorId: input.actorId
-        }
-      }
+          actorId: input.actorId,
+        },
+      },
     });
 
-    const runDetail = await input.request<RunDetail>("GET", `/api/v1/runs/${input.runId}`);
+    const runDetail = await input.request<RunDetail>(
+      "GET",
+      `/api/v1/runs/${input.runId}`,
+    );
     const projectTeam = input.planningPrompt
       ? null
       : await loadProjectTeamForRun(input.request, runDetail);
     const availableRoles = toLeaderPlanningRoleOptions(projectTeam);
-    const persistedSession = runDetail.sessions.find((session) => session.agentId === agent.id);
+    const persistedSession = runDetail.sessions.find(
+      (session) => session.agentId === agent.id,
+    );
 
     if (!persistedSession) {
-      throw new Error(`persisted leader session for agent ${agent.id} was not found`);
+      throw new Error(
+        `persisted leader session for agent ${agent.id} was not found`,
+      );
     }
 
     await input.request(
       "POST",
       `/api/v1/sessions/${persistedSession.id}/transcript`,
       {
-        entries: buildTranscriptEntries(startPrompt, started.response.output)
-      }
+        entries: buildTranscriptEntries(startPrompt, started.response.output),
+      },
     );
 
     const persistedRegistry = new SessionRegistry();
@@ -272,30 +298,40 @@ export async function runLeaderPlanningLoop(input: LeaderPlanningLoopInput): Pro
         threadId: persistedSession.threadId,
         staleReason: persistedSession.staleReason,
         lastHeartbeatAt: null,
-        createdAt: toDate((persistedSession as unknown as Record<string, unknown>).createdAt as Date | string | null | undefined) ?? new Date(),
-        updatedAt: toDate((persistedSession as unknown as Record<string, unknown>).updatedAt as Date | string | null | undefined) ?? new Date()
-      }
+        createdAt:
+          toDate(
+            (persistedSession as unknown as Record<string, unknown>)
+              .createdAt as Date | string | null | undefined,
+          ) ?? new Date(),
+        updatedAt:
+          toDate(
+            (persistedSession as unknown as Record<string, unknown>)
+              .updatedAt as Date | string | null | undefined,
+          ) ?? new Date(),
+      },
     ]);
 
     const continueRuntime = new CodexSessionRuntime({
       registry: persistedRegistry,
       supervisor,
-      executeTool: input.executeTool
+      executeTool: input.executeTool,
     });
-    const planningPrompt = input.planningPrompt ?? buildLeaderPlanningPrompt(
-      runDetail.goal,
-      runDetail.context,
-      availableRoles
-    );
+    const planningPrompt =
+      input.planningPrompt ??
+      buildLeaderPlanningPrompt(
+        runDetail.goal,
+        runDetail.context,
+        availableRoles,
+      );
     const continued = await continueRuntime.continueSession(
       persistedSession.id,
-      planningPrompt
+      planningPrompt,
     );
     const planningBudgetState = await checkpointRunBudget(
       input.request,
       input.runId,
       "leader.plan",
-      continued.response
+      continued.response,
     );
 
     if (!planningBudgetState.continueAllowed) {
@@ -306,8 +342,11 @@ export async function runLeaderPlanningLoop(input: LeaderPlanningLoopInput): Pro
       "POST",
       `/api/v1/sessions/${persistedSession.id}/transcript`,
       {
-        entries: buildTranscriptEntries(planningPrompt, continued.response.output)
-      }
+        entries: buildTranscriptEntries(
+          planningPrompt,
+          continued.response.output,
+        ),
+      },
     );
 
     const plan = parseLeaderPlanOutput(continued.response.output);
@@ -323,9 +362,9 @@ export async function runLeaderPlanningLoop(input: LeaderPlanningLoopInput): Pro
           role: task.role,
           description: task.description,
           definitionOfDone: task.definitionOfDone,
-          acceptanceCriteria: task.acceptanceCriteria
-        }))
-      }
+          acceptanceCriteria: task.acceptanceCriteria,
+        })),
+      },
     });
 
     await input.request("POST", "/api/v1/artifacts", {
@@ -335,13 +374,13 @@ export async function runLeaderPlanningLoop(input: LeaderPlanningLoopInput): Pro
       contentType: "text/markdown",
       metadata: {
         relativePath: planArtifact.relativePath,
-        source: "leader-planning-loop"
-      }
+        source: "leader-planning-loop",
+      },
     });
 
     await input.request("PATCH", `/api/v1/runs/${input.runId}/status`, {
       status: "planning",
-      planArtifactPath: planArtifact.path
+      planArtifactPath: planArtifact.path,
     });
 
     const createdTaskIds = new Map<string, string>();
@@ -364,7 +403,7 @@ export async function runLeaderPlanningLoop(input: LeaderPlanningLoopInput): Pro
           return dependencyId;
         }),
         definitionOfDone: task.definitionOfDone,
-        acceptanceCriteria: task.acceptanceCriteria
+        acceptanceCriteria: task.acceptanceCriteria,
       });
 
       createdTaskIds.set(task.key, createdTask.id);
@@ -379,29 +418,48 @@ export async function runLeaderPlanningLoop(input: LeaderPlanningLoopInput): Pro
       tasks: createdTasks,
       startOutput: started.response.output,
       planningOutput: continued.response.output,
-      continuedAt: continued.session.lastHeartbeatAt?.toISOString() ?? null
+      continuedAt: continued.session.lastHeartbeatAt?.toISOString() ?? null,
     };
   } finally {
-    await runtime.stopSession(`bootstrap-${input.runId}`).catch(() => undefined);
+    await runtime
+      .stopSession(`bootstrap-${input.runId}`)
+      .catch(() => undefined);
   }
 }
 
-export async function runLeaderResliceLoop(input: LeaderResliceLoopInput): Promise<LeaderResliceLoopResult | null> {
-  if (input.workerOutcome.status !== "needs_slicing" && !(input.workerOutcome.status === "blocked" && input.workerOutcome.blockerKind === "actionable")) {
+export async function runLeaderResliceLoop(
+  input: LeaderResliceLoopInput,
+): Promise<LeaderResliceLoopResult | null> {
+  if (
+    input.workerOutcome.status !== "needs_slicing" &&
+    !(
+      input.workerOutcome.status === "blocked" &&
+      input.workerOutcome.blockerKind === "actionable"
+    )
+  ) {
     return null;
   }
 
-  const runDetail = await input.request<RunDetail>("GET", `/api/v1/runs/${input.runId}`);
+  const runDetail = await input.request<RunDetail>(
+    "GET",
+    `/api/v1/runs/${input.runId}`,
+  );
   const projectTeam = await loadProjectTeamForRun(input.request, runDetail);
   const availableRoles = toLeaderPlanningRoleOptions(projectTeam);
-  const parentTask = runDetail.tasks.find((task) => task.id === input.parentTaskId);
-  const leaderAgent = runDetail.agents.find((agent) => agent.role === "tech-lead");
+  const parentTask = runDetail.tasks.find(
+    (task) => task.id === input.parentTaskId,
+  );
+  const leaderAgent = runDetail.agents.find(
+    (agent) => agent.role === "tech-lead",
+  );
 
   if (!parentTask || !leaderAgent) {
     return null;
   }
 
-  const persistedSession = runDetail.sessions.find((session) => session.agentId === leaderAgent.id);
+  const persistedSession = runDetail.sessions.find(
+    (session) => session.agentId === leaderAgent.id,
+  );
 
   if (!persistedSession) {
     return null;
@@ -418,9 +476,23 @@ export async function runLeaderResliceLoop(input: LeaderResliceLoopInput): Promi
       threadId: persistedSession.threadId,
       staleReason: persistedSession.staleReason,
       lastHeartbeatAt: null,
-      createdAt: toDate((persistedSession as unknown as Record<string, unknown>).createdAt as Date | string | null | undefined) ?? new Date(),
-      updatedAt: toDate((persistedSession as unknown as Record<string, unknown>).updatedAt as Date | string | null | undefined) ?? new Date()
-    }
+      createdAt:
+        toDate(
+          (persistedSession as unknown as Record<string, unknown>).createdAt as
+            | Date
+            | string
+            | null
+            | undefined,
+        ) ?? new Date(),
+      updatedAt:
+        toDate(
+          (persistedSession as unknown as Record<string, unknown>).updatedAt as
+            | Date
+            | string
+            | null
+            | undefined,
+        ) ?? new Date(),
+    },
   ]);
 
   const runtime = new CodexSessionRuntime({
@@ -431,41 +503,47 @@ export async function runLeaderResliceLoop(input: LeaderResliceLoopInput): Promi
         profile: "default",
         sandbox: persistedSession.sandbox,
         approvalPolicy: persistedSession.approvalPolicy,
-        includePlanTool: persistedSession.includePlanTool
+        includePlanTool: persistedSession.includePlanTool,
       },
-      ...(input.supervisorCommand ? { command: input.supervisorCommand } : {})
+      ...(input.supervisorCommand ? { command: input.supervisorCommand } : {}),
     }),
-    executeTool: input.executeTool
+    executeTool: input.executeTool,
   });
 
   try {
-    const planningPrompt = input.workerOutcome.status === "blocked"
-      ? buildLeaderUnblockPrompt({
-        goal: runDetail.goal,
-        taskTitle: parentTask.title,
-        taskRole: parentTask.role,
-        taskDescription: parentTask.description,
-        workerSummary: input.workerOutcome.summary,
-        blockingIssues: input.workerOutcome.blockingIssues,
-        messages: input.workerOutcome.messages,
-        availableRoles
-      })
-      : buildLeaderReslicePrompt({
-        goal: runDetail.goal,
-        taskTitle: parentTask.title,
-        taskRole: parentTask.role,
-        taskDescription: parentTask.description,
-        workerSummary: input.workerOutcome.summary,
-        blockingIssues: input.workerOutcome.blockingIssues,
-        messages: input.workerOutcome.messages,
-        availableRoles
-      });
-    const continued = await runtime.continueSession(persistedSession.id, planningPrompt);
+    const planningPrompt =
+      input.workerOutcome.status === "blocked"
+        ? buildLeaderUnblockPrompt({
+            goal: runDetail.goal,
+            taskTitle: parentTask.title,
+            taskRole: parentTask.role,
+            taskDescription: parentTask.description,
+            workerSummary: input.workerOutcome.summary,
+            blockingIssues: input.workerOutcome.blockingIssues,
+            messages: input.workerOutcome.messages,
+            availableRoles,
+          })
+        : buildLeaderReslicePrompt({
+            goal: runDetail.goal,
+            taskTitle: parentTask.title,
+            taskRole: parentTask.role,
+            taskDescription: parentTask.description,
+            workerSummary: input.workerOutcome.summary,
+            blockingIssues: input.workerOutcome.blockingIssues,
+            messages: input.workerOutcome.messages,
+            availableRoles,
+          });
+    const continued = await runtime.continueSession(
+      persistedSession.id,
+      planningPrompt,
+    );
     const planningBudgetState = await checkpointRunBudget(
       input.request,
       input.runId,
-      input.workerOutcome.status === "blocked" ? "leader.unblock" : "leader.reslice",
-      continued.response
+      input.workerOutcome.status === "blocked"
+        ? "leader.unblock"
+        : "leader.reslice",
+      continued.response,
     );
 
     if (!planningBudgetState.continueAllowed) {
@@ -476,8 +554,11 @@ export async function runLeaderResliceLoop(input: LeaderResliceLoopInput): Promi
       "POST",
       `/api/v1/sessions/${persistedSession.id}/transcript`,
       {
-        entries: buildTranscriptEntries(planningPrompt, continued.response.output)
-      }
+        entries: buildTranscriptEntries(
+          planningPrompt,
+          continued.response.output,
+        ),
+      },
     );
 
     const plan = parseLeaderPlanOutput(continued.response.output);
@@ -485,16 +566,21 @@ export async function runLeaderResliceLoop(input: LeaderResliceLoopInput): Promi
     const createdTasks = await createFollowOnTasks(input.request, {
       runId: input.runId,
       parentTask,
-      orderedTasks
+      orderedTasks,
     });
 
-    if (input.workerOutcome.status === "blocked" && input.workerOutcome.blockerKind === "actionable") {
+    if (
+      input.workerOutcome.status === "blocked" &&
+      input.workerOutcome.blockerKind === "actionable"
+    ) {
       await input.request("PATCH", `/api/v1/tasks/${parentTask.id}/status`, {
         status: "blocked",
-        dependencyIds: Array.from(new Set([
-          ...parentTask.dependencyIds,
-          ...createdTasks.map((task) => task.id)
-        ]))
+        dependencyIds: Array.from(
+          new Set([
+            ...parentTask.dependencyIds,
+            ...createdTasks.map((task) => task.id),
+          ]),
+        ),
       });
     }
 
@@ -504,7 +590,7 @@ export async function runLeaderResliceLoop(input: LeaderResliceLoopInput): Promi
       threadId: persistedSession.threadId,
       tasks: createdTasks,
       planningOutput: continued.response.output,
-      continuedAt: continued.session.lastHeartbeatAt?.toISOString() ?? null
+      continuedAt: continued.session.lastHeartbeatAt?.toISOString() ?? null,
     };
   } finally {
     await runtime.stopSession(persistedSession.id).catch(() => undefined);

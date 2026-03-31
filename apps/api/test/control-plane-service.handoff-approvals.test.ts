@@ -56,7 +56,7 @@ class FakeHandoffApprovalDb {
     metadata: {},
     createdBy: "tech-lead",
     createdAt: new Date("2026-03-28T12:00:00.000Z"),
-    updatedAt: new Date("2026-03-28T12:00:00.000Z")
+    updatedAt: new Date("2026-03-28T12:00:00.000Z"),
   };
 
   artifactValues: Array<Record<string, unknown>> = [];
@@ -72,13 +72,13 @@ class FakeHandoffApprovalDb {
 
             this.runRecord = {
               ...this.runRecord,
-              ...values
+              ...values,
             };
 
             return [this.runRecord];
-          }
-        })
-      })
+          },
+        }),
+      }),
     };
   }
 
@@ -91,17 +91,19 @@ class FakeHandoffApprovalDb {
 
         this.artifactValues.push(values);
         return [];
-      }
+      },
     };
   }
 
-  async transaction<T>(callback: (tx: {
-    update: FakeHandoffApprovalDb["update"];
-    insert: FakeHandoffApprovalDb["insert"];
-  }) => Promise<T>) {
+  async transaction<T>(
+    callback: (tx: {
+      update: FakeHandoffApprovalDb["update"];
+      insert: FakeHandoffApprovalDb["insert"];
+    }) => Promise<T>,
+  ) {
     return callback({
       update: this.update.bind(this),
-      insert: this.insert.bind(this)
+      insert: this.insert.bind(this),
     });
   }
 }
@@ -110,7 +112,7 @@ describe("ControlPlaneService handoff approval enforcement", () => {
   it("requires explicit patch approval linkage before branch publish when patch approvals exist", async () => {
     const db = new FakeHandoffApprovalDb();
     const service = new ControlPlaneService(db as never, {
-      now: () => new Date("2026-03-28T12:05:00.000Z")
+      now: () => new Date("2026-03-28T12:05:00.000Z"),
     });
 
     (service as any).assertRunExists = async () => db.runRecord;
@@ -118,7 +120,7 @@ describe("ControlPlaneService handoff approval enforcement", () => {
       id: db.runRecord.repositoryId,
       workspaceId: db.runRecord.workspaceId,
       teamId: db.runRecord.teamId,
-      projectId: null
+      projectId: null,
     });
     (service as any).listApprovals = async () => [
       {
@@ -136,25 +138,29 @@ describe("ControlPlaneService handoff approval enforcement", () => {
         resolver: "reviewer",
         resolvedAt: new Date("2026-03-28T12:01:00.000Z"),
         createdAt: new Date("2026-03-28T12:00:00.000Z"),
-        updatedAt: new Date("2026-03-28T12:01:00.000Z")
-      }
+        updatedAt: new Date("2026-03-28T12:01:00.000Z"),
+      },
     ];
 
-    await expect(service.publishRunBranch(db.runRecord.id, {
-      branchName: "runs/m7-handoff",
-      publishedBy: "tech-lead",
-      remoteName: "origin"
-    })).rejects.toBeInstanceOf(HttpError);
+    await expect(
+      service.publishRunBranch(db.runRecord.id, {
+        branchName: "runs/m7-handoff",
+        publishedBy: "tech-lead",
+        remoteName: "origin",
+      }),
+    ).rejects.toBeInstanceOf(HttpError);
 
-    await expect(service.publishRunBranch(db.runRecord.id, {
-      branchName: "runs/m7-handoff",
-      approvalId: "11111111-1111-4111-8111-111111111111",
-      publishedBy: "tech-lead",
-      remoteName: "origin"
-    })).resolves.toMatchObject({
+    await expect(
+      service.publishRunBranch(db.runRecord.id, {
+        branchName: "runs/m7-handoff",
+        approvalId: "11111111-1111-4111-8111-111111111111",
+        publishedBy: "tech-lead",
+        remoteName: "origin",
+      }),
+    ).resolves.toMatchObject({
       publishedBranch: "runs/m7-handoff",
       branchPublishApprovalId: "11111111-1111-4111-8111-111111111111",
-      handoffStatus: "branch_published"
+      handoffStatus: "branch_published",
     });
   });
 
@@ -164,7 +170,7 @@ describe("ControlPlaneService handoff approval enforcement", () => {
     db.runRecord.handoffStatus = "branch_published";
 
     const service = new ControlPlaneService(db as never, {
-      now: () => new Date("2026-03-28T12:10:00.000Z")
+      now: () => new Date("2026-03-28T12:10:00.000Z"),
     });
 
     (service as any).assertRunExists = async () => db.runRecord;
@@ -176,7 +182,7 @@ describe("ControlPlaneService handoff approval enforcement", () => {
       name: "codex-swarm",
       defaultBranch: "main",
       provider: "github",
-      url: "https://github.com/example/codex-swarm"
+      url: "https://github.com/example/codex-swarm",
     });
     (service as any).listApprovals = async () => [
       {
@@ -194,8 +200,8 @@ describe("ControlPlaneService handoff approval enforcement", () => {
         resolver: "reviewer",
         resolvedAt: new Date("2026-03-28T12:09:00.000Z"),
         createdAt: new Date("2026-03-28T12:08:00.000Z"),
-        updatedAt: new Date("2026-03-28T12:09:00.000Z")
-      }
+        updatedAt: new Date("2026-03-28T12:09:00.000Z"),
+      },
     ];
 
     const run = await service.createRunPullRequestHandoff(db.runRecord.id, {
@@ -206,16 +212,16 @@ describe("ControlPlaneService handoff approval enforcement", () => {
       provider: "github",
       url: "https://github.com/example/codex-swarm/pull/42",
       number: 42,
-      status: "open"
+      status: "open",
     });
 
     expect(run).toMatchObject({
       pullRequestApprovalId: "22222222-2222-4222-8222-222222222222",
-      handoffStatus: "pr_open"
+      handoffStatus: "pr_open",
     });
     expect(db.artifactValues.at(-1)).toMatchObject({
       runId: db.runRecord.id,
-      kind: "pr_link"
+      kind: "pr_link",
     });
   });
 });

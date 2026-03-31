@@ -15,7 +15,10 @@ export function getArtifactStorageRoot(config: AppConfig) {
   return resolve(config.ARTIFACT_STORAGE_ROOT);
 }
 
-export function buildArtifactDownloadUrl(config: AppConfig, artifactId: string) {
+export function buildArtifactDownloadUrl(
+  config: AppConfig,
+  artifactId: string,
+) {
   const baseUrl = config.ARTIFACT_BASE_URL.replace(/\/$/, "");
   return `${baseUrl}/api/v1/artifacts/${artifactId}/content`;
 }
@@ -23,7 +26,7 @@ export function buildArtifactDownloadUrl(config: AppConfig, artifactId: string) 
 export async function persistArtifactBlob(
   config: AppConfig,
   artifactId: string,
-  content: Buffer
+  content: Buffer,
 ): Promise<PersistedArtifactBlob> {
   const sha256 = createHash("sha256").update(content).digest("hex");
   const storageKey = join(artifactId.slice(0, 2), artifactId, "content.bin");
@@ -36,7 +39,7 @@ export async function persistArtifactBlob(
     storageKey,
     url: buildArtifactDownloadUrl(config, artifactId),
     sizeBytes: content.byteLength,
-    sha256
+    sha256,
   };
 }
 
@@ -44,11 +47,11 @@ export async function readArtifactBlob(config: AppConfig, storageKey: string) {
   const artifactPath = join(getArtifactStorageRoot(config), storageKey);
   const [content, details] = await Promise.all([
     readFile(artifactPath),
-    stat(artifactPath)
+    stat(artifactPath),
   ]);
 
   return {
     content,
-    sizeBytes: details.size
+    sizeBytes: details.size,
   };
 }

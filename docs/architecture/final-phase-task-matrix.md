@@ -22,7 +22,7 @@ This task is still too broad unless treated as three concrete slices:
    Scope:
    - role-gate run create, review, approve, retry, stop, and admin actions
    - reject out-of-role actions consistently across governed routes
-   Acceptance:
+     Acceptance:
    - wrong-role requests fail deterministically
    - actor/workspace context is preserved in denial and audit paths
 
@@ -31,7 +31,7 @@ This task is still too broad unless treated as three concrete slices:
    Scope:
    - team and repo policy profile selection/inheritance
    - stricter defaults for sensitive repositories
-   Acceptance:
+     Acceptance:
    - a sensitive repo path is observably stricter than a standard repo path
    - profile selection does not require code edits
 
@@ -41,7 +41,7 @@ This task is still too broad unless treated as three concrete slices:
    - persist delegation rules
    - enforce delegated approval eligibility
    - surface delegation state to audit/UI consumers
-   Acceptance:
+     Acceptance:
    - delegated approval behavior is enforced rather than interpreted informally
    - audit/provenance can explain delegated approvals
 

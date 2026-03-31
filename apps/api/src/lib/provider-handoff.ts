@@ -28,7 +28,9 @@ export interface PullRequestCreateResult {
 
 export interface ProviderHandoffAdapter {
   publishBranch(input: BranchPublishRequest): Promise<void>;
-  createGitHubPullRequest(input: PullRequestCreateRequest): Promise<PullRequestCreateResult>;
+  createGitHubPullRequest(
+    input: PullRequestCreateRequest,
+  ): Promise<PullRequestCreateResult>;
 }
 
 export function createShellProviderHandoffAdapter(options?: {
@@ -43,7 +45,11 @@ export function createShellProviderHandoffAdapter(options?: {
       await execFileAsync(
         gitCommand,
         ["push", input.remoteName, input.branchName],
-        { cwd: input.workspacePath, timeout: 120_000, maxBuffer: 1024 * 1024 * 4 }
+        {
+          cwd: input.workspacePath,
+          timeout: 120_000,
+          maxBuffer: 1024 * 1024 * 4,
+        },
       );
     },
 
@@ -65,9 +71,13 @@ export function createShellProviderHandoffAdapter(options?: {
             "--title",
             input.title,
             "--body-file",
-            bodyFile
+            bodyFile,
           ],
-          { cwd: input.workspacePath, timeout: 120_000, maxBuffer: 1024 * 1024 * 4 }
+          {
+            cwd: input.workspacePath,
+            timeout: 120_000,
+            maxBuffer: 1024 * 1024 * 4,
+          },
         );
 
         const url = stdout
@@ -83,12 +93,14 @@ export function createShellProviderHandoffAdapter(options?: {
 
         return {
           url,
-          number: numberMatch ? Number.parseInt(numberMatch[1] ?? "", 10) : null,
-          status: "open"
+          number: numberMatch
+            ? Number.parseInt(numberMatch[1] ?? "", 10)
+            : null,
+          status: "open",
         };
       } finally {
         await rm(scratchDir, { recursive: true, force: true });
       }
-    }
+    },
   };
 }

@@ -32,7 +32,10 @@ describe("repository-provider inspection", () => {
     await runGit(["init", "--bare", originPath], tempRoot);
     await runGit(["init", "-b", "main", workingPath], tempRoot);
     await runGit(["config", "user.name", "Codex Swarm"], workingPath);
-    await runGit(["config", "user.email", "codex-swarm@example.com"], workingPath);
+    await runGit(
+      ["config", "user.email", "codex-swarm@example.com"],
+      workingPath,
+    );
     await writeFile(join(workingPath, "README.md"), "# test\n");
     await runGit(["add", "README.md"], workingPath);
     await runGit(["commit", "-m", "Initial commit"], workingPath);
@@ -44,14 +47,14 @@ describe("repository-provider inspection", () => {
     const inspection = await inspectRepositoryProvider({
       provider: "github",
       url: originPath,
-      localPath: null
+      localPath: null,
     });
 
     expect(inspection).toMatchObject({
       connectivityStatus: "validated",
       defaultBranch: "main",
       providerRepoUrl: originPath,
-      lastError: null
+      lastError: null,
     });
     expect(inspection.validatedAt).toBeInstanceOf(Date);
     expect(inspection.branches).toEqual(["main", "release"]);
@@ -61,7 +64,7 @@ describe("repository-provider inspection", () => {
     const inspection = await inspectRepositoryProvider({
       provider: "local",
       url: "file:///tmp/local-repo",
-      localPath: "/tmp/local-repo"
+      localPath: "/tmp/local-repo",
     });
 
     expect(inspection).toEqual({
@@ -70,7 +73,7 @@ describe("repository-provider inspection", () => {
       defaultBranch: null,
       branches: [],
       providerRepoUrl: "file:///tmp/local-repo",
-      lastError: null
+      lastError: null,
     });
   });
 });

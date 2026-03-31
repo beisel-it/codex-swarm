@@ -12,7 +12,7 @@ const observability = {
   recordRequestFailure: vi.fn(),
   recordTimelineEvent: vi.fn(),
   setActorContext: vi.fn(),
-  withTrace: vi.fn(async (_name: string, fn: () => Promise<unknown>) => fn())
+  withTrace: vi.fn(async (_name: string, fn: () => Promise<unknown>) => fn()),
 };
 
 afterEach(() => {
@@ -42,14 +42,14 @@ describe("webhookRoutes", () => {
             request: {
               method: "POST",
               path: "/webhooks/triggers/22222222-2222-4222-8222-222222222222",
-              receivedAt: new Date("2026-03-30T10:00:00.000Z")
+              receivedAt: new Date("2026-03-30T10:00:00.000Z"),
             },
-            metadata: {}
+            metadata: {},
           },
           rejectionReason: null,
           createdRunId: "55555555-5555-4555-8555-555555555555",
           createdAt: new Date("2026-03-30T10:00:00.000Z"),
-          updatedAt: new Date("2026-03-30T10:00:00.000Z")
+          updatedAt: new Date("2026-03-30T10:00:00.000Z"),
         },
         run: {
           id: "55555555-5555-4555-8555-555555555555",
@@ -65,11 +65,11 @@ describe("webhookRoutes", () => {
           concurrencyCap: 1,
           policyProfile: "standard",
           metadata: {
-            externalEventReceiptId: "11111111-1111-4111-8111-111111111111"
+            externalEventReceiptId: "11111111-1111-4111-8111-111111111111",
           },
           context: {
             externalInput: null,
-            values: {}
+            values: {},
           },
           publishedBranch: null,
           branchPublishedAt: null,
@@ -82,33 +82,35 @@ describe("webhookRoutes", () => {
           completedAt: null,
           createdBy: "external-trigger",
           createdAt: new Date("2026-03-30T10:00:00.000Z"),
-          updatedAt: new Date("2026-03-30T10:00:00.000Z")
-        }
-      }))
+          updatedAt: new Date("2026-03-30T10:00:00.000Z"),
+        },
+      })),
     };
     const app = await buildApp({
       controlPlane: controlPlane as unknown as ControlPlaneService,
-      observability: observability as never
+      observability: observability as never,
     });
 
     const response = await app.inject({
       method: "POST",
       url: "/api/v1/webhooks/triggers/22222222-2222-4222-8222-222222222222",
       payload: {
-        action: "opened"
-      }
+        action: "opened",
+      },
     });
 
     expect(response.statusCode).toBe(202);
-    expect(controlPlane.ingestWebhook).toHaveBeenCalledWith(expect.objectContaining({
-      endpointPath: "/webhooks/triggers/22222222-2222-4222-8222-222222222222",
-      method: "POST"
-    }));
+    expect(controlPlane.ingestWebhook).toHaveBeenCalledWith(
+      expect.objectContaining({
+        endpointPath: "/webhooks/triggers/22222222-2222-4222-8222-222222222222",
+        method: "POST",
+      }),
+    );
     expect(response.json()).toEqual({
       receiptId: "11111111-1111-4111-8111-111111111111",
       status: "run_created",
       runId: "55555555-5555-4555-8555-555555555555",
-      rejectionReason: null
+      rejectionReason: null,
     });
 
     await app.close();

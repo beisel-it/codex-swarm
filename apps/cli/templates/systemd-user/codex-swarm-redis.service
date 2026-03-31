@@ -1,0 +1,19 @@
+[Unit]
+Description=Codex Swarm Redis (single-host deployment)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=__ENV_FILE__
+Restart=always
+RestartSec=5
+ExecStartPre=-/bin/sh -lc 'docker rm -f codex-swarm-redis'
+ExecStart=/bin/sh -lc 'docker run --rm --name codex-swarm-redis \
+  -v "$HOME/.local/share/codex-swarm/redis:/data" \
+  -p 127.0.0.1:${CODEX_SWARM_REDIS_PORT}:6379 \
+  redis:7-alpine --appendonly yes'
+ExecStop=/bin/sh -lc 'docker stop codex-swarm-redis'
+
+[Install]
+WantedBy=default.target

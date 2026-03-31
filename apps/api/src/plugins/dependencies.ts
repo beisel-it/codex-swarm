@@ -23,7 +23,7 @@ export const dependenciesPlugin = fp(async (app: FastifyInstance) => {
   await ensureControlPlaneCompatibility(
     pool,
     app.config.CONTROL_PLANE_SCHEMA_VERSION,
-    app.config.CONTROL_PLANE_CONFIG_VERSION
+    app.config.CONTROL_PLANE_CONFIG_VERSION,
   );
   const db = createDb(pool);
   const observability = new ObservabilityService(db, systemClock, app.config);
@@ -31,12 +31,15 @@ export const dependenciesPlugin = fp(async (app: FastifyInstance) => {
   app.decorate("dbPool", pool);
   app.decorate("db", db);
   app.decorate("observability", observability);
-  app.decorate("controlPlane", new ControlPlaneService(db, systemClock, {
-    providerHandoff: createShellProviderHandoffAdapter({
-      gitCommand: app.config.GIT_COMMAND,
-      ghCommand: app.config.GITHUB_CLI_COMMAND
-    })
-  }));
+  app.decorate(
+    "controlPlane",
+    new ControlPlaneService(db, systemClock, {
+      providerHandoff: createShellProviderHandoffAdapter({
+        gitCommand: app.config.GIT_COMMAND,
+        ghCommand: app.config.GITHUB_CLI_COMMAND,
+      }),
+    }),
+  );
 
   app.addHook("onRequest", async (request, reply) => {
     observability.beginRequest(request, reply);

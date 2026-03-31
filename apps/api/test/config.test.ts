@@ -55,7 +55,7 @@ describe("getConfig", () => {
       SUPPORT_HOURS_UTC: undefined,
       SUPPORT_ESCALATION: undefined,
       OPENAI_TRACING_DISABLED: undefined,
-      OPENAI_TRACING_EXPORT_API_KEY: undefined
+      OPENAI_TRACING_EXPORT_API_KEY: undefined,
     });
 
     expect(config).toMatchObject({
@@ -77,7 +77,7 @@ describe("getConfig", () => {
       SLO_ACTIVE_RUN_MAX_MINUTES: 240,
       SLO_TASK_QUEUE_MAX: 100,
       SLO_SUPPORT_RESPONSE_HOURS: 8,
-      SUPPORT_HOURS_UTC: "Mon-Fri 08:00-18:00 UTC"
+      SUPPORT_HOURS_UTC: "Mon-Fri 08:00-18:00 UTC",
     });
     expect(config.DATABASE_URL).toContain("codex_swarm");
   });
@@ -114,7 +114,8 @@ describe("getConfig", () => {
       REMOTE_SECRET_ENV_NAMES: "OPENAI_API_KEY,GITHUB_TOKEN",
       SECRET_ALLOWED_TRUST_LEVELS: "trusted,restricted",
       SENSITIVE_POLICY_PROFILES: "sensitive,breakglass",
-      SECRET_DISTRIBUTION_BOUNDARY: "api brokers credentials,workers get task-scoped env",
+      SECRET_DISTRIBUTION_BOUNDARY:
+        "api brokers credentials,workers get task-scoped env",
       POLICY_DRIVEN_SECRET_ACCESS: "true",
       SLO_PENDING_APPROVAL_MAX_MINUTES: "45",
       SLO_ACTIVE_RUN_MAX_MINUTES: "180",
@@ -123,7 +124,7 @@ describe("getConfig", () => {
       SUPPORT_HOURS_UTC: "Mon-Fri 09:00-17:00 UTC",
       SUPPORT_ESCALATION: "page platform admin,open DR bridge",
       OPENAI_TRACING_DISABLED: "false",
-      OPENAI_TRACING_EXPORT_API_KEY: undefined
+      OPENAI_TRACING_EXPORT_API_KEY: undefined,
     });
 
     expect(config).toEqual({
@@ -157,7 +158,10 @@ describe("getConfig", () => {
       REMOTE_SECRET_ENV_NAMES: ["OPENAI_API_KEY", "GITHUB_TOKEN"],
       SECRET_ALLOWED_TRUST_LEVELS: ["trusted", "restricted"],
       SENSITIVE_POLICY_PROFILES: ["sensitive", "breakglass"],
-      SECRET_DISTRIBUTION_BOUNDARY: ["api brokers credentials", "workers get task-scoped env"],
+      SECRET_DISTRIBUTION_BOUNDARY: [
+        "api brokers credentials",
+        "workers get task-scoped env",
+      ],
       POLICY_DRIVEN_SECRET_ACCESS: true,
       SLO_PENDING_APPROVAL_MAX_MINUTES: 45,
       SLO_ACTIVE_RUN_MAX_MINUTES: 180,
@@ -166,7 +170,7 @@ describe("getConfig", () => {
       SUPPORT_HOURS_UTC: "Mon-Fri 09:00-17:00 UTC",
       SUPPORT_ESCALATION: ["page platform admin", "open DR bridge"],
       OPENAI_TRACING_DISABLED: false,
-      OPENAI_TRACING_EXPORT_API_KEY: undefined
+      OPENAI_TRACING_EXPORT_API_KEY: undefined,
     });
   });
 });

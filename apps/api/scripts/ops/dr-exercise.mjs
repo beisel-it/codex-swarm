@@ -5,7 +5,7 @@ import {
   createControlPlaneSnapshot,
   restoreControlPlaneSnapshot,
   summarizeSnapshot,
-  writeSnapshotFile
+  writeSnapshotFile,
 } from "./control-plane-snapshot.mjs";
 
 const { Client } = pg;
@@ -49,15 +49,23 @@ if (!sourceConnectionString) {
 }
 
 const runId = new Date().toISOString().replaceAll(":", "-");
-const scratchDatabaseName = process.env.DRILL_DATABASE_NAME ?? `codex_swarm_drill_${runId.replaceAll("-", "_").replaceAll(".", "_")}`;
-const drillOutputFile = process.env.DRILL_OUTPUT_FILE ?? `.ops/drills/dr-exercise-${runId}.json`;
+const scratchDatabaseName =
+  process.env.DRILL_DATABASE_NAME ??
+  `codex_swarm_drill_${runId.replaceAll("-", "_").replaceAll(".", "_")}`;
+const drillOutputFile =
+  process.env.DRILL_OUTPUT_FILE ?? `.ops/drills/dr-exercise-${runId}.json`;
 const explicitRestoreConnectionString = process.env.RESTORE_DATABASE_URL;
-const scratchConnectionString = explicitRestoreConnectionString ?? buildDatabaseUrl(sourceConnectionString, scratchDatabaseName);
+const scratchConnectionString =
+  explicitRestoreConnectionString ??
+  buildDatabaseUrl(sourceConnectionString, scratchDatabaseName);
 const startedAt = Date.now();
 
 try {
   if (!explicitRestoreConnectionString) {
-    await createScratchDatabase(sourceConnectionString, new URL(scratchConnectionString).pathname.slice(1));
+    await createScratchDatabase(
+      sourceConnectionString,
+      new URL(scratchConnectionString).pathname.slice(1),
+    );
   }
 
   const backupStartedAt = Date.now();
@@ -70,7 +78,9 @@ try {
   const restoreDurationMs = Date.now() - restoreStartedAt;
 
   const validationStartedAt = Date.now();
-  const restoredSnapshot = await createControlPlaneSnapshot(scratchConnectionString);
+  const restoredSnapshot = await createControlPlaneSnapshot(
+    scratchConnectionString,
+  );
   const validationDurationMs = Date.now() - validationStartedAt;
   const sourceCounts = summarizeSnapshot(snapshot);
   const restoredCounts = summarizeSnapshot(restoredSnapshot);
@@ -79,7 +89,7 @@ try {
     .map(([tableName, count]) => ({
       table: tableName,
       source: count,
-      restored: restoredCounts[tableName]
+      restored: restoredCounts[tableName],
     }));
 
   const report = {
@@ -94,20 +104,29 @@ try {
     sourceCounts,
     restoredCounts,
     mismatches,
-    success: mismatches.length === 0
+    success: mismatches.length === 0,
   };
 
   await writeSnapshotFile(drillOutputFile, report);
-  console.log(JSON.stringify({
-    drillReport: drillOutputFile,
-    ...report
-  }, null, 2));
+  console.log(
+    JSON.stringify(
+      {
+        drillReport: drillOutputFile,
+        ...report,
+      },
+      null,
+      2,
+    ),
+  );
 
   if (mismatches.length > 0) {
     process.exitCode = 1;
   }
 } finally {
   if (!explicitRestoreConnectionString) {
-    await dropScratchDatabase(sourceConnectionString, new URL(scratchConnectionString).pathname.slice(1));
+    await dropScratchDatabase(
+      sourceConnectionString,
+      new URL(scratchConnectionString).pathname.slice(1),
+    );
   }
 }

@@ -5,13 +5,16 @@ import {
   projectTeamCreateSchema,
   projectTeamImportSchema,
   projectTeamListQuerySchema,
-  projectTeamUpdateSchema
+  projectTeamUpdateSchema,
 } from "../http/schemas.js";
 
 export const projectTeamRoutes: FastifyPluginAsync = async (app) => {
   app.get("/project-teams", async (request) => {
     const query = projectTeamListQuerySchema.parse(request.query ?? {});
-    return app.controlPlane.listProjectTeams(query.projectId, request.authContext);
+    return app.controlPlane.listProjectTeams(
+      query.projectId,
+      request.authContext,
+    );
   });
 
   app.get("/project-teams/:id", async (request) => {
@@ -21,13 +24,19 @@ export const projectTeamRoutes: FastifyPluginAsync = async (app) => {
 
   app.post("/project-teams", async (request, reply) => {
     const input = projectTeamCreateSchema.parse(request.body);
-    const projectTeam = await app.controlPlane.createProjectTeam(input, request.authContext);
+    const projectTeam = await app.controlPlane.createProjectTeam(
+      input,
+      request.authContext,
+    );
     return reply.code(201).send(projectTeam);
   });
 
   app.post("/project-teams/import", async (request, reply) => {
     const input = projectTeamImportSchema.parse(request.body);
-    const projectTeam = await app.controlPlane.importProjectTeam(input, request.authContext);
+    const projectTeam = await app.controlPlane.importProjectTeam(
+      input,
+      request.authContext,
+    );
     return reply.code(201).send(projectTeam);
   });
 

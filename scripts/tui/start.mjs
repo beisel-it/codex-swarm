@@ -13,7 +13,7 @@ function printFailureGuidance(code) {
   ];
 
   if (typeof code === "number") {
-    lines.push(`- launcher exited with status ${code}`)
+    lines.push(`- launcher exited with status ${code}`);
   }
 
   console.error(lines.join("\n"));

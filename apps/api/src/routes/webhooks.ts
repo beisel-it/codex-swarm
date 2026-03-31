@@ -1,15 +1,22 @@
 import type { FastifyPluginAsync } from "fastify";
 
-import { controlPlaneEvents, timelineEvent } from "../lib/control-plane-events.js";
+import {
+  controlPlaneEvents,
+  timelineEvent,
+} from "../lib/control-plane-events.js";
 
-function normalizeHeaders(headers: Record<string, string | string[] | undefined>) {
-  return Object.fromEntries(Object.entries(headers).flatMap(([key, value]) => {
-    if (typeof value === "undefined") {
-      return [];
-    }
+function normalizeHeaders(
+  headers: Record<string, string | string[] | undefined>,
+) {
+  return Object.fromEntries(
+    Object.entries(headers).flatMap(([key, value]) => {
+      if (typeof value === "undefined") {
+        return [];
+      }
 
-    return [[key, Array.isArray(value) ? value.join(",") : value]];
-  }));
+      return [[key, Array.isArray(value) ? value.join(",") : value]];
+    }),
+  );
 }
 
 function normalizeQuery(query: unknown) {
@@ -25,7 +32,10 @@ function normalizeQuery(query: unknown) {
       continue;
     }
 
-    if (Array.isArray(value) && value.every((entry) => typeof entry === "string")) {
+    if (
+      Array.isArray(value) &&
+      value.every((entry) => typeof entry === "string")
+    ) {
       normalized[key] = value as string[];
       continue;
     }
@@ -54,42 +64,48 @@ export const webhookRoutes: FastifyPluginAsync = async (app) => {
     method: ["DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT"],
     url: "/webhooks/*",
     handler: async (request, reply) => {
-      return app.observability.withTrace("api.webhooks.ingest", async () => {
-        const wildcard = (request.params as { "*": string })["*"] ?? "";
-        const endpointPath = `/webhooks/${wildcard}`;
-        const headers = normalizeHeaders(request.headers);
-        const result = await app.controlPlane.ingestWebhook({
-          endpointPath,
-          method: request.method,
-          headers,
-          query: normalizeQuery(request.query),
-          body: request.body ?? null,
-          contentType: request.headers["content-type"]?.toString() ?? null,
-          contentLengthBytes: readContentLength(headers),
-          remoteAddress: request.ip ?? null,
-          userAgent: request.headers["user-agent"]?.toString() ?? null
-        });
+      return app.observability.withTrace(
+        "api.webhooks.ingest",
+        async () => {
+          const wildcard = (request.params as { "*": string })["*"] ?? "";
+          const endpointPath = `/webhooks/${wildcard}`;
+          const headers = normalizeHeaders(request.headers);
+          const result = await app.controlPlane.ingestWebhook({
+            endpointPath,
+            method: request.method,
+            headers,
+            query: normalizeQuery(request.query),
+            body: request.body ?? null,
+            contentType: request.headers["content-type"]?.toString() ?? null,
+            contentLengthBytes: readContentLength(headers),
+            remoteAddress: request.ip ?? null,
+            userAgent: request.headers["user-agent"]?.toString() ?? null,
+          });
 
-        if (result.run) {
-          await app.observability.recordTimelineEvent(timelineEvent(controlPlaneEvents.runCreated, {
-            runId: result.run.id,
-            entityId: result.run.id,
-            status: result.run.status,
-            summary: `Run created from webhook trigger ${result.receipt.repeatableRunTriggerId}`,
-            metadata: {
-              receiptId: result.receipt.id,
-              repeatableRunId: result.receipt.repeatableRunId
-            }
-          }));
-        }
+          if (result.run) {
+            await app.observability.recordTimelineEvent(
+              timelineEvent(controlPlaneEvents.runCreated, {
+                runId: result.run.id,
+                entityId: result.run.id,
+                status: result.run.status,
+                summary: `Run created from webhook trigger ${result.receipt.repeatableRunTriggerId}`,
+                metadata: {
+                  receiptId: result.receipt.id,
+                  repeatableRunId: result.receipt.repeatableRunId,
+                },
+              }),
+            );
+          }
 
-        return reply.code(202).send({
-          receiptId: result.receipt.id,
-          status: result.receipt.status,
-          runId: result.run?.id ?? null,
-          rejectionReason: result.receipt.rejectionReason
-        });
-      }, { route: "webhooks.ingest" });
-    }
+          return reply.code(202).send({
+            receiptId: result.receipt.id,
+            status: result.receipt.status,
+            runId: result.run?.id ?? null,
+            rejectionReason: result.receipt.rejectionReason,
+          });
+        },
+        { route: "webhooks.ingest" },
+      );
+    },
   });
 };

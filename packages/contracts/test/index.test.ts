@@ -44,14 +44,14 @@ import {
   workerNodeRegisterSchema,
   validationCreateSchema,
   taskCreateSchema,
-  taskSchema
+  taskSchema,
 } from "../src/index.js";
 
 describe("repositoryCreateSchema", () => {
   it("leaves branch discovery open by default", () => {
     const repository = repositoryCreateSchema.parse({
       name: "codex-swarm",
-      url: "https://example.com/repo.git"
+      url: "https://example.com/repo.git",
     });
 
     expect(repository.defaultBranch).toBeUndefined();
@@ -66,13 +66,13 @@ describe("identityEntrypointSchema", () => {
       roles: ["member", "reviewer"],
       workspace: {
         id: "acme",
-        name: "Acme"
+        name: "Acme",
       },
       team: {
         id: "platform",
         workspaceId: "acme",
-        name: "Platform"
-      }
+        name: "Platform",
+      },
     });
 
     expect(identity.email).toBeNull();
@@ -86,7 +86,7 @@ describe("actorIdentitySchema", () => {
       principal: "alice",
       actorId: "oidc|alice",
       role: "workspace_admin",
-      roles: ["workspace_admin", "reviewer"]
+      roles: ["workspace_admin", "reviewer"],
     });
 
     expect(actor.roles).toEqual(["workspace_admin", "reviewer"]);
@@ -97,7 +97,7 @@ describe("runCreateSchema", () => {
   it("defaults metadata to an empty object", () => {
     const run = runCreateSchema.parse({
       repositoryId: "550e8400-e29b-41d4-a716-446655440000",
-      goal: "Ship alpha"
+      goal: "Ship alpha",
     });
 
     expect(run.metadata).toEqual({});
@@ -106,7 +106,7 @@ describe("runCreateSchema", () => {
   it("defaults the run context for manual runs", () => {
     const run = runCreateSchema.parse({
       repositoryId: "550e8400-e29b-41d4-a716-446655440000",
-      goal: "Ship alpha"
+      goal: "Ship alpha",
     });
 
     expect(run.context).toEqual({
@@ -118,7 +118,7 @@ describe("runCreateSchema", () => {
       jobId: null,
       jobName: null,
       externalInput: null,
-      values: {}
+      values: {},
     });
   });
 
@@ -126,7 +126,7 @@ describe("runCreateSchema", () => {
     const run = runCreateSchema.parse({
       repositoryId: "550e8400-e29b-41d4-a716-446655440000",
       projectId: null,
-      goal: "Ship alpha"
+      goal: "Ship alpha",
     });
 
     expect(run.projectId).toBeNull();
@@ -146,7 +146,7 @@ describe("project schemas", () => {
       runCount: 5,
       latestRunAt: now,
       createdAt: now,
-      updatedAt: now
+      updatedAt: now,
     });
 
     expect(project.repositoryCount).toBe(2);
@@ -186,12 +186,12 @@ describe("project schemas", () => {
               defaultBranch: "main",
               branches: ["main"],
               providerRepoUrl: "https://example.com/repo.git",
-              lastError: null
+              lastError: null,
             },
             createdAt: now,
-            updatedAt: now
-          }
-        }
+            updatedAt: now,
+          },
+        },
       ],
       runAssignments: [
         {
@@ -223,12 +223,12 @@ describe("project schemas", () => {
             metadata: {},
             createdBy: "leader",
             createdAt: now,
-            updatedAt: now
-          }
-        }
+            updatedAt: now,
+          },
+        },
       ],
       createdAt: now,
-      updatedAt: now
+      updatedAt: now,
     });
 
     expect(project.repositoryAssignments).toHaveLength(1);
@@ -240,7 +240,7 @@ describe("project schemas", () => {
       repositoryId: "550e8400-e29b-41d4-a716-446655440000",
       projectId: "550e8400-e29b-41d4-a716-446655440010",
       projectTeamId: "550e8400-e29b-41d4-a716-446655440011",
-      goal: "Ship alpha"
+      goal: "Ship alpha",
     });
 
     expect(run.projectId).toBe("550e8400-e29b-41d4-a716-446655440010");
@@ -251,7 +251,7 @@ describe("projectTeamImportSchema", () => {
   it("accepts blueprint-based project team imports", () => {
     const input = projectTeamImportSchema.parse({
       projectId: "550e8400-e29b-41d4-a716-446655440110",
-      blueprintId: "development-stack"
+      blueprintId: "development-stack",
     });
 
     expect(input.blueprintId).toBe("development-stack");
@@ -261,7 +261,7 @@ describe("projectTeamImportSchema", () => {
   it("keeps templateId as a compatibility alias for blueprintId", () => {
     const input = projectTeamImportSchema.parse({
       projectId: "550e8400-e29b-41d4-a716-446655440111",
-      templateId: "development-stack"
+      templateId: "development-stack",
     });
 
     expect(input.templateId).toBe("development-stack");
@@ -275,7 +275,7 @@ describe("taskCreateSchema", () => {
       runId: "550e8400-e29b-41d4-a716-446655440000",
       title: "Write tests",
       description: "Add coverage for core services",
-      role: "qa-engineer"
+      role: "qa-engineer",
     });
 
     expect(task.priority).toBe(3);
@@ -291,16 +291,16 @@ describe("taskCreateSchema", () => {
       description: "Add coverage for verification-gated completion",
       role: "tester",
       definitionOfDone: [
-        "new task creation persists structured definition of done checks"
+        "new task creation persists structured definition of done checks",
       ],
-      acceptanceCriteria: ["task remains readable in operator UIs"]
+      acceptanceCriteria: ["task remains readable in operator UIs"],
     });
 
     expect(task.definitionOfDone).toEqual([
-      "new task creation persists structured definition of done checks"
+      "new task creation persists structured definition of done checks",
     ]);
     expect(task.acceptanceCriteria).toEqual([
-      "task remains readable in operator UIs"
+      "task remains readable in operator UIs",
     ]);
   });
 });
@@ -322,7 +322,7 @@ describe("taskSchema", () => {
       acceptanceCriteria: ["implementation is reviewable"],
       validationTemplates: [],
       createdAt: now,
-      updatedAt: now
+      updatedAt: now,
     });
 
     expect(task.verificationStatus).toBe("not_required");
@@ -349,11 +349,13 @@ describe("taskSchema", () => {
       acceptanceCriteria: ["legacy summary remains available"],
       validationTemplates: [],
       createdAt: now,
-      updatedAt: now
+      updatedAt: now,
     });
 
     expect(task.definitionOfDone).toEqual([]);
-    expect(task.acceptanceCriteria).toEqual(["legacy summary remains available"]);
+    expect(task.acceptanceCriteria).toEqual([
+      "legacy summary remains available",
+    ]);
   });
 });
 
@@ -366,15 +368,19 @@ describe("workerDispatchCompleteSchema", () => {
         kind: "verification",
         summary: "Definition of done is not satisfied yet.",
         outcomeStatus: "failed",
-        findings: ["The task does not include the requested verification output."],
-        changeRequests: ["Add the missing verification output and rerun the checks."],
-        evidence: ["artifact:.swarm/reports/verification.md"]
-      }
+        findings: [
+          "The task does not include the requested verification output.",
+        ],
+        changeRequests: [
+          "Add the missing verification output and rerun the checks.",
+        ],
+        evidence: ["artifact:.swarm/reports/verification.md"],
+      },
     });
 
     expect(completion.outcome).toMatchObject({
       kind: "verification",
-      outcomeStatus: "failed"
+      outcomeStatus: "failed",
     });
   });
 });
@@ -396,16 +402,16 @@ describe("repeatableRunDefinitionSchema", () => {
         goal: "Review the incoming issue",
         concurrencyCap: 2,
         metadata: {
-          preset: "issue-review"
-        }
+          preset: "issue-review",
+        },
       },
       createdAt: now,
-      updatedAt: now
+      updatedAt: now,
     });
 
     expect(definition.execution.branchName).toBeNull();
     expect(definition.execution.metadata).toEqual({
-      preset: "issue-review"
+      preset: "issue-review",
     });
   });
 
@@ -424,10 +430,10 @@ describe("repeatableRunDefinitionSchema", () => {
       execution: {
         goal: "Use legacy settings",
         concurrencyCap: 1,
-        metadata: {}
+        metadata: {},
       },
       createdAt: now,
-      updatedAt: now
+      updatedAt: now,
     });
 
     expect(definition.projectTeamId).toBeNull();
@@ -445,9 +451,9 @@ describe("repeatableRunTriggerCreateSchema", () => {
         eventNameHeader: "x-github-event",
         filters: {
           eventNames: ["pull_request"],
-          actions: ["opened"]
-        }
-      }
+          actions: ["opened"],
+        },
+      },
     });
 
     expect(trigger.config.allowedMethods).toEqual(["POST"]);
@@ -464,24 +470,26 @@ describe("inboundExternalEventEnvelopeSchema", () => {
       action: "opened",
       payload: {
         repository: {
-          full_name: "acme/api"
+          full_name: "acme/api",
         },
         pull_request: {
-          number: 42
-        }
+          number: 42,
+        },
       },
       request: {
         method: "POST",
         path: "/webhooks/project/pr-review",
         headers: {
-          "x-github-event": "pull_request"
+          "x-github-event": "pull_request",
         },
         receivedAt: "2026-03-30T09:01:00.000Z",
-        deliveryId: "delivery-123"
-      }
+        deliveryId: "delivery-123",
+      },
     });
 
-    expect(event.request.receivedAt).toEqual(new Date("2026-03-30T09:01:00.000Z"));
+    expect(event.request.receivedAt).toEqual(
+      new Date("2026-03-30T09:01:00.000Z"),
+    );
     expect(event.request.deliveryId).toBe("delivery-123");
   });
 });
@@ -495,7 +503,7 @@ describe("runContextSchema", () => {
           id: "550e8400-e29b-41d4-a716-446655440102",
           repeatableRunId: "550e8400-e29b-41d4-a716-446655440101",
           name: "PR opened webhook",
-          kind: "webhook"
+          kind: "webhook",
         },
         event: {
           sourceType: "webhook",
@@ -504,26 +512,26 @@ describe("runContextSchema", () => {
           action: "opened",
           payload: {
             pull_request: {
-              number: 42
-            }
+              number: 42,
+            },
           },
           request: {
             method: "POST",
             path: "/webhooks/project/pr-review",
-            receivedAt: "2026-03-30T09:01:00.000Z"
-          }
+            receivedAt: "2026-03-30T09:01:00.000Z",
+          },
         },
-        receivedAt: "2026-03-30T09:01:01.000Z"
+        receivedAt: "2026-03-30T09:01:01.000Z",
       },
       values: {
-        initiator: "automation"
-      }
+        initiator: "automation",
+      },
     });
 
     expect(context.externalInput?.event.sourceType).toBe("webhook");
     expect(context.externalInput?.trigger.kind).toBe("webhook");
     expect(context.values).toEqual({
-      initiator: "automation"
+      initiator: "automation",
     });
   });
 });
@@ -561,13 +569,13 @@ describe("runDetailSchema", () => {
         autoPublishBranch: false,
         autoCreatePullRequest: false,
         titleTemplate: null,
-        bodyTemplate: null
+        bodyTemplate: null,
       },
       handoffExecution: {
         state: "idle",
         failureReason: null,
         attemptedAt: null,
-        completedAt: null
+        completedAt: null,
       },
       completedAt: null,
       metadata: {},
@@ -590,7 +598,7 @@ describe("runDetailSchema", () => {
           acceptanceCriteria: [],
           validationTemplates: [],
           createdAt: now,
-          updatedAt: now
+          updatedAt: now,
         },
         {
           id: "550e8400-e29b-41d4-a716-446655440011",
@@ -607,8 +615,8 @@ describe("runDetailSchema", () => {
           acceptanceCriteria: [],
           validationTemplates: [],
           createdAt: now,
-          updatedAt: now
-        }
+          updatedAt: now,
+        },
       ],
       agents: [
         {
@@ -628,11 +636,11 @@ describe("runDetailSchema", () => {
             visibleTranscriptSessionId: "550e8400-e29b-41d4-a716-446655440031",
             visibleTranscriptSessionState: "stopped",
             visibleTranscriptUpdatedAt: now,
-            lineageSource: "session_rollover"
+            lineageSource: "session_rollover",
           },
           createdAt: now,
-          updatedAt: now
-        }
+          updatedAt: now,
+        },
       ],
       sessions: [
         {
@@ -651,7 +659,7 @@ describe("runDetailSchema", () => {
           staleReason: null,
           metadata: {},
           createdAt: now,
-          updatedAt: now
+          updatedAt: now,
         },
         {
           id: "550e8400-e29b-41d4-a716-446655440030",
@@ -669,8 +677,8 @@ describe("runDetailSchema", () => {
           staleReason: null,
           metadata: {},
           createdAt: now,
-          updatedAt: now
-        }
+          updatedAt: now,
+        },
       ],
       taskDag: {
         nodes: [
@@ -684,7 +692,7 @@ describe("runDetailSchema", () => {
             dependentTaskIds: ["550e8400-e29b-41d4-a716-446655440011"],
             blockedByTaskIds: [],
             isRoot: true,
-            isBlocked: false
+            isBlocked: false,
           },
           {
             taskId: "550e8400-e29b-41d4-a716-446655440011",
@@ -696,8 +704,8 @@ describe("runDetailSchema", () => {
             dependentTaskIds: [],
             blockedByTaskIds: ["550e8400-e29b-41d4-a716-446655440010"],
             isRoot: false,
-            isBlocked: true
-          }
+            isBlocked: true,
+          },
         ],
         edges: [
           {
@@ -706,8 +714,8 @@ describe("runDetailSchema", () => {
             targetTaskId: "550e8400-e29b-41d4-a716-446655440011",
             kind: "dependency",
             isSatisfied: true,
-            isBlocking: false
-          }
+            isBlocking: false,
+          },
         ],
         rootTaskIds: ["550e8400-e29b-41d4-a716-446655440010"],
         blockedTaskIds: ["550e8400-e29b-41d4-a716-446655440011"],
@@ -717,17 +725,25 @@ describe("runDetailSchema", () => {
             blockingTaskIds: ["550e8400-e29b-41d4-a716-446655440010"],
             pathTaskIds: [
               "550e8400-e29b-41d4-a716-446655440010",
-              "550e8400-e29b-41d4-a716-446655440011"
+              "550e8400-e29b-41d4-a716-446655440011",
             ],
-            pathEdgeIds: ["550e8400-e29b-41d4-a716-446655440010->550e8400-e29b-41d4-a716-446655440011"]
-          }
-        ]
-      }
+            pathEdgeIds: [
+              "550e8400-e29b-41d4-a716-446655440010->550e8400-e29b-41d4-a716-446655440011",
+            ],
+          },
+        ],
+      },
     });
 
-    expect(runDetail.taskDag.rootTaskIds).toEqual(["550e8400-e29b-41d4-a716-446655440010"]);
-    expect(runDetail.taskDag.blockedTaskIds).toEqual(["550e8400-e29b-41d4-a716-446655440011"]);
-    expect(runDetail.agents[0]?.observability.lineageSource).toBe("session_rollover");
+    expect(runDetail.taskDag.rootTaskIds).toEqual([
+      "550e8400-e29b-41d4-a716-446655440010",
+    ]);
+    expect(runDetail.taskDag.blockedTaskIds).toEqual([
+      "550e8400-e29b-41d4-a716-446655440011",
+    ]);
+    expect(runDetail.agents[0]?.observability.lineageSource).toBe(
+      "session_rollover",
+    );
   });
 });
 
@@ -737,7 +753,7 @@ describe("runJobScopeSchema", () => {
       kind: "ad_hoc",
       projectId: null,
       repositoryProjectId: "550e8400-e29b-41d4-a716-446655440010",
-      reason: "run_unassigned"
+      reason: "run_unassigned",
     });
 
     expect(scope.kind).toBe("ad_hoc");
@@ -781,13 +797,13 @@ describe("runsByJobScopeSchema", () => {
             autoPublishBranch: false,
             autoCreatePullRequest: false,
             titleTemplate: null,
-            bodyTemplate: null
+            bodyTemplate: null,
           },
           handoffExecution: {
             state: "idle",
             failureReason: null,
             attemptedAt: null,
-            completedAt: null
+            completedAt: null,
           },
           completedAt: null,
           metadata: {},
@@ -795,14 +811,14 @@ describe("runsByJobScopeSchema", () => {
             kind: "project",
             projectId: "550e8400-e29b-41d4-a716-446655440010",
             repositoryProjectId: "550e8400-e29b-41d4-a716-446655440010",
-            reason: "run_assigned"
+            reason: "run_assigned",
           },
           createdBy: "leader",
           createdAt: now,
-          updatedAt: now
-        }
+          updatedAt: now,
+        },
       ],
-      adHocJobs: []
+      adHocJobs: [],
     });
 
     expect(grouped.projectJobs).toHaveLength(1);
@@ -820,15 +836,15 @@ describe("agentCreateSchema", () => {
         threadId: "thread-1",
         cwd: "/tmp/codex-swarm",
         sandbox: "danger-full-access",
-        approvalPolicy: "never"
-      }
+        approvalPolicy: "never",
+      },
     });
 
     expect(agent.status).toBe("provisioning");
     expect(agent.session).toMatchObject({
       includePlanTool: false,
       placementConstraintLabels: [],
-      metadata: {}
+      metadata: {},
     });
   });
 });
@@ -844,7 +860,7 @@ describe("agentObservabilitySchema", () => {
       visibleTranscriptSessionId: null,
       visibleTranscriptSessionState: null,
       visibleTranscriptUpdatedAt: null,
-      lineageSource: "not_started"
+      lineageSource: "not_started",
     });
   });
 
@@ -856,26 +872,32 @@ describe("agentObservabilitySchema", () => {
       visibleTranscriptSessionId: "550e8400-e29b-41d4-a716-446655440021",
       visibleTranscriptSessionState: "stopped",
       visibleTranscriptUpdatedAt: new Date("2026-03-29T10:05:00.000Z"),
-      lineageSource: "session_rollover"
+      lineageSource: "session_rollover",
     });
 
-    expect(observability.currentSessionId).toBe("550e8400-e29b-41d4-a716-446655440020");
-    expect(observability.visibleTranscriptSessionId).toBe("550e8400-e29b-41d4-a716-446655440021");
+    expect(observability.currentSessionId).toBe(
+      "550e8400-e29b-41d4-a716-446655440020",
+    );
+    expect(observability.visibleTranscriptSessionId).toBe(
+      "550e8400-e29b-41d4-a716-446655440021",
+    );
     expect(observability.lineageSource).toBe("session_rollover");
   });
 
   it("requires a visible transcript when operating in transcript fallback mode", () => {
-    expect(() => agentObservabilitySchema.parse({
-      mode: "transcript_visibility",
-      lineageSource: "task_state_transition"
-    })).toThrow(/visibleTranscriptSessionId/);
+    expect(() =>
+      agentObservabilitySchema.parse({
+        mode: "transcript_visibility",
+        lineageSource: "task_state_transition",
+      }),
+    ).toThrow(/visibleTranscriptSessionId/);
   });
 });
 
 describe("workerNodeRegisterSchema", () => {
   it("defaults capability labels and active scheduling state", () => {
     const workerNode = workerNodeRegisterSchema.parse({
-      name: "node-a"
+      name: "node-a",
     });
 
     expect(workerNode.capabilityLabels).toEqual([]);
@@ -896,7 +918,7 @@ describe("workerNodeHeartbeatSchema", () => {
 describe("workerNodeDrainUpdateSchema", () => {
   it("accepts explicit drain state transitions", () => {
     const drainUpdate = workerNodeDrainUpdateSchema.parse({
-      drainState: "draining"
+      drainState: "draining",
     });
 
     expect(drainUpdate.drainState).toBe("draining");
@@ -908,7 +930,7 @@ describe("approvalCreateSchema", () => {
     const approval = approvalCreateSchema.parse({
       runId: "550e8400-e29b-41d4-a716-446655440000",
       kind: "plan",
-      requestedBy: "tech-lead"
+      requestedBy: "tech-lead",
     });
 
     expect(approval.requestedPayload).toEqual({});
@@ -921,13 +943,13 @@ describe("approvalCreateSchema", () => {
       requestedBy: "tech-lead",
       delegation: {
         delegateActorId: "reviewer-2",
-        reason: "coverage for on-call reviewer"
-      }
+        reason: "coverage for on-call reviewer",
+      },
     });
 
     expect(approval.delegation).toEqual({
       delegateActorId: "reviewer-2",
-      reason: "coverage for on-call reviewer"
+      reason: "coverage for on-call reviewer",
     });
   });
 });
@@ -937,7 +959,7 @@ describe("approvalResolveSchema", () => {
     const resolution = approvalResolveSchema.parse({
       status: "rejected",
       resolver: "reviewer-1",
-      feedback: "Validation report is incomplete"
+      feedback: "Validation report is incomplete",
     });
 
     expect(resolution.resolutionPayload).toEqual({});
@@ -949,7 +971,7 @@ describe("validationCreateSchema", () => {
     const validation = validationCreateSchema.parse({
       runId: "550e8400-e29b-41d4-a716-446655440000",
       name: "typecheck",
-      command: "pnpm typecheck"
+      command: "pnpm typecheck",
     });
 
     expect(validation.artifactIds).toEqual([]);
@@ -963,7 +985,7 @@ describe("artifactCreateSchema", () => {
       kind: "report",
       path: "artifacts/report.json",
       contentType: "application/json",
-      contentBase64: "eyJvayI6dHJ1ZX0="
+      contentBase64: "eyJvayI6dHJ1ZX0=",
     });
 
     expect(artifact.contentBase64).toBe("eyJvayI6dHJ1ZX0=");
@@ -976,9 +998,9 @@ describe("sessionTranscriptAppendSchema", () => {
       entries: [
         {
           kind: "prompt",
-          text: "Create the landing page."
-        }
-      ]
+          text: "Create the landing page.",
+        },
+      ],
     });
 
     expect(transcript.entries[0]?.metadata).toEqual({});
@@ -996,16 +1018,16 @@ describe("artifactDiffSummarySchema", () => {
           path: "apps/api/src/routes/artifacts.ts",
           changeType: "modified",
           additions: 7,
-          deletions: 1
+          deletions: 1,
         },
         {
           path: "frontend/src/App.tsx",
           changeType: "added",
           additions: 3,
-          deletions: 2
-        }
+          deletions: 2,
+        },
       ],
-      diffPreview: "@@ -1,2 +1,2 @@"
+      diffPreview: "@@ -1,2 +1,2 @@",
     });
 
     expect(diffSummary.filesChanged).toBe(2);
@@ -1027,7 +1049,7 @@ describe("artifactDetailSchema", () => {
         sizeBytes: 120,
         sha256: "abc123",
         metadata: {},
-        createdAt: new Date("2026-03-29T00:00:00.000Z")
+        createdAt: new Date("2026-03-29T00:00:00.000Z"),
       },
       contentState: "available",
       bodyText: "diff --git a/file b/file",
@@ -1040,10 +1062,10 @@ describe("artifactDetailSchema", () => {
             path: "file",
             changeType: "modified",
             additions: 1,
-            deletions: 0
-          }
-        ]
-      }
+            deletions: 0,
+          },
+        ],
+      },
     });
 
     expect(detail.diffSummary?.filesChanged).toBe(1);
@@ -1056,7 +1078,7 @@ describe("repositoryCreateSchema", () => {
     const repository = repositoryCreateSchema.parse({
       name: "codex-swarm",
       url: "https://github.com/example/codex-swarm",
-      provider: "github"
+      provider: "github",
     });
 
     expect(repository.trustLevel).toBe("trusted");
@@ -1069,7 +1091,7 @@ describe("runCreateSchema", () => {
   it("defaults concurrency cap for new runs", () => {
     const run = runCreateSchema.parse({
       repositoryId: "550e8400-e29b-41d4-a716-446655440000",
-      goal: "Ship M3"
+      goal: "Ship M3",
     });
 
     expect(run.concurrencyCap).toBe(1);
@@ -1079,7 +1101,7 @@ describe("runCreateSchema", () => {
 describe("repositoryUpdateSchema", () => {
   it("allows clearing a repository project assignment", () => {
     const repository = repositoryUpdateSchema.parse({
-      projectId: null
+      projectId: null,
     });
 
     expect(repository.projectId).toBeNull();
@@ -1089,7 +1111,7 @@ describe("repositoryUpdateSchema", () => {
 describe("runBranchPublishSchema", () => {
   it("defaults the remote for branch publish", () => {
     const publish = runBranchPublishSchema.parse({
-      publishedBy: "tech-lead"
+      publishedBy: "tech-lead",
     });
 
     expect(publish.remoteName).toBe("origin");
@@ -1101,7 +1123,7 @@ describe("runPullRequestHandoffSchema", () => {
     const handoff = runPullRequestHandoffSchema.parse({
       title: "Open PR",
       body: "Validation evidence attached",
-      createdBy: "tech-lead"
+      createdBy: "tech-lead",
     });
 
     expect(handoff.status).toBe("draft");
@@ -1125,18 +1147,18 @@ describe("controlPlaneMetricsSchema", () => {
         tasksPending: 2,
         tasksBlocked: 0,
         approvalsPending: 1,
-        busyAgents: 3
+        busyAgents: 3,
       },
       retries: {
         recoverableDatabaseFallbacks: 0,
-        taskUnblocks: 4
+        taskUnblocks: 4,
       },
       failures: {
         runsFailed: 0,
         tasksFailed: 0,
         agentsFailed: 0,
         validationsFailed: 0,
-        requestFailures: 1
+        requestFailures: 1,
       },
       usage: {
         repositories: 2,
@@ -1148,13 +1170,13 @@ describe("controlPlaneMetricsSchema", () => {
         validationsTotal: 6,
         artifactsTotal: 4,
         workerNodesOnline: 2,
-        workerNodesDraining: 1
+        workerNodesDraining: 1,
       },
       cost: {
         runsWithBudget: 5,
         totalBudgetedRunCostUsd: 45.5,
         averageBudgetedRunCostUsd: 9.1,
-        maxBudgetedRunCostUsd: 18
+        maxBudgetedRunCostUsd: 18,
       },
       performance: {
         completedRunsMeasured: 7,
@@ -1163,46 +1185,46 @@ describe("controlPlaneMetricsSchema", () => {
         runDurationMs: {
           p50: 1000,
           p95: 5000,
-          max: 6000
+          max: 6000,
         },
         approvalResolutionMs: {
           p50: 500,
           p95: 1500,
-          max: 2000
+          max: 2000,
         },
         validationTurnaroundMs: {
           p50: 750,
           p95: 1750,
-          max: 2500
-        }
+          max: 2500,
+        },
       },
       slo: {
         objectives: {
           pendingApprovalMaxMinutes: 60,
           activeRunMaxMinutes: 240,
           taskQueueMax: 100,
-          supportResponseHours: 8
+          supportResponseHours: 8,
         },
         support: {
           hoursUtc: "Mon-Fri 08:00-18:00 UTC",
-          escalation: ["page platform admin"]
+          escalation: ["page platform admin"],
         },
         status: {
           pendingApprovalsWithinTarget: true,
           activeRunsWithinTarget: true,
           queueDepthWithinTarget: true,
-          withinEnvelope: true
+          withinEnvelope: true,
         },
         measurements: {
           oldestPendingApprovalAgeMinutes: 12,
           oldestActiveRunAgeMinutes: 45,
           pendingApprovals: 1,
           activeRuns: 3,
-          tasksPending: 2
-        }
+          tasksPending: 2,
+        },
       },
       eventsRecorded: 11,
-      recordedAt: new Date("2026-03-28T12:15:00.000Z")
+      recordedAt: new Date("2026-03-28T12:15:00.000Z"),
     });
 
     expect(metrics.slo.status.withinEnvelope).toBe(true);
@@ -1224,7 +1246,7 @@ describe("workerDispatchAssignmentSchema", () => {
       profile: "default",
       sandbox: "danger-full-access",
       approvalPolicy: "never",
-      createdAt: new Date("2026-03-28T12:00:00.000Z")
+      createdAt: new Date("2026-03-28T12:00:00.000Z"),
     });
 
     expect(assignment).toMatchObject({
@@ -1239,7 +1261,7 @@ describe("workerDispatchAssignmentSchema", () => {
       metadata: {},
       attempt: 0,
       maxAttempts: 3,
-      leaseTtlSeconds: 300
+      leaseTtlSeconds: 300,
     });
   });
 });
@@ -1256,7 +1278,7 @@ describe("workerDispatchCreateSchema", () => {
       prompt: "Run the task",
       profile: "default",
       sandbox: "danger-full-access",
-      approvalPolicy: "never"
+      approvalPolicy: "never",
     });
 
     expect(assignment.queue).toBe("worker-dispatch");
@@ -1269,7 +1291,7 @@ describe("workerDispatchCreateSchema", () => {
 describe("workerDispatchListQuerySchema", () => {
   it("accepts optional dispatch filters", () => {
     const query = workerDispatchListQuerySchema.parse({
-      state: "claimed"
+      state: "claimed",
     });
 
     expect(query.state).toBe("claimed");
@@ -1281,7 +1303,7 @@ describe("workerDispatchCompleteSchema", () => {
     const completion = workerDispatchCompleteSchema.parse({
       nodeId: "550e8400-e29b-41d4-a716-446655440011",
       status: "failed",
-      reason: "node lost"
+      reason: "node lost",
     });
 
     expect(completion.status).toBe("failed");
@@ -1291,7 +1313,7 @@ describe("workerDispatchCompleteSchema", () => {
 describe("workerNodeReconcileSchema", () => {
   it("defaults reconciliation to marking nodes offline", () => {
     const reconciliation = workerNodeReconcileSchema.parse({
-      reason: "node heartbeat expired"
+      reason: "node heartbeat expired",
     });
 
     expect(reconciliation.markOffline).toBe(true);
@@ -1308,12 +1330,12 @@ describe("workerNodeRuntimeSchema", () => {
       codexCommand: ["codex", "mcp-server"],
       controlPlaneUrl: "https://control-plane.internal",
       postgresUrl: "postgres://postgres:postgres@db.internal:5432/codex",
-      redisUrl: "redis://cache.internal:6379/0"
+      redisUrl: "redis://cache.internal:6379/0",
     });
 
     expect(runtime.queueKeyPrefix).toBe("codex-swarm");
     expect(runtime.codexTransport).toEqual({
-      kind: "stdio"
+      kind: "stdio",
     });
     expect(runtime.capabilities).toEqual([]);
     expect(runtime.credentialEnvNames).toEqual([]);
@@ -1334,13 +1356,13 @@ describe("remoteWorkerBootstrapSchema", () => {
           kind: "streamable_http",
           url: "https://codex-mcp.internal/mcp",
           headers: {
-            authorization: "Bearer shared-token"
+            authorization: "Bearer shared-token",
           },
-          protocolVersion: "2025-11-25"
+          protocolVersion: "2025-11-25",
         },
         controlPlaneUrl: "https://control-plane.internal",
         postgresUrl: "postgres://postgres:postgres@db.internal:5432/codex",
-        redisUrl: "redis://cache.internal:6379/0"
+        redisUrl: "redis://cache.internal:6379/0",
       },
       dispatch: {
         id: "550e8400-e29b-41d4-a716-446655440010",
@@ -1354,16 +1376,18 @@ describe("remoteWorkerBootstrapSchema", () => {
         profile: "default",
         sandbox: "danger-full-access",
         approvalPolicy: "never",
-        createdAt: new Date("2026-03-28T12:00:00.000Z")
+        createdAt: new Date("2026-03-28T12:00:00.000Z"),
       },
       environment: {
-        CODEX_SWARM_NODE_ID: "node-a"
+        CODEX_SWARM_NODE_ID: "node-a",
       },
-      checks: [{
-        name: "redis",
-        status: "ready",
-        detail: "redis connection string configured"
-      }]
+      checks: [
+        {
+          name: "redis",
+          status: "ready",
+          detail: "redis connection string configured",
+        },
+      ],
     });
 
     expect(bootstrap.environment.CODEX_SWARM_NODE_ID).toBe("node-a");
@@ -1377,7 +1401,7 @@ describe("workerDrainCommandSchema", () => {
     const command = workerDrainCommandSchema.parse({
       nodeId: "node-a",
       targetState: "draining",
-      reason: "maintenance"
+      reason: "maintenance",
     });
 
     expect(command.allowActiveAssignments).toBe(true);
@@ -1394,48 +1418,52 @@ describe("governance admin schemas", () => {
         actorType: "user",
         role: "platform-admin",
         teamId: "team-a",
-        policyProfile: "standard"
+        policyProfile: "standard",
       },
       retention: {
         policy: { runsDays: 30, artifactsDays: 30, eventsDays: 30 },
         runs: { total: 3, expired: 1, retained: 2 },
         artifacts: { total: 4, expired: 1, retained: 3 },
-        events: { total: 5, expired: 2, retained: 3 }
+        events: { total: 5, expired: 2, retained: 3 },
       },
       approvals: {
         total: 1,
         pending: 0,
         approved: 1,
         rejected: 0,
-        history: [{
-          approvalId: "550e8400-e29b-41d4-a716-446655440010",
-          runId: "550e8400-e29b-41d4-a716-446655440001",
-          taskId: null,
-          repositoryId: "550e8400-e29b-41d4-a716-446655440004",
-          repositoryName: "codex-swarm",
-          kind: "plan",
-          status: "approved",
-          requestedAt: new Date("2026-03-28T10:00:00.000Z"),
-          resolvedAt: new Date("2026-03-28T11:00:00.000Z"),
-          requestedBy: "alice",
-          requestedByActor: {
-            principal: "alice",
-            actorId: "user-1",
-            actorType: "user",
-            role: "platform-admin",
-            teamId: "team-a",
-            policyProfile: "standard"
+        history: [
+          {
+            approvalId: "550e8400-e29b-41d4-a716-446655440010",
+            runId: "550e8400-e29b-41d4-a716-446655440001",
+            taskId: null,
+            repositoryId: "550e8400-e29b-41d4-a716-446655440004",
+            repositoryName: "codex-swarm",
+            kind: "plan",
+            status: "approved",
+            requestedAt: new Date("2026-03-28T10:00:00.000Z"),
+            resolvedAt: new Date("2026-03-28T11:00:00.000Z"),
+            requestedBy: "alice",
+            requestedByActor: {
+              principal: "alice",
+              actorId: "user-1",
+              actorType: "user",
+              role: "platform-admin",
+              teamId: "team-a",
+              policyProfile: "standard",
+            },
+            resolver: "bob",
+            resolverActor: null,
+            policyProfile: "standard",
+            requestedPayload: {},
+            resolutionPayload: {},
           },
-          resolver: "bob",
-          resolverActor: null,
-          policyProfile: "standard",
-          requestedPayload: {},
-          resolutionPayload: {}
-        }]
+        ],
       },
       policies: {
-        repositoryProfiles: [{ profile: "standard", repositoryCount: 1, runCount: 2 }],
-        sensitiveRepositories: []
+        repositoryProfiles: [
+          { profile: "standard", repositoryCount: 1, runCount: 2 },
+        ],
+        sensitiveRepositories: [],
       },
       secrets: {
         sourceMode: "external_manager",
@@ -1444,11 +1472,13 @@ describe("governance admin schemas", () => {
         allowedRepositoryTrustLevels: ["trusted"],
         sensitivePolicyProfiles: ["sensitive"],
         credentialDistribution: ["api brokers credentials"],
-        policyDrivenAccess: true
-      }
+        policyDrivenAccess: true,
+      },
     });
 
-    expect(report.approvals.history[0]?.requestedByActor?.actorId).toBe("user-1");
+    expect(report.approvals.history[0]?.requestedByActor?.actorId).toBe(
+      "user-1",
+    );
     expect(report.secrets.provider).toBe("vault");
   });
 
@@ -1462,11 +1492,11 @@ describe("governance admin schemas", () => {
         actorType: "user",
         role: "platform-admin",
         teamId: "team-a",
-        policyProfile: "standard"
+        policyProfile: "standard",
       },
       runsUpdated: 2,
       artifactsUpdated: 3,
-      eventsUpdated: 4
+      eventsUpdated: 4,
     });
     const plan = secretAccessPlanSchema.parse({
       repositoryId: "550e8400-e29b-41d4-a716-446655440004",
@@ -1478,7 +1508,8 @@ describe("governance admin schemas", () => {
       provider: "vault",
       credentialEnvNames: ["OPENAI_API_KEY"],
       distributionBoundary: ["workers get task-scoped env"],
-      reason: "policy profile sensitive requires brokered secret delivery for governed repos"
+      reason:
+        "policy profile sensitive requires brokered secret delivery for governed repos",
     });
 
     expect(reconcile.eventsUpdated).toBe(4);

@@ -10,8 +10,8 @@ vi.mock("../src/lib/repository-provider.js", () => ({
     defaultBranch: "main",
     branches: ["main"],
     providerRepoUrl: repository.url,
-    lastError: null
-  }))
+    lastError: null,
+  })),
 }));
 
 class FakePolicyDb {
@@ -23,7 +23,7 @@ class FakePolicyDb {
     name: "Platform",
     policyProfile: "standard",
     createdAt: new Date("2026-03-28T12:00:00.000Z"),
-    updatedAt: new Date("2026-03-28T12:00:00.000Z")
+    updatedAt: new Date("2026-03-28T12:00:00.000Z"),
   };
 
   insert(table: unknown) {
@@ -41,8 +41,8 @@ class FakePolicyDb {
           }
 
           throw new Error("unexpected insert table");
-        }
-      })
+        },
+      }),
     };
   }
 
@@ -55,8 +55,8 @@ class FakePolicyDb {
           }
 
           throw new Error("unexpected select table");
-        }
-      })
+        },
+      }),
     };
   }
 
@@ -71,13 +71,13 @@ class FakePolicyDb {
 
             this.teamRecord = {
               ...this.teamRecord,
-              ...values
+              ...values,
             };
 
             return [this.teamRecord];
-          }
-        })
-      })
+          },
+        }),
+      }),
     };
   }
 
@@ -95,21 +95,24 @@ describe("ControlPlaneService policy inheritance", () => {
     const db = new FakePolicyDb();
     db.teamRecord.policyProfile = "breakglass";
     const service = new ControlPlaneService(db as never, {
-      now: () => new Date("2026-03-28T12:00:00.000Z")
+      now: () => new Date("2026-03-28T12:00:00.000Z"),
     });
 
-    const repository = await service.createRepository({
-      name: "codex-swarm",
-      url: "https://github.com/example/codex-swarm",
-      defaultBranch: "main",
-      trustLevel: "trusted"
-    }, {
-      workspaceId: "acme",
-      workspaceName: "Acme",
-      teamId: "platform",
-      teamName: "Platform",
-      policyProfile: "breakglass"
-    });
+    const repository = await service.createRepository(
+      {
+        name: "codex-swarm",
+        url: "https://github.com/example/codex-swarm",
+        defaultBranch: "main",
+        trustLevel: "trusted",
+      },
+      {
+        workspaceId: "acme",
+        workspaceName: "Acme",
+        teamId: "platform",
+        teamName: "Platform",
+        policyProfile: "breakglass",
+      },
+    );
 
     expect(repository.approvalProfile).toBe("breakglass");
     expect(db.repositoryValues.at(-1)?.approvalProfile).toBe("breakglass");
@@ -118,21 +121,24 @@ describe("ControlPlaneService policy inheritance", () => {
   it("elevates restricted repositories to a sensitive profile by default", async () => {
     const db = new FakePolicyDb();
     const service = new ControlPlaneService(db as never, {
-      now: () => new Date("2026-03-28T12:00:00.000Z")
+      now: () => new Date("2026-03-28T12:00:00.000Z"),
     });
 
-    const repository = await service.createRepository({
-      name: "sensitive-repo",
-      url: "https://github.com/example/sensitive-repo",
-      defaultBranch: "main",
-      trustLevel: "restricted"
-    }, {
-      workspaceId: "acme",
-      workspaceName: "Acme",
-      teamId: "platform",
-      teamName: "Platform",
-      policyProfile: "standard"
-    });
+    const repository = await service.createRepository(
+      {
+        name: "sensitive-repo",
+        url: "https://github.com/example/sensitive-repo",
+        defaultBranch: "main",
+        trustLevel: "restricted",
+      },
+      {
+        workspaceId: "acme",
+        workspaceName: "Acme",
+        teamId: "platform",
+        teamName: "Platform",
+        policyProfile: "standard",
+      },
+    );
 
     expect(repository.approvalProfile).toBe("sensitive");
     expect(db.repositoryValues.at(-1)?.approvalProfile).toBe("sensitive");
@@ -141,7 +147,7 @@ describe("ControlPlaneService policy inheritance", () => {
   it("caps concurrency for sensitive runs while preserving standard repo overrides", async () => {
     const db = new FakePolicyDb();
     const service = new ControlPlaneService(db as never, {
-      now: () => new Date("2026-03-28T12:00:00.000Z")
+      now: () => new Date("2026-03-28T12:00:00.000Z"),
     });
 
     (service as any).assertRepositoryExists = async () => ({
@@ -149,21 +155,25 @@ describe("ControlPlaneService policy inheritance", () => {
       workspaceId: "acme",
       teamId: "platform",
       trustLevel: "restricted",
-      approvalProfile: "sensitive"
+      approvalProfile: "sensitive",
     });
 
-    const sensitiveRun = await service.createRun({
-      repositoryId: "repo-sensitive",
-      goal: "Handle sensitive repo",
-      concurrencyCap: 4,
-      metadata: {}
-    }, "tech-lead", {
-      workspaceId: "acme",
-      workspaceName: "Acme",
-      teamId: "platform",
-      teamName: "Platform",
-      policyProfile: "standard"
-    });
+    const sensitiveRun = await service.createRun(
+      {
+        repositoryId: "repo-sensitive",
+        goal: "Handle sensitive repo",
+        concurrencyCap: 4,
+        metadata: {},
+      },
+      "tech-lead",
+      {
+        workspaceId: "acme",
+        workspaceName: "Acme",
+        teamId: "platform",
+        teamName: "Platform",
+        policyProfile: "standard",
+      },
+    );
 
     expect(sensitiveRun.policyProfile).toBe("sensitive");
     expect(sensitiveRun.concurrencyCap).toBe(1);
@@ -173,21 +183,25 @@ describe("ControlPlaneService policy inheritance", () => {
       workspaceId: "acme",
       teamId: "platform",
       trustLevel: "trusted",
-      approvalProfile: "standard"
+      approvalProfile: "standard",
     });
 
-    const standardRun = await service.createRun({
-      repositoryId: "repo-standard",
-      goal: "Handle standard repo",
-      concurrencyCap: 4,
-      metadata: {}
-    }, "tech-lead", {
-      workspaceId: "acme",
-      workspaceName: "Acme",
-      teamId: "platform",
-      teamName: "Platform",
-      policyProfile: "standard"
-    });
+    const standardRun = await service.createRun(
+      {
+        repositoryId: "repo-standard",
+        goal: "Handle standard repo",
+        concurrencyCap: 4,
+        metadata: {},
+      },
+      "tech-lead",
+      {
+        workspaceId: "acme",
+        workspaceName: "Acme",
+        teamId: "platform",
+        teamName: "Platform",
+        policyProfile: "standard",
+      },
+    );
 
     expect(standardRun.policyProfile).toBe("standard");
     expect(standardRun.concurrencyCap).toBe(4);

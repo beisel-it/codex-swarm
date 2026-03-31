@@ -89,9 +89,9 @@ for (const pkg of runnablePackages) {
     packageManagerCommand.command,
     [...packageManagerCommand.args, "--dir", pkg.dir, "run", stage],
     {
-    cwd: rootDir,
-    stdio: "inherit",
-    env: process.env,
+      cwd: rootDir,
+      stdio: "inherit",
+      env: process.env,
     },
   );
 

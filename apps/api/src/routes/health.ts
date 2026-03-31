@@ -5,7 +5,7 @@ export const healthRoutes: FastifyPluginAsync = async (app) => {
     status: "ok",
     versions: {
       schema: app.config.CONTROL_PLANE_SCHEMA_VERSION,
-      config: app.config.CONTROL_PLANE_CONFIG_VERSION
-    }
+      config: app.config.CONTROL_PLANE_CONFIG_VERSION,
+    },
   }));
 };

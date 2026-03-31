@@ -1,6 +1,12 @@
-import { applySchemaMigrations, readSnapshotFile, restoreControlPlaneSnapshot, summarizeSnapshot } from "./control-plane-snapshot.mjs";
+import {
+  applySchemaMigrations,
+  readSnapshotFile,
+  restoreControlPlaneSnapshot,
+  summarizeSnapshot,
+} from "./control-plane-snapshot.mjs";
 
-const connectionString = process.env.RESTORE_DATABASE_URL ?? process.env.DATABASE_URL;
+const connectionString =
+  process.env.RESTORE_DATABASE_URL ?? process.env.DATABASE_URL;
 const snapshotFile = process.env.BACKUP_FILE;
 
 if (!connectionString) {
@@ -18,9 +24,15 @@ const snapshot = await readSnapshotFile(snapshotFile);
 applySchemaMigrations(connectionString);
 await restoreControlPlaneSnapshot(connectionString, snapshot);
 
-console.log(JSON.stringify({
-  backupFile: snapshotFile,
-  restoredAt: new Date().toISOString(),
-  durationMs: Date.now() - startedAt,
-  counts: summarizeSnapshot(snapshot)
-}, null, 2));
+console.log(
+  JSON.stringify(
+    {
+      backupFile: snapshotFile,
+      restoredAt: new Date().toISOString(),
+      durationMs: Date.now() - startedAt,
+      counts: summarizeSnapshot(snapshot),
+    },
+    null,
+    2,
+  ),
+);

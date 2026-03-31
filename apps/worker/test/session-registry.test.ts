@@ -9,7 +9,7 @@ describe("SessionRegistry", () => {
       sessionId: "session-001",
       runId: "run-001",
       agentId: "agent-001",
-      worktreePath: ".swarm/worktrees/codex-swarm/run-001/agent-001"
+      worktreePath: ".swarm/worktrees/codex-swarm/run-001/agent-001",
     });
 
     const record = registry.activate("session-001", "thread-001");
@@ -17,7 +17,9 @@ describe("SessionRegistry", () => {
     expect(record.state).toBe("active");
     expect(record.threadId).toBe("thread-001");
     expect(record.lastHeartbeatAt).toBeInstanceOf(Date);
-    expect(registry.findByThreadId("thread-001")?.sessionId).toBe("session-001");
+    expect(registry.findByThreadId("thread-001")?.sessionId).toBe(
+      "session-001",
+    );
   });
 
   it("stops, fails, marks stale, and archives sessions explicitly", () => {
@@ -26,12 +28,14 @@ describe("SessionRegistry", () => {
       sessionId: "session-002",
       runId: "run-001",
       agentId: "agent-002",
-      worktreePath: ".swarm/worktrees/codex-swarm/run-001/agent-002"
+      worktreePath: ".swarm/worktrees/codex-swarm/run-001/agent-002",
     });
 
     expect(registry.stop("session-002").state).toBe("stopped");
     expect(registry.fail("session-002").state).toBe("failed");
-    expect(registry.markStale("session-002", "heartbeat_timeout").staleReason).toBe("heartbeat_timeout");
+    expect(
+      registry.markStale("session-002", "heartbeat_timeout").staleReason,
+    ).toBe("heartbeat_timeout");
     expect(registry.archive("session-002").state).toBe("archived");
   });
 
@@ -41,13 +45,13 @@ describe("SessionRegistry", () => {
       sessionId: "session-003",
       runId: "run-001",
       agentId: "agent-003",
-      worktreePath: ".swarm/worktrees/codex-swarm/run-001/agent-003"
+      worktreePath: ".swarm/worktrees/codex-swarm/run-001/agent-003",
     });
 
     registry.activate("session-003", "thread-003");
 
     expect(() => registry.activate("session-003", "thread-other")).toThrow(
-      "session session-003 is already bound to thread thread-003"
+      "session session-003 is already bound to thread thread-003",
     );
   });
 
@@ -66,14 +70,19 @@ describe("SessionRegistry", () => {
         staleReason: null,
         lastHeartbeatAt: heartbeatAt,
         createdAt: new Date("2026-03-28T11:00:00.000Z"),
-        updatedAt: new Date("2026-03-28T11:30:00.000Z")
-      }
+        updatedAt: new Date("2026-03-28T11:30:00.000Z"),
+      },
     ]);
 
-    const updated = registry.heartbeat("session-004", new Date("2026-03-28T12:05:00.000Z"));
+    const updated = registry.heartbeat(
+      "session-004",
+      new Date("2026-03-28T12:05:00.000Z"),
+    );
 
     expect(registry.get("session-004").threadId).toBe("thread-004");
-    expect(updated.lastHeartbeatAt?.toISOString()).toBe("2026-03-28T12:05:00.000Z");
+    expect(updated.lastHeartbeatAt?.toISOString()).toBe(
+      "2026-03-28T12:05:00.000Z",
+    );
   });
 
   it("supports bulk session lifecycle updates without losing lookups", () => {
@@ -85,7 +94,7 @@ describe("SessionRegistry", () => {
         sessionId,
         runId: "run-load",
         agentId: `agent-${index}`,
-        worktreePath: `.swarm/worktrees/codex-swarm/run-load/agent-${index}`
+        worktreePath: `.swarm/worktrees/codex-swarm/run-load/agent-${index}`,
       });
 
       registry.activate(sessionId, `thread-${index}`);
@@ -101,18 +110,31 @@ describe("SessionRegistry", () => {
     }
 
     for (let index = 100; index < 200; index += 1) {
-      registry.heartbeat(`session-${index}`, new Date("2026-03-28T12:30:00.000Z"));
+      registry.heartbeat(
+        `session-${index}`,
+        new Date("2026-03-28T12:30:00.000Z"),
+      );
     }
 
     expect(registry.list()).toHaveLength(200);
-    expect(registry.findByThreadId("thread-120")?.sessionId).toBe("session-120");
-    expect(registry.list().filter((record) => record.state === "stale")).toHaveLength(50);
-    expect(registry.list().filter((record) => record.state === "archived")).toHaveLength(50);
+    expect(registry.findByThreadId("thread-120")?.sessionId).toBe(
+      "session-120",
+    );
+    expect(
+      registry.list().filter((record) => record.state === "stale"),
+    ).toHaveLength(50);
+    expect(
+      registry.list().filter((record) => record.state === "archived"),
+    ).toHaveLength(50);
     expect(
       registry
         .list()
         .filter((record) => record.state === "active")
-        .every((record) => record.lastHeartbeatAt?.toISOString() === "2026-03-28T12:30:00.000Z")
+        .every(
+          (record) =>
+            record.lastHeartbeatAt?.toISOString() ===
+            "2026-03-28T12:30:00.000Z",
+        ),
     ).toBe(true);
   });
 });

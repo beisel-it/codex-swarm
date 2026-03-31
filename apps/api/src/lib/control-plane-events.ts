@@ -1,136 +1,142 @@
 import type {
   ControlPlaneEventEntityType,
-  ControlPlaneEventType
+  ControlPlaneEventType,
 } from "@codex-swarm/contracts";
 
 export const controlPlaneEvents = {
   adminGovernanceReportGenerated: {
     eventType: "admin.governance_report_generated",
-    entityType: "admin_report"
+    entityType: "admin_report",
   },
   adminRetentionReconciled: {
     eventType: "admin.retention_reconciled",
-    entityType: "retention_policy"
+    entityType: "retention_policy",
   },
   agentCreated: {
     eventType: "agent.created",
-    entityType: "agent"
+    entityType: "agent",
   },
   approvalCreated: {
     eventType: "approval.created",
-    entityType: "approval"
+    entityType: "approval",
   },
   approvalResolved: {
     eventType: "approval.resolved",
-    entityType: "approval"
+    entityType: "approval",
   },
   artifactCreated: {
     eventType: "artifact.created",
-    entityType: "artifact"
+    entityType: "artifact",
   },
   maintenanceCleanupCompleted: {
     eventType: "maintenance.cleanup_completed",
-    entityType: "cleanup_job"
+    entityType: "cleanup_job",
   },
   messageCreated: {
     eventType: "message.created",
-    entityType: "message"
+    entityType: "message",
   },
   repositoryCreated: {
     eventType: "repository.created",
-    entityType: "repository"
+    entityType: "repository",
   },
   runAuditExported: {
     eventType: "run.audit_exported",
-    entityType: "run"
+    entityType: "run",
   },
   runBranchPublished: {
     eventType: "run.branch_published",
-    entityType: "run"
+    entityType: "run",
   },
   runCompleted: {
     eventType: "run.completed",
-    entityType: "run"
+    entityType: "run",
   },
   runCreated: {
     eventType: "run.created",
-    entityType: "run"
+    entityType: "run",
   },
   runPullRequestHandoffCreated: {
     eventType: "run.pull_request_handoff_created",
-    entityType: "run"
+    entityType: "run",
   },
   runStatusUpdated: {
     eventType: "run.status_updated",
-    entityType: "run"
+    entityType: "run",
   },
   taskCreated: {
     eventType: "task.created",
-    entityType: "task"
+    entityType: "task",
   },
   taskStatusUpdated: {
     eventType: "task.status_updated",
-    entityType: "task"
+    entityType: "task",
   },
   taskVerificationRequested: {
     eventType: "task.verification_requested",
-    entityType: "task"
+    entityType: "task",
   },
   taskVerificationPassed: {
     eventType: "task.verification_passed",
-    entityType: "task"
+    entityType: "task",
   },
   taskVerificationFailed: {
     eventType: "task.verification_failed",
-    entityType: "task"
+    entityType: "task",
   },
   taskVerificationBlocked: {
     eventType: "task.verification_blocked",
-    entityType: "task"
+    entityType: "task",
   },
   taskUnblocked: {
     eventType: "task.unblocked",
-    entityType: "task"
+    entityType: "task",
   },
   validationCreated: {
     eventType: "validation.created",
-    entityType: "validation"
+    entityType: "validation",
   },
   workerDispatchAssignmentClaimed: {
     eventType: "worker_dispatch_assignment.claimed",
-    entityType: "worker_dispatch_assignment"
+    entityType: "worker_dispatch_assignment",
   },
   workerDispatchAssignmentCreated: {
     eventType: "worker_dispatch_assignment.created",
-    entityType: "worker_dispatch_assignment"
+    entityType: "worker_dispatch_assignment",
   },
   workerDispatchAssignmentUpdated: {
     eventType: "worker_dispatch_assignment.updated",
-    entityType: "worker_dispatch_assignment"
+    entityType: "worker_dispatch_assignment",
   },
   workerNodeDrainStateUpdated: {
     eventType: "worker_node.drain_state_updated",
-    entityType: "worker_node"
+    entityType: "worker_node",
   },
   workerNodeHeartbeatRecorded: {
     eventType: "worker_node.heartbeat_recorded",
-    entityType: "worker_node"
+    entityType: "worker_node",
   },
   workerNodeReconciled: {
     eventType: "worker_node.reconciled",
-    entityType: "worker_node"
+    entityType: "worker_node",
   },
   workerNodeRegistered: {
     eventType: "worker_node.registered",
-    entityType: "worker_node"
+    entityType: "worker_node",
+  },
+} as const satisfies Record<
+  string,
+  {
+    eventType: ControlPlaneEventType;
+    entityType: ControlPlaneEventEntityType;
   }
-} as const satisfies Record<string, {
-  eventType: ControlPlaneEventType;
-  entityType: ControlPlaneEventEntityType;
-}>;
+>;
 
 export function timelineEvent(
-  definition: { eventType: ControlPlaneEventType; entityType: ControlPlaneEventEntityType },
+  definition: {
+    eventType: ControlPlaneEventType;
+    entityType: ControlPlaneEventEntityType;
+  },
   input: {
     entityId: string;
     runId?: string | null;
@@ -139,10 +145,10 @@ export function timelineEvent(
     status: string;
     summary: string;
     metadata?: Record<string, unknown>;
-  }
+  },
 ) {
   return {
     ...definition,
-    ...input
+    ...input,
   };
 }
