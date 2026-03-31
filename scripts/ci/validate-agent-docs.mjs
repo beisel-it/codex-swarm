@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, statSync } from "node:fs";
 
 const failures = [];
@@ -81,13 +82,31 @@ const referencedPaths = [
   "packages/orchestration/src/index.ts",
   ".agents/skills/README.md",
   ".codex/agents",
-  ".swarm/plan.md",
-  ".swarm/status.md",
 ];
 
 for (const target of referencedPaths) {
   if (!existsSync(target)) {
     failures.push(`Referenced path does not exist: ${target}`);
+  }
+}
+
+for (const artifactPath of [
+  ".swarm/plan.md",
+  ".swarm/status.md",
+]) {
+  if (isTrackedPath(artifactPath)) {
+    failures.push(`Run artifact must not be checked into the repo: ${artifactPath}`);
+  }
+}
+
+function isTrackedPath(target) {
+  try {
+    execFileSync("git", ["ls-files", "--error-unmatch", target], {
+      stdio: "ignore",
+    });
+    return true;
+  } catch {
+    return false;
   }
 }
 
