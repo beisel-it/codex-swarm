@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState, type FormEvent, type PointerEvent as ReactPointerEvent } from 'react'
+import { startTransition, useEffect, useMemo, useState, type FormEvent, type PointerEvent as ReactPointerEvent } from 'react'
 import type {
   ExternalEventReceipt,
   ProjectSummary as ContractProjectSummary,
+  TaskDagGraph,
   ProjectTeamCreateInput,
   ProjectTeamDetail,
   ProjectTeamImportInput,
@@ -13,6 +14,7 @@ import type {
   RepeatableRunTriggerCreateInput,
 } from '../../packages/contracts/src/index.ts'
 import { RepeatableRunsPanel } from './repeatable-runs-panel'
+import { TaskDagGraphPanel } from './task-dag'
 import {
   deriveAdHocWorkspace,
   deriveProjectSummaries,
@@ -301,6 +303,7 @@ type RunDetail = Run & {
   tasks: Task[]
   agents: Agent[]
   sessions: Session[]
+  taskDag?: TaskDagGraph | null
 }
 
 type SwarmData = {
@@ -311,6 +314,7 @@ type SwarmData = {
   tasks: Task[]
   agents: Agent[]
   sessions: Session[]
+  runTaskDags: Record<string, TaskDagGraph | null>
   workerNodes: WorkerNode[]
   approvals: Approval[]
   validations: Validation[]
@@ -384,6 +388,7 @@ function createEmptySwarmData(): SwarmData {
     tasks: [],
     agents: [],
     sessions: [],
+    runTaskDags: {},
     workerNodes: [],
     approvals: [],
     validations: [],
@@ -820,6 +825,7 @@ async function loadSwarmData(): Promise<SwarmData> {
         tasks: [],
         agents: [],
         sessions: [],
+        taskDag: null,
       }))),
     )
 
@@ -844,6 +850,7 @@ async function loadSwarmData(): Promise<SwarmData> {
       tasks: details.flatMap((detail) => detail.tasks),
       agents: details.flatMap((detail) => detail.agents),
       sessions: details.flatMap((detail) => detail.sessions),
+      runTaskDags: Object.fromEntries(details.map((detail) => [detail.id, detail.taskDag ?? null])),
       workerNodes,
       approvals,
       validations,
@@ -1214,6 +1221,31 @@ function App() {
     () => new Map(runTasks.map((task) => [task.id, buildTaskPresentation(task, runTasks, runAgentsById)] as const)),
     [runAgentsById, runTasks],
   )
+  const selectedRunTaskDag = selectedRun ? data.runTaskDags[selectedRun.id] ?? null : null
+
+  function handleTaskSelection(nextTaskId: string) {
+    startTransition(() => setSelectedTaskId(nextTaskId))
+  }
+
+  function handleDagTaskSelection(nextTaskId: string) {
+    handleTaskSelection(nextTaskId)
+    if (typeof window !== 'undefined' && window.innerWidth < 720) {
+      window.requestAnimationFrame(() => {
+        document.getElementById('task-detail-panel')?.scrollIntoView({
+          behavior: 'smooth',
+          block: 'start',
+        })
+      })
+    }
+  }
+
+  const dagToneByTaskId = useMemo(
+    () => new Map<string, string>(
+      Array.from(runTaskPresentations.entries(), ([taskId, presentation]) => [taskId, presentation.primaryStatusTone]),
+    ),
+    [runTaskPresentations],
+  )
+
   useEffect(() => {
     if (!selectedRun) {
       setRunEvents([])
@@ -2770,15 +2802,22 @@ function App() {
                   <button type="submit" className="action-button" disabled={busy}>Add</button>
                 </form>
                 <div className="board-grid">
-                  <BoardColumn title="In flight" tasks={inFlightTasks} selectedTaskId={selectedTaskId} onSelectTask={setSelectedTaskId} presentations={runTaskPresentations} />
-                  <BoardColumn title="Blocked" tasks={blockedTasks} selectedTaskId={selectedTaskId} onSelectTask={setSelectedTaskId} presentations={runTaskPresentations} />
-                  <BoardColumn title="Waiting" tasks={waitingTasks} selectedTaskId={selectedTaskId} onSelectTask={setSelectedTaskId} presentations={runTaskPresentations} />
+                  <BoardColumn title="In flight" tasks={inFlightTasks} selectedTaskId={selectedTaskId} onSelectTask={handleTaskSelection} presentations={runTaskPresentations} />
+                  <BoardColumn title="Blocked" tasks={blockedTasks} selectedTaskId={selectedTaskId} onSelectTask={handleTaskSelection} presentations={runTaskPresentations} />
+                  <BoardColumn title="Waiting" tasks={waitingTasks} selectedTaskId={selectedTaskId} onSelectTask={handleTaskSelection} presentations={runTaskPresentations} />
                 </div>
                 <details className="secondary-panel" open={showCompletedTasks} onToggle={(event) => setShowCompletedTasks((event.currentTarget as HTMLDetailsElement).open)}>
                   <summary>Completed ({completedTasks.length})</summary>
-                  <BoardTaskList tasks={completedTasks} selectedTaskId={selectedTaskId} onSelectTask={setSelectedTaskId} presentations={runTaskPresentations} />
+                  <BoardTaskList tasks={completedTasks} selectedTaskId={selectedTaskId} onSelectTask={handleTaskSelection} presentations={runTaskPresentations} />
                 </details>
               </section>
+              <TaskDagGraphPanel
+                tasks={runTasks}
+                taskDag={selectedRunTaskDag}
+                selectedTaskId={selectedTaskId}
+                onSelectTask={handleDagTaskSelection}
+                toneByTaskId={dagToneByTaskId}
+              />
               <section className="panel split-panel">
                 <TaskDetailPanel
                   task={selectedTask}
@@ -2868,7 +2907,7 @@ function App() {
                       }
 
                       return (
-                        <tr key={task.id} className={task.id === selectedTask?.id ? 'task-row is-selected' : 'task-row'} onClick={() => setSelectedTaskId(task.id)}>
+                        <tr key={task.id} className={task.id === selectedTask?.id ? 'task-row is-selected' : 'task-row'} onClick={() => handleTaskSelection(task.id)}>
                           <td>
                             <strong>{task.title}</strong>
                             <div className="cell-subtitle">{task.role}</div>
@@ -2965,7 +3004,7 @@ function App() {
                         }
 
                         return (
-                          <button key={task.id} type="button" className={`review-item ${task.id === selectedVerificationTask?.id ? 'is-selected' : ''}`} onClick={() => setSelectedTaskId(task.id)}>
+                          <button key={task.id} type="button" className={`review-item ${task.id === selectedVerificationTask?.id ? 'is-selected' : ''}`} onClick={() => handleTaskSelection(task.id)}>
                             <strong>{task.title}</strong>
                             <span className={`tone-chip tone-${presentation.verificationTone}`}>{presentation.verificationLabel}</span>
                             <p>{presentation.latestSummary}</p>
@@ -3176,7 +3215,7 @@ function TaskDetailPanel({
 }) {
   if (!task) {
     return (
-      <article className="surface-card task-detail-card">
+      <article id="task-detail-panel" className="surface-card task-detail-card">
         <p className="eyebrow">Task detail</p>
         <div className="compact-empty">Select a task to inspect its definition of done and verification state.</div>
       </article>
@@ -3197,7 +3236,7 @@ function TaskDetailPanel({
   const findings = task.latestVerificationFindings
 
   return (
-    <article className="surface-card task-detail-card">
+    <article id="task-detail-panel" className="surface-card task-detail-card">
       <p className="eyebrow">Task detail</p>
       <div className="task-detail-header">
         <div>

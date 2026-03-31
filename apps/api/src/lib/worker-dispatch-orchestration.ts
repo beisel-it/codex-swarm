@@ -12,8 +12,10 @@ import type {
 import {
   buildVerifierTaskExecutionPrompt,
   buildWorkerTaskExecutionPrompt,
+  type VerifierTaskOutcome,
   parseVerifierTaskOutcome,
-  parseWorkerTaskOutcome
+  parseWorkerTaskOutcome,
+  type WorkerTaskOutcome
 } from "@codex-swarm/orchestration";
 import {
   cleanupWorktreePaths,
@@ -270,6 +272,46 @@ async function publishWorkerOutcomeMessages(
       }
     }
   }
+}
+
+function toLeaderResliceOutcomeFromVerification(outcome: VerifierTaskOutcome): WorkerTaskOutcome | null {
+  if (outcome.status === "passed") {
+    return null;
+  }
+
+  if (outcome.status === "blocked") {
+    const hasActionableBlocker = outcome.blockingIssues.length > 0 || outcome.messages.length > 0;
+
+    if (!hasActionableBlocker) {
+      return null;
+    }
+
+    return {
+      summary: outcome.summary,
+      status: "blocked",
+      blockerKind: "actionable",
+      messages: outcome.messages,
+      blockingIssues: outcome.blockingIssues,
+      ...(outcome.artifacts ? { artifacts: outcome.artifacts } : {})
+    };
+  }
+
+  const hasReworkSignal = outcome.changeRequests.length > 0 || outcome.findings.length > 0;
+
+  if (!hasReworkSignal) {
+    return null;
+  }
+
+  return {
+    summary: outcome.summary,
+    status: "needs_slicing",
+    messages: outcome.messages,
+    blockingIssues: [
+      ...outcome.changeRequests,
+      ...outcome.findings
+    ],
+    ...(outcome.artifacts ? { artifacts: outcome.artifacts } : {})
+  };
 }
 
 async function failAssignment(
@@ -632,6 +674,7 @@ export async function runManagedWorkerDispatch(
     if (responseOutput && assignment.taskId) {
       if (assignmentKind === "verification") {
         const outcome = parseVerifierTaskOutcome(responseOutput);
+        const leaderOutcome = toLeaderResliceOutcomeFromVerification(outcome);
 
         await recordWorkerOutcomeArtifacts(
           input.request,
@@ -668,6 +711,18 @@ export async function runManagedWorkerDispatch(
             ]
           }
         };
+
+        if (leaderOutcome) {
+          await runLeaderResliceLoop({
+            request: input.request,
+            runId: assignment.runId,
+            parentTaskId: assignment.taskId,
+            actorId: assignment.agentId,
+            workerOutcome: leaderOutcome,
+            executeTool: input.executeTool,
+            ...(input.supervisorCommand ? { supervisorCommand: input.supervisorCommand } : {})
+          });
+        }
       } else {
         const outcome = parseWorkerTaskOutcome(responseOutput);
         const synchronizedBranchName = await synchronizeRunBranchContext(input.request, runDetail, workspace.path);
