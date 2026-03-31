@@ -18,6 +18,7 @@ import type { LeaderPlanningLoopRequest } from "../src/lib/leader-planning-loop.
 import { runLeaderPlanningLoop } from "../src/lib/leader-planning-loop.js";
 import { runManagedWorkerDispatch } from "../src/lib/worker-dispatch-orchestration.js";
 import { HttpError } from "../src/lib/http-error.js";
+import { CURRENT_CONTROL_PLANE_SCHEMA_VERSION } from "../src/db/versioning.js";
 
 const ids = {
   project: "10101010-1010-4010-8010-101010101010",
@@ -1488,7 +1489,7 @@ describe("buildApp", () => {
     expect(response.json()).toMatchObject({
       status: "ok",
       versions: {
-        schema: "2026-03-30",
+        schema: CURRENT_CONTROL_PLANE_SCHEMA_VERSION,
         config: "1"
       }
     });
