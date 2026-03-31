@@ -113,6 +113,7 @@ const observability = {
   recordRequestFailure: vi.fn(),
   recordTimelineEvent: vi.fn(),
   setActorContext: vi.fn(),
+  subscribeToRunEvents: vi.fn(() => () => undefined),
   withTrace: vi.fn(async (_name: string, fn: () => Promise<unknown>) => fn())
 };
 
@@ -2911,6 +2912,122 @@ describe("buildApp", () => {
     await app.close();
   });
 
+  it("streams live run events over the authenticated run stream endpoint", async () => {
+    const runStreamListeners = new Map<string, (event: Record<string, unknown>) => void>();
+    const streamObservability = {
+      ...observability,
+      subscribeToRunEvents: vi.fn((runId: string, onEvent: (event: Record<string, unknown>) => void) => {
+        runStreamListeners.set(runId, onEvent);
+        return () => {
+          runStreamListeners.delete(runId);
+        };
+      })
+    };
+
+    controlPlane.getRun.mockResolvedValue({
+      id: ids.run,
+      repositoryId: ids.repository,
+      projectId: null,
+      projectTeamId: null,
+      projectTeamName: null,
+      goal: "Ship live updates",
+      status: "in_progress",
+      branchName: "main",
+      planArtifactPath: null,
+      publishedBranch: null,
+      pullRequestUrl: null,
+      pullRequestNumber: null,
+      pullRequestStatus: null,
+      handoffStatus: "pending",
+      handoff: {
+        mode: "manual",
+        provider: null,
+        baseBranch: null,
+        autoPublishBranch: false,
+        autoCreatePullRequest: false,
+        titleTemplate: null,
+        bodyTemplate: null
+      },
+      createdBy: "dev-user",
+      createdAt: "2026-03-31T10:00:00.000Z",
+      updatedAt: "2026-03-31T10:00:00.000Z",
+      metadata: {},
+      tasks: [],
+      agents: [],
+      sessions: [],
+      taskDag: null
+    });
+
+    const app = await buildApp({
+      config: getConfig({
+        NODE_ENV: "test",
+        DEV_AUTH_TOKEN: "test-token"
+      }),
+      controlPlane: controlPlane as unknown as ControlPlaneService,
+      observability: streamObservability as any
+    });
+
+    await app.listen({ port: 0, host: "127.0.0.1" });
+    const address = app.server.address();
+
+    if (!address || typeof address === "string") {
+      throw new Error("failed to resolve app listen address");
+    }
+
+    const controller = new AbortController();
+    const response = await fetch(`http://127.0.0.1:${address.port}/api/v1/runs/${ids.run}/stream`, {
+      headers: {
+        authorization: "Bearer test-token"
+      },
+      signal: controller.signal
+    });
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toContain("text/event-stream");
+    expect(streamObservability.subscribeToRunEvents).toHaveBeenCalledWith(ids.run, expect.any(Function));
+
+    runStreamListeners.get(ids.run)?.({
+      id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      runId: ids.run,
+      taskId: ids.taskA,
+      agentId: ids.agent,
+      traceId: "trace-live-stream",
+      eventType: "task.status_updated",
+      entityType: "task",
+      entityId: ids.taskA,
+      status: "in_progress",
+      summary: "Task claimed",
+      metadata: {},
+      createdAt: "2026-03-31T10:05:00.000Z"
+    });
+
+    const reader = response.body?.getReader();
+
+    if (!reader) {
+      throw new Error("expected streaming response body");
+    }
+
+    let received = "";
+
+    while (!received.includes("event: control_plane_event")) {
+      const { value, done } = await reader.read();
+
+      if (done) {
+        break;
+      }
+
+      received += new TextDecoder().decode(value);
+    }
+
+    expect(received).toContain("event: heartbeat");
+    expect(received).toContain("event: control_plane_event");
+    expect(received).toContain(`\"entityId\":\"${ids.taskA}\"`);
+
+    controller.abort();
+    await reader.cancel().catch(() => undefined);
+    await app.close();
+  });
+
   it("runs the stale session cleanup job", async () => {
     controlPlane.runCleanupJob.mockResolvedValueOnce({
       scannedSessions: 2,
@@ -4705,6 +4822,67 @@ describe("buildApp", () => {
       });
     } finally {
       await rm(tempFile, { recursive: true, force: true });
+      await app.close();
+    }
+  });
+
+  it("returns a 409 when the artifact source file does not exist and does not create a row", async () => {
+    const controlPlane = new FakeVerticalSliceControlPlane();
+    const app = await buildApp({
+      config: getConfig({
+        NODE_ENV: "test",
+        PORT: 3000,
+        HOST: "127.0.0.1",
+        DATABASE_URL: "postgres://unused/test",
+        DEV_AUTH_TOKEN: "test-token",
+        OPENAI_TRACING_DISABLED: true
+      }),
+      controlPlane: controlPlane as unknown as ControlPlaneService
+    });
+
+    const headers = {
+      authorization: "Bearer test-token"
+    };
+
+    try {
+      const createRunResponse = await app.inject({
+        method: "POST",
+        url: "/api/v1/runs",
+        headers,
+        payload: {
+          repositoryId: ids.repository,
+          goal: "Reject missing artifact source file",
+          metadata: {}
+        }
+      });
+
+      expect(createRunResponse.statusCode).toBe(201);
+
+      const beforeArtifacts = await controlPlane.listArtifacts(ids.run);
+      const response = await app.inject({
+        method: "POST",
+        url: "/api/v1/artifacts",
+        headers,
+        payload: {
+          runId: ids.run,
+          kind: "report",
+          path: "apps/api:test",
+          contentType: "text/plain",
+          metadata: {
+            source: "worker-outcome",
+            resolvedArtifactPath: "/definitely/missing/apps/api:test"
+          }
+        }
+      });
+      const afterArtifacts = await controlPlane.listArtifacts(ids.run);
+
+      expect(response.statusCode).toBe(409);
+      expect(response.json()).toEqual({
+        error: "artifact source file not found: /definitely/missing/apps/api:test",
+        details: null
+      });
+      expect(afterArtifacts).toHaveLength(beforeArtifacts.length);
+    } finally {
       await app.close();
     }
   });

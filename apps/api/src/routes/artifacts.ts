@@ -54,6 +54,24 @@ function resolveArtifactSourcePath(input: z.infer<typeof artifactCreateSchema>) 
   return input.path;
 }
 
+async function readArtifactContent(input: z.infer<typeof artifactCreateSchema>) {
+  if (input.contentBase64) {
+    return Buffer.from(input.contentBase64, "base64");
+  }
+
+  const sourcePath = resolveArtifactSourcePath(input);
+
+  try {
+    return await readFile(sourcePath as string);
+  } catch (error) {
+    if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") {
+      throw new HttpError(409, `artifact source file not found: ${sourcePath}`);
+    }
+
+    throw error;
+  }
+}
+
 function buildDerivedDiffSummary(rawDiff: string, truncated: boolean) {
   const fileSummaries: Array<{
     path: string;
@@ -264,6 +282,7 @@ export const artifactRoutes: FastifyPluginAsync = async (app) => {
   app.post("/artifacts", { bodyLimit: ARTIFACT_ROUTE_BODY_LIMIT_BYTES }, async (request, reply) => {
     return app.observability.withTrace("api.artifacts.create", async () => {
       const input = artifactCreateSchema.parse(request.body);
+      const content = await readArtifactContent(input);
       const artifact = requireValue(
         await app.controlPlane.createArtifact({
           ...input,
@@ -273,9 +292,6 @@ export const artifactRoutes: FastifyPluginAsync = async (app) => {
         }, request.authContext),
         "control plane returned no artifact"
       );
-      const content = input.contentBase64
-        ? Buffer.from(input.contentBase64, "base64")
-        : await readFile(resolveArtifactSourcePath(input) as string);
       const storedArtifact = await app.controlPlane.attachArtifactStorage(
         artifact.id,
         await persistArtifactBlob(app.config, artifact.id, content)

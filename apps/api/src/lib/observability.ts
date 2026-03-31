@@ -36,6 +36,8 @@ type TimelineEventInput = {
   metadata?: Record<string, unknown>;
 };
 
+type RunEventSubscriber = (event: ControlPlaneEvent) => void;
+
 type OpenAiTracingModule = {
   setTracingDisabled: (disabled: boolean) => void;
   setTracingExportApiKey: (apiKey: string) => void;
@@ -117,6 +119,7 @@ async function loadTracingModule() {
 
 export class ObservabilityService {
   private readonly traceContext = new AsyncLocalStorage<RequestTraceContext>();
+  private readonly runEventSubscribers = new Map<string, Map<string, RunEventSubscriber>>();
   private recoverableDatabaseFallbacks = 0;
   private requestFailures = 0;
   private readonly tracingModulePromise: Promise<OpenAiTracingModule | null>;
@@ -222,6 +225,47 @@ export class ObservabilityService {
     console.error("[observability] request failure", error);
   }
 
+  subscribeToRunEvents(runId: string, onEvent: RunEventSubscriber) {
+    const subscriptionId = crypto.randomUUID();
+    const existingSubscribers = this.runEventSubscribers.get(runId) ?? new Map<string, RunEventSubscriber>();
+    existingSubscribers.set(subscriptionId, onEvent);
+    this.runEventSubscribers.set(runId, existingSubscribers);
+
+    return () => {
+      const currentSubscribers = this.runEventSubscribers.get(runId);
+
+      if (!currentSubscribers) {
+        return;
+      }
+
+      currentSubscribers.delete(subscriptionId);
+
+      if (currentSubscribers.size === 0) {
+        this.runEventSubscribers.delete(runId);
+      }
+    };
+  }
+
+  private publishRunEvent(event: ControlPlaneEvent) {
+    if (!event.runId) {
+      return;
+    }
+
+    const subscribers = this.runEventSubscribers.get(event.runId);
+
+    if (!subscribers || subscribers.size === 0) {
+      return;
+    }
+
+    for (const subscriber of subscribers.values()) {
+      try {
+        subscriber(event);
+      } catch (error) {
+        console.error("[observability] run event subscriber failed", error);
+      }
+    }
+  }
+
   async recordTimelineEvent(input: TimelineEventInput) {
     try {
       const [event] = await this.db.insert(controlPlaneEvents).values({
@@ -244,7 +288,9 @@ export class ObservabilityService {
         return null;
       }
 
-      return controlPlaneEventSchema.parse(normalizeLegacyEventActor(event));
+      const parsedEvent = controlPlaneEventSchema.parse(normalizeLegacyEventActor(event));
+      this.publishRunEvent(parsedEvent);
+      return parsedEvent;
     } catch (error) {
       console.error("[observability] timeline event persistence failed", error);
       return null;

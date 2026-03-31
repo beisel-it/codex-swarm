@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { readFile } from "node:fs/promises";
 import { isAbsolute, resolve } from "node:path";
 import { promisify } from "node:util";
 import type {
@@ -418,6 +419,14 @@ async function recordWorkerOutcomeArtifacts(
     const resolvedArtifactPath = isAbsolute(artifact.path)
       ? artifact.path
       : resolve(workspacePath, artifact.path);
+    const contentBase64 = artifact.contentBase64
+      ?? await readFile(resolvedArtifactPath, "base64").catch((error: unknown) => {
+        if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") {
+          throw new Error(`worker outcome artifact source file not found: ${resolvedArtifactPath}`);
+        }
+
+        throw error;
+      });
 
     await request(
       "POST",
@@ -428,9 +437,7 @@ async function recordWorkerOutcomeArtifacts(
         kind: artifact.kind,
         path: artifact.path,
         contentType: artifact.contentType,
-        ...(artifact.contentBase64
-          ? { contentBase64: artifact.contentBase64 }
-          : {}),
+        contentBase64,
         metadata: {
           source: "worker-outcome",
           assignmentId: assignment.id,

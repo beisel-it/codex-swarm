@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -254,7 +254,195 @@ function createVerificationAssignment(worktreePath: string): WorkerDispatchAssig
   };
 }
 
+function createWorkerAssignment(worktreePath: string): WorkerDispatchAssignment {
+  return {
+    id: "dispatch-worker-1",
+    runId: "run-1",
+    taskId: "task-1",
+    agentId: "worker-agent-1",
+    sessionId: "session-worker-1",
+    repositoryId: "repo-1",
+    repositoryName: "codex-swarm",
+    queue: "worker-dispatch",
+    state: "claimed",
+    stickyNodeId: "node-1",
+    preferredNodeId: "node-1",
+    claimedByNodeId: "node-1",
+    requiredCapabilities: ["workspace-write"],
+    worktreePath,
+    branchName: "main",
+    prompt: "Implement the assigned slice and publish evidence.",
+    profile: "backend-developer",
+    sandbox: "workspace-write",
+    approvalPolicy: "on-request",
+    includePlanTool: false,
+    metadata: {
+      assignmentKind: "worker"
+    },
+    attempt: 0,
+    maxAttempts: 3,
+    leaseTtlSeconds: 300,
+    createdAt: new Date("2026-03-31T09:00:00.000Z")
+  };
+}
+
 describe("runManagedWorkerDispatch verification prompts", () => {
+  it("uploads worker outcome artifacts with inline content instead of path-only references", async () => {
+    const repoRoot = await mkdtemp(join(tmpdir(), "codex-swarm-worker-artifact-repo-"));
+    const worktreeRoot = await mkdtemp(join(tmpdir(), "codex-swarm-worker-artifact-worktree-"));
+
+    try {
+      await writeFile(join(repoRoot, "README.md"), "worker artifact fixture\n", "utf8");
+      execFileSync("git", ["init", "--initial-branch=main"], { cwd: repoRoot, stdio: "pipe" });
+      execFileSync("git", ["config", "user.name", "Codex Swarm"], { cwd: repoRoot, stdio: "pipe" });
+      execFileSync("git", ["config", "user.email", "codex-swarm@example.com"], { cwd: repoRoot, stdio: "pipe" });
+      execFileSync("git", ["add", "README.md"], { cwd: repoRoot, stdio: "pipe" });
+      execFileSync("git", ["commit", "-m", "initial"], { cwd: repoRoot, stdio: "pipe" });
+
+      const repository = createRepository(repoRoot);
+      const runDetail = createRunDetail();
+      runDetail.tasks[0] = {
+        ...runDetail.tasks[0]!,
+        status: "pending",
+        ownerAgentId: "worker-agent-1",
+        verificationStatus: "pending",
+        verifierAgentId: null,
+        latestVerificationSummary: null
+      };
+      const assignment = createWorkerAssignment(join(worktreeRoot, "shared"));
+      const artifactPosts: Array<Record<string, unknown>> = [];
+
+      const request = async <T>(method: string, path: string, payload?: Record<string, unknown>) => {
+        if (method === "POST" && path === "/api/v1/worker-nodes/node-1/claim-dispatch") {
+          return assignment as T;
+        }
+
+        if (method === "GET" && path === "/api/v1/runs/run-1") {
+          return runDetail as T;
+        }
+
+        if (method === "GET" && path === "/api/v1/repositories") {
+          return [repository] as T;
+        }
+
+        if (method === "GET" && path === "/api/v1/messages?runId=run-1") {
+          return [] as T;
+        }
+
+        if (method === "POST" && path === "/api/v1/runs/run-1/budget-checkpoints") {
+          return {
+            decision: "within_budget",
+            exceeded: [],
+            updatedAt: new Date("2026-03-31T09:02:00.000Z").toISOString(),
+            approvalId: null,
+            continueAllowed: true
+          } as T;
+        }
+
+        if (method === "POST" && path === "/api/v1/agents/worker-agent-1/session") {
+          return {
+            id: "session-worker-1",
+            agentId: "worker-agent-1",
+            threadId: "thread-worker-1",
+            cwd: assignment.worktreePath,
+            sandbox: assignment.sandbox,
+            approvalPolicy: assignment.approvalPolicy,
+            includePlanTool: false,
+            workerNodeId: "node-1",
+            stickyNodeId: null,
+            placementConstraintLabels: ["workspace-write"],
+            lastHeartbeatAt: null,
+            state: "active",
+            staleReason: null,
+            metadata: {},
+            createdAt: new Date("2026-03-31T09:00:00.000Z"),
+            updatedAt: new Date("2026-03-31T09:00:00.000Z")
+          } as T;
+        }
+
+        if (method === "POST" && path === "/api/v1/worker-dispatch-assignments/dispatch-worker-1/session") {
+          return { ok: true } as T;
+        }
+
+        if (method === "POST" && path === "/api/v1/sessions/session-worker-1/transcript") {
+          return { ok: true } as T;
+        }
+
+        if (method === "POST" && path === "/api/v1/artifacts") {
+          artifactPosts.push(payload ?? {});
+          return { id: "artifact-1", ...(payload ?? {}) } as T;
+        }
+
+        if (method === "PATCH" && path === "/api/v1/worker-dispatch-assignments/dispatch-worker-1") {
+          return {
+            ...assignment,
+            state: "completed",
+            metadata: payload?.outcome ?? assignment.metadata
+          } as T;
+        }
+
+        throw new Error(`unexpected request: ${method} ${path}`);
+      };
+
+      const result = await runManagedWorkerDispatch({
+        request,
+        nodeId: "node-1",
+        workspaceRoot: worktreeRoot,
+        supervisorCommand: [
+          process.execPath,
+          "--input-type=module",
+          "-e",
+          "setInterval(() => {}, 1000);"
+        ],
+        executeTool: async () => {
+          const artifactDir = join(assignment.worktreePath, "artifacts");
+          const artifactPath = join(artifactDir, "report.txt");
+          await mkdir(artifactDir, { recursive: true });
+          await writeFile(artifactPath, "worker artifact\n", "utf8");
+
+          return {
+            threadId: "thread-worker-1",
+            output: JSON.stringify({
+              summary: "Implemented the slice and attached evidence.",
+              status: "completed",
+              blockingIssues: [],
+              messages: [],
+              artifacts: [
+                {
+                  kind: "report",
+                  path: "artifacts/report.txt",
+                  contentType: "text/plain"
+                }
+              ]
+            })
+          };
+        }
+      });
+
+      expect(result).toMatchObject({
+        assignmentId: "dispatch-worker-1",
+        status: "completed"
+      });
+      expect(artifactPosts).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          runId: "run-1",
+          taskId: "task-1",
+          kind: "report",
+          path: "artifacts/report.txt",
+          contentType: "text/plain",
+          contentBase64: Buffer.from("worker artifact\n", "utf8").toString("base64"),
+          metadata: expect.objectContaining({
+            source: "worker-outcome",
+            resolvedArtifactPath: join(assignment.worktreePath, "artifacts/report.txt")
+          })
+        })
+      ]));
+    } finally {
+      await rm(worktreeRoot, { recursive: true, force: true });
+      await rm(repoRoot, { recursive: true, force: true });
+    }
+  });
+
   it("injects validation evidence, artifacts, and relevant messages into the verifier prompt", async () => {
     const repoRoot = await mkdtemp(join(tmpdir(), "codex-swarm-verifier-repo-"));
     const worktreeRoot = await mkdtemp(join(tmpdir(), "codex-swarm-verifier-worktree-"));

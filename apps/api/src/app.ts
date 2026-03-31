@@ -44,7 +44,7 @@ interface BuildAppOptions {
 
 function createNoopObservability(config: ReturnType<typeof getConfig>): Pick<
   ObservabilityService,
-  "beginRequest" | "clearActorContext" | "getMetrics" | "listEvents" | "recordRecoverableDatabaseFallback" | "recordRequestFailure" | "recordTimelineEvent" | "setActorContext" | "withTrace"
+  "beginRequest" | "clearActorContext" | "getMetrics" | "listEvents" | "recordRecoverableDatabaseFallback" | "recordRequestFailure" | "recordTimelineEvent" | "setActorContext" | "subscribeToRunEvents" | "withTrace"
 > {
   return Object.assign(Object.create(ObservabilityService.prototype) as ObservabilityService, {
     beginRequest: () => undefined,
@@ -139,6 +139,7 @@ function createNoopObservability(config: ReturnType<typeof getConfig>): Pick<
     recordRequestFailure: () => undefined,
     recordTimelineEvent: async () => null,
     setActorContext: () => undefined,
+    subscribeToRunEvents: () => () => undefined,
     withTrace: async <T>(_name: string, fn: () => Promise<T>) => fn()
   });
 }

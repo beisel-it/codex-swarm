@@ -191,6 +191,8 @@ type ProjectTeamRecord = typeof projectTeams.$inferSelect;
 type ProjectTeamMemberRecord = typeof projectTeamMembers.$inferSelect;
 type AgentRecord = typeof agents.$inferSelect;
 type SessionRecord = typeof sessions.$inferSelect;
+type TaskRecord = typeof tasks.$inferSelect;
+type WorkerDispatchAssignmentRecord = typeof workerDispatchAssignments.$inferSelect;
 type RepeatableRunDefinitionRecord = typeof repeatableRunDefinitions.$inferSelect;
 type RepeatableRunTriggerRecord = typeof repeatableRunTriggers.$inferSelect;
 
@@ -234,6 +236,19 @@ const preferredReviewerRoles = ["reviewer"];
 function normalizeAssignmentKind(metadata: Record<string, unknown> | null | undefined) {
   const kind = metadata?.assignmentKind;
   return kind === "verification" ? "verification" : "worker";
+}
+
+function readWorkerAssignmentInvalidationReason(metadata: Record<string, unknown> | null | undefined) {
+  const invalidationReason = metadata?.invalidationReason;
+  return typeof invalidationReason === "string" && invalidationReason.length > 0
+    ? invalidationReason
+    : null;
+}
+
+function isInvalidatedWorkerDispatchAssignment(
+  assignment: Pick<WorkerDispatchAssignment, "state" | "metadata">
+) {
+  return assignment.state === "failed" && readWorkerAssignmentInvalidationReason(assignment.metadata) !== null;
 }
 
 function normalizeReviewLikeRole(role: string) {
@@ -3276,9 +3291,33 @@ export class ControlPlaneService {
         return left.createdAt.getTime() - right.createdAt.getTime();
       });
 
-    const nextAssignment = candidates[0];
+    let nextAssignment: WorkerDispatchAssignment | null = null;
+    const invalidatedRunIds = new Set<string>();
+
+    for (const candidate of candidates) {
+      if (normalizeAssignmentKind(candidate.metadata) !== "verification") {
+        const task = await this.getTaskRecord(candidate.taskId);
+        const resolution = task
+          ? await this.resolveWorkerAssignmentTaskState(task, candidate.state)
+          : { valid: false, effectiveTaskStatus: null as Task["status"] | null };
+
+        if (!resolution.valid) {
+          await this.invalidateWorkerDispatchAssignment(candidate, {
+            reason: task ? "task_not_runnable" : "task_missing",
+            task,
+            taskStatus: resolution.effectiveTaskStatus
+          });
+          invalidatedRunIds.add(candidate.runId);
+          continue;
+        }
+      }
+
+      nextAssignment = candidate;
+      break;
+    }
 
     if (!nextAssignment) {
+      await Promise.all([...invalidatedRunIds].map((runId) => this.reconcileRunExecutionState(runId)));
       return null;
     }
 
@@ -3511,7 +3550,7 @@ export class ControlPlaneService {
           dispatchCounts.completed += 1;
         } else if (assignment.state === "retrying") {
           dispatchCounts.retrying += 1;
-        } else if (assignment.state === "failed") {
+        } else if (assignment.state === "failed" && !isInvalidatedWorkerDispatchAssignment(assignment)) {
           dispatchCounts.failed += 1;
         }
 
@@ -3617,7 +3656,7 @@ export class ControlPlaneService {
         });
       }
 
-      if (assignment.state === "failed") {
+      if (assignment.state === "failed" && !isInvalidatedWorkerDispatchAssignment(assignment)) {
         alerts.push({
           kind: "dispatch_failed",
           severity: "critical",
@@ -4828,12 +4867,25 @@ export class ControlPlaneService {
               updatedAt: now
             }).where(eq(tasks.id, task.id));
           }
-        } else if (task.status !== "in_progress" || task.ownerAgentId !== assignment.agentId) {
-          await this.db.update(tasks).set({
-            status: "in_progress",
-            ownerAgentId: assignment.agentId,
-            updatedAt: now
-          }).where(eq(tasks.id, task.id));
+        } else {
+          const resolution = await this.resolveWorkerAssignmentTaskState(task, assignment.state);
+
+          if (!resolution.valid) {
+            await this.invalidateWorkerDispatchAssignment(this.mapWorkerDispatchAssignment(assignment), {
+              reason: "task_not_runnable",
+              task,
+              taskStatus: resolution.effectiveTaskStatus
+            });
+            continue;
+          }
+
+          if (task.status !== "in_progress" || task.ownerAgentId !== assignment.agentId) {
+            await this.db.update(tasks).set({
+              status: "in_progress",
+              ownerAgentId: assignment.agentId,
+              updatedAt: now
+            }).where(eq(tasks.id, task.id));
+          }
         }
 
         agentIdsToBusy.add(assignment.agentId);
@@ -4859,12 +4911,25 @@ export class ControlPlaneService {
               updatedAt: now
             }).where(eq(tasks.id, task.id));
           }
-        } else if (task.status !== "pending" || task.ownerAgentId !== assignment.agentId) {
-          await this.db.update(tasks).set({
-            status: "pending",
-            ownerAgentId: assignment.agentId,
-            updatedAt: now
-          }).where(eq(tasks.id, task.id));
+        } else {
+          const resolution = await this.resolveWorkerAssignmentTaskState(task, assignment.state);
+
+          if (!resolution.valid) {
+            await this.invalidateWorkerDispatchAssignment(this.mapWorkerDispatchAssignment(assignment), {
+              reason: "task_not_runnable",
+              task,
+              taskStatus: resolution.effectiveTaskStatus
+            });
+            continue;
+          }
+
+          if (task.status !== "pending" || task.ownerAgentId !== assignment.agentId) {
+            await this.db.update(tasks).set({
+              status: "pending",
+              ownerAgentId: assignment.agentId,
+              updatedAt: now
+            }).where(eq(tasks.id, task.id));
+          }
         }
 
         agentIdsToIdle.add(assignment.agentId);
@@ -4877,6 +4942,16 @@ export class ControlPlaneService {
       }
 
       if (assignment.state === "failed") {
+        if (assignmentKind !== "verification" && isInvalidatedWorkerDispatchAssignment(this.mapWorkerDispatchAssignment(assignment))) {
+          agentIdsToIdle.add(assignment.agentId);
+
+          if (assignment.sessionId) {
+            sessionIdsToReset.add(assignment.sessionId);
+          }
+
+          continue;
+        }
+
         if (task.status !== "failed" || task.ownerAgentId !== assignment.agentId) {
           await this.db.update(tasks).set({
             status: "failed",
@@ -4958,8 +5033,11 @@ export class ControlPlaneService {
       }).where(inArray(sessions.id, [...sessionIdsToStale]));
     }
 
-    const refreshedTasks = await this.db.select().from(tasks).where(eq(tasks.runId, runId)).orderBy(asc(tasks.createdAt));
-    const activeAssignments = assignmentRows.filter((assignment) =>
+    const [refreshedTasks, refreshedAssignments] = await Promise.all([
+      this.db.select().from(tasks).where(eq(tasks.runId, runId)).orderBy(asc(tasks.createdAt)),
+      this.db.select().from(workerDispatchAssignments).where(eq(workerDispatchAssignments.runId, runId)).orderBy(asc(workerDispatchAssignments.createdAt))
+    ]);
+    const activeAssignments = refreshedAssignments.filter((assignment) =>
       assignment.state === "queued" || assignment.state === "claimed" || assignment.state === "retrying");
     const anyFailedTask = refreshedTasks.some((task) => task.status === "failed");
     const allTasksCompleted = refreshedTasks.length > 0 && refreshedTasks.every((task) => task.status === "completed");
@@ -5967,6 +6045,109 @@ export class ControlPlaneService {
     if (foreignDependency) {
       throw new HttpError(409, "dependency tasks must belong to the same run");
     }
+  }
+
+  private async getTaskRecord(taskId: string) {
+    const [task] = await this.db.select().from(tasks).where(eq(tasks.id, taskId));
+    return task ?? null;
+  }
+
+  private async resolveWorkerAssignmentTaskState(
+    task: TaskRecord,
+    assignmentState: WorkerDispatchAssignment["state"]
+  ): Promise<{ valid: boolean; effectiveTaskStatus: Task["status"] }> {
+    const dependenciesSatisfied = await this.areDependenciesSatisfied(task.runId, task.dependencyIds);
+
+    if (!dependenciesSatisfied) {
+      return {
+        valid: false,
+        effectiveTaskStatus: "blocked"
+      };
+    }
+
+    if (assignmentState === "claimed") {
+      return {
+        valid: task.status === "pending" || task.status === "in_progress",
+        effectiveTaskStatus: task.status as Task["status"]
+      };
+    }
+
+    if (assignmentState === "queued" || assignmentState === "retrying") {
+      return {
+        valid: task.status === "pending",
+        effectiveTaskStatus: task.status as Task["status"]
+      };
+    }
+
+    return {
+      valid: false,
+      effectiveTaskStatus: task.status as Task["status"]
+    };
+  }
+
+  private async invalidateWorkerDispatchAssignment(
+    assignment: WorkerDispatchAssignment,
+    input: {
+      reason: string;
+      task: TaskRecord | null;
+      taskStatus: Task["status"] | null;
+    }
+  ) {
+    const now = this.clock.now();
+    const nextMetadata = {
+      ...assignment.metadata,
+      assignmentKind: normalizeAssignmentKind(assignment.metadata),
+      invalidationReason: input.reason,
+      terminalOutcome: "invalidated"
+    };
+
+    await this.db.update(workerDispatchAssignments).set({
+      state: "failed",
+      attempt: assignment.maxAttempts,
+      stickyNodeId: null,
+      preferredNodeId: null,
+      claimedByNodeId: null,
+      claimedAt: null,
+      completedAt: now,
+      lastFailureReason: input.reason,
+      metadata: nextMetadata,
+      updatedAt: now
+    }).where(eq(workerDispatchAssignments.id, assignment.id));
+
+    if (assignment.sessionId) {
+      await this.db.update(sessions).set({
+        workerNodeId: null,
+        stickyNodeId: null,
+        state: "pending",
+        staleReason: input.reason,
+        updatedAt: now
+      }).where(eq(sessions.id, assignment.sessionId));
+    }
+
+    await this.db.update(agents).set({
+      status: "idle",
+      updatedAt: now
+    }).where(eq(agents.id, assignment.agentId));
+
+    if (input.task) {
+      await this.db.update(tasks).set({
+        status: input.taskStatus ?? (input.task.status as Task["status"]),
+        ownerAgentId: assignment.agentId,
+        updatedAt: now
+      }).where(eq(tasks.id, input.task.id));
+    }
+
+    await this.recordControlPlaneEvent(controlPlaneEventDefinitions.workerDispatchAssignmentUpdated, {
+      runId: assignment.runId,
+      entityId: assignment.id,
+      status: "failed",
+      summary: `Worker dispatch assignment invalidated: ${input.reason}`,
+      metadata: {
+        taskId: assignment.taskId,
+        agentId: assignment.agentId,
+        reason: input.reason
+      }
+    });
   }
 
   private async areDependenciesSatisfied(runId: string, dependencyIds: string[]) {

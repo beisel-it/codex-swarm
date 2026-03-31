@@ -137,6 +137,56 @@ export const runRoutes: FastifyPluginAsync = async (app) => {
     return app.controlPlane.getRun(id, request.authContext);
   });
 
+  app.get("/runs/:id/stream", async (request, reply) => {
+    const { id } = idParamSchema.parse(request.params);
+    await app.controlPlane.getRun(id, request.authContext);
+
+    reply.hijack();
+    reply.raw.writeHead(200, {
+      "content-type": "text/event-stream; charset=utf-8",
+      "cache-control": "no-cache, no-transform",
+      connection: "keep-alive",
+      "x-accel-buffering": "no"
+    });
+    reply.raw.flushHeaders?.();
+
+    const writeFrame = (eventName: string, data: Record<string, unknown>) => {
+      if (reply.raw.destroyed || reply.raw.writableEnded) {
+        return;
+      }
+
+      reply.raw.write(`event: ${eventName}\n`);
+      reply.raw.write(`data: ${JSON.stringify(data)}\n\n`);
+    };
+
+    const writeHeartbeat = () => {
+      writeFrame("heartbeat", {
+        runId: id,
+        ts: new Date().toISOString()
+      });
+    };
+
+    let closed = false;
+    const unsubscribe = app.observability.subscribeToRunEvents(id, (event) => {
+      writeFrame("control_plane_event", event);
+    });
+    const heartbeatTimer = setInterval(writeHeartbeat, 15000);
+
+    const cleanup = () => {
+      if (closed) {
+        return;
+      }
+
+      closed = true;
+      clearInterval(heartbeatTimer);
+      unsubscribe();
+    };
+
+    reply.raw.on("close", cleanup);
+    reply.raw.on("error", cleanup);
+    writeHeartbeat();
+  });
+
   app.get("/runs/:id/audit-export", async (request) => {
     return app.observability.withTrace("api.runs.audit-export", async () => {
       const { id } = idParamSchema.parse(request.params);

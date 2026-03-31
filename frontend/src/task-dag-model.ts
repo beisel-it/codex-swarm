@@ -72,9 +72,9 @@ type BuildTaskDagRenderModelArgs = {
   isLoading?: boolean
 }
 
-const NODE_WIDTH = 220
-const NODE_HEIGHT = 108
-const HORIZONTAL_GAP = 72
+const NODE_WIDTH = 280
+const NODE_HEIGHT = 136
+const HORIZONTAL_GAP = 64
 const VERTICAL_GAP = 24
 const CANVAS_PADDING = 24
 
