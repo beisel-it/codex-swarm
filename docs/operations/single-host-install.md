@@ -18,6 +18,7 @@ Install and verify:
 
 - Node 22+
 - pnpm via Corepack
+- `curl`
 - Docker
 - `git`
 - `codex`
@@ -26,6 +27,27 @@ Install and verify:
 Optional but recommended:
 
 - `loginctl enable-linger <user>` so user services survive logout
+
+## One-command install
+
+The primary release install path is the review-first remote installer:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/beisel-it/codex-swarm/main/ops/deploy/install-single-host-remote.sh | sh
+```
+
+By default it:
+
+- resolves the latest published GitHub Release bundle
+- shows the exact bundle URL and delegated install command
+- asks whether you want to continue after review
+- asks again before it performs a real install
+
+For trusted automation or a fully non-interactive local install:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/beisel-it/codex-swarm/main/ops/deploy/install-single-host-remote.sh | sh -s -- --yes --start
+```
 
 ## Install the CLI
 
@@ -41,7 +63,7 @@ codex-swarm
 
 ## Review the installer entrypoint
 
-If you want a copy-paste-safe shell entrypoint, inspect the checked-in wrapper first:
+If you want a checked-in local shell entrypoint instead of the remote one-liner, inspect the wrapper first:
 
 ```bash
 ./ops/deploy/install-single-host.sh

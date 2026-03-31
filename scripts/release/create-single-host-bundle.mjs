@@ -24,6 +24,9 @@ const releaseMetadata = {
 const bundlePaths = [
   "apps/api/package.json",
   "apps/api/dist/src",
+  "apps/cli/package.json",
+  "apps/cli/dist",
+  "apps/cli/templates",
   "apps/tui/package.json",
   "apps/tui/dist/index.js",
   "apps/tui/dist/data.js",
