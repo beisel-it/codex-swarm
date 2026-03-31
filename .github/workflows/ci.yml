@@ -22,7 +22,7 @@ jobs:
       pull-requests: read
     steps:
       - name: Review dependency changes
-        uses: actions/dependency-review-action@v4.8.2
+        uses: actions/dependency-review-action@v4.9.0
         with:
           fail-on-severity: high
 
@@ -31,7 +31,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Check out repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
 
       - name: Set up workspace
         uses: ./.github/actions/setup-workspace
@@ -48,7 +48,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Check out repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
 
       - name: Set up workspace
         uses: ./.github/actions/setup-workspace
@@ -65,7 +65,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Check out repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
 
       - name: Set up workspace
         uses: ./.github/actions/setup-workspace
@@ -82,7 +82,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Check out repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
 
       - name: Set up workspace
         uses: ./.github/actions/setup-workspace
