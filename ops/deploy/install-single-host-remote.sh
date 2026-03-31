@@ -218,4 +218,10 @@ if [ -n "$PASSTHROUGH_ARGS" ]; then
   IFS=$OLD_IFS
 fi
 
-exec "$@"
+if "$@"; then
+  status=0
+else
+  status=$?
+fi
+
+exit "$status"
