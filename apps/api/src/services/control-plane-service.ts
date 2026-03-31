@@ -238,6 +238,19 @@ function normalizeAssignmentKind(metadata: Record<string, unknown> | null | unde
   return kind === "verification" ? "verification" : "worker";
 }
 
+function readWorkerAssignmentInvalidationReason(metadata: Record<string, unknown> | null | undefined) {
+  const invalidationReason = metadata?.invalidationReason;
+  return typeof invalidationReason === "string" && invalidationReason.length > 0
+    ? invalidationReason
+    : null;
+}
+
+function isInvalidatedWorkerDispatchAssignment(
+  assignment: Pick<WorkerDispatchAssignment, "state" | "metadata">
+) {
+  return assignment.state === "failed" && readWorkerAssignmentInvalidationReason(assignment.metadata) !== null;
+}
+
 function normalizeReviewLikeRole(role: string) {
   return role.trim().toLowerCase().includes("review");
 }
@@ -3537,7 +3550,7 @@ export class ControlPlaneService {
           dispatchCounts.completed += 1;
         } else if (assignment.state === "retrying") {
           dispatchCounts.retrying += 1;
-        } else if (assignment.state === "failed") {
+        } else if (assignment.state === "failed" && !isInvalidatedWorkerDispatchAssignment(assignment)) {
           dispatchCounts.failed += 1;
         }
 
@@ -3643,7 +3656,7 @@ export class ControlPlaneService {
         });
       }
 
-      if (assignment.state === "failed") {
+      if (assignment.state === "failed" && !isInvalidatedWorkerDispatchAssignment(assignment)) {
         alerts.push({
           kind: "dispatch_failed",
           severity: "critical",
@@ -4929,6 +4942,16 @@ export class ControlPlaneService {
       }
 
       if (assignment.state === "failed") {
+        if (assignmentKind !== "verification" && isInvalidatedWorkerDispatchAssignment(this.mapWorkerDispatchAssignment(assignment))) {
+          agentIdsToIdle.add(assignment.agentId);
+
+          if (assignment.sessionId) {
+            sessionIdsToReset.add(assignment.sessionId);
+          }
+
+          continue;
+        }
+
         if (task.status !== "failed" || task.ownerAgentId !== assignment.agentId) {
           await this.db.update(tasks).set({
             status: "failed",
@@ -6074,7 +6097,8 @@ export class ControlPlaneService {
     const nextMetadata = {
       ...assignment.metadata,
       assignmentKind: normalizeAssignmentKind(assignment.metadata),
-      invalidationReason: input.reason
+      invalidationReason: input.reason,
+      terminalOutcome: "invalidated"
     };
 
     await this.db.update(workerDispatchAssignments).set({

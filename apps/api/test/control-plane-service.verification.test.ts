@@ -944,6 +944,7 @@ describe("ControlPlaneService verification lifecycle", () => {
     (service as any).recordControlPlaneEvent = async () => undefined;
 
     await (service as any).repairRunStateFromDispatchAssignments("run-1");
+    await (service as any).repairRunStateFromDispatchAssignments("run-1");
 
     expect(db.assignmentStore[0]).toMatchObject({
       state: "failed",

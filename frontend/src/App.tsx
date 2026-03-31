@@ -1244,10 +1244,10 @@ function App() {
   const [pendingRunStarts, setPendingRunStarts] = useState<string[]>([])
   const liveRunRefreshStateRef = useRef<{
     inFlight: boolean
-    pending: RunLiveRefreshRequest | null
+    pendingByRunId: Map<string, RunLiveRefreshRequest>
   }>({
     inFlight: false,
-    pending: null,
+    pendingByRunId: new Map<string, RunLiveRefreshRequest>(),
   })
   const queueRunLiveRefreshRef = useRef<(runId: string, request: RunLiveRefreshRequest) => void>(() => undefined)
 
@@ -1525,7 +1525,7 @@ function App() {
     return () => {
       disposed = true
       activeController?.abort()
-      liveRefreshState.pending = null
+      liveRefreshState.pendingByRunId.delete(runId)
       if (reconnectTimer !== null) {
         window.clearTimeout(reconnectTimer)
       }
@@ -1721,7 +1721,10 @@ function App() {
 
   function queueRunLiveRefresh(runId: string, request: RunLiveRefreshRequest) {
     const refreshState = liveRunRefreshStateRef.current
-    refreshState.pending = mergeRunLiveRefreshRequests(refreshState.pending, request)
+    refreshState.pendingByRunId.set(
+      runId,
+      mergeRunLiveRefreshRequests(refreshState.pendingByRunId.get(runId) ?? null, request),
+    )
 
     if (refreshState.inFlight) {
       return
@@ -1731,15 +1734,16 @@ function App() {
 
     void (async () => {
       try {
-        while (liveRunRefreshStateRef.current.pending) {
-          const nextRequest = liveRunRefreshStateRef.current.pending
-          liveRunRefreshStateRef.current.pending = null
+        while (liveRunRefreshStateRef.current.pendingByRunId.size > 0) {
+          const nextEntry = liveRunRefreshStateRef.current.pendingByRunId.entries().next().value as [string, RunLiveRefreshRequest] | undefined
 
-          if (!nextRequest) {
+          if (!nextEntry) {
             continue
           }
 
-          await refreshRunSlices(runId, nextRequest)
+          const [nextRunId, nextRequest] = nextEntry
+          liveRunRefreshStateRef.current.pendingByRunId.delete(nextRunId)
+          await refreshRunSlices(nextRunId, nextRequest)
         }
       } catch (error) {
         console.error('[live-run-refresh] refresh failed', error)
