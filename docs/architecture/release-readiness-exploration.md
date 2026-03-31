@@ -298,7 +298,7 @@ The README should eventually include a deployment section with this structure:
    - single-host managed deployment
    - optional same-host worker fan-out
 2. **Install the CLI**
-   - `npm install -g codex-swarm`
+   - `npm install -g @beisel-it/codex-swarm --registry=https://npm.pkg.github.com`
    - GitHub Release fallback
 3. **Inspect the installer**
    - safe one-line script flow

@@ -29,6 +29,13 @@ jobs:
       - name: Set up workspace
         uses: ./.github/actions/setup-workspace
 
+      - name: Configure Node for GitHub Packages
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: .nvmrc
+          registry-url: https://npm.pkg.github.com
+          scope: "@beisel-it"
+
       - name: Run release changeset workflow
         id: changesets
         uses: changesets/action@v1
@@ -40,7 +47,7 @@ jobs:
           createGithubReleases: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          NPM_CONFIG_PROVENANCE: "true"
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build and verify single-host bundle
         if: steps.changesets.outputs.published == 'true'

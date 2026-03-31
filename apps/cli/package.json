@@ -1,5 +1,5 @@
 {
-  "name": "codex-swarm",
+  "name": "@beisel-it/codex-swarm",
   "version": "0.1.0",
   "description": "Built-JS command line interface for Codex Swarm",
   "type": "module",
@@ -18,7 +18,8 @@
     "templates"
   ],
   "publishConfig": {
-    "access": "public"
+    "access": "public",
+    "registry": "https://npm.pkg.github.com"
   },
   "repository": {
     "type": "git",

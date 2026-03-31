@@ -59,10 +59,14 @@ curl -fsSL https://raw.githubusercontent.com/beisel-it/codex-swarm/main/ops/depl
 CLI-first alternative:
 
 ```bash
-npm install -g codex-swarm
+npm login --scope=@beisel-it --auth-type=legacy --registry=https://npm.pkg.github.com
+npm install -g @beisel-it/codex-swarm --registry=https://npm.pkg.github.com
 codex-swarm install --version latest --dry-run
 codex-swarm install --version latest
 ```
+
+The direct package path uses GitHub Packages. The one-command installer above remains the preferred path because it does not depend on npm registry setup or a preinstalled global CLI.
+Use a GitHub identity with package read access when `npm login` prompts.
 
 After reviewing and editing `~/.config/codex-swarm/single-host.env`, start the stack if you did not already pass `--start`:
 
@@ -303,7 +307,8 @@ This is now centered on a release-bundle install path. The intended deployment
 flow is:
 
 ```bash
-npm install -g codex-swarm
+npm login --scope=@beisel-it --auth-type=legacy --registry=https://npm.pkg.github.com
+npm install -g @beisel-it/codex-swarm --registry=https://npm.pkg.github.com
 codex-swarm install --version latest --dry-run
 codex-swarm install --version latest
 codex-swarm install --install-root ~/.local/share/codex-swarm/install --start --yes
