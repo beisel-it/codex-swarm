@@ -80,22 +80,30 @@ export const webhookRoutes: FastifyPluginAsync = async (app) => {
             teamId: result.receipt.teamId,
             teamName: request.authContext.teamName ?? null
           };
-          const startedRun = await startRunNow(app, {
-            authContext: webhookAuthContext,
-            runId: result.run.id,
-            startedFrom: `webhook trigger ${result.receipt.repeatableRunTriggerId}`
-          });
 
           await app.observability.recordTimelineEvent(timelineEvent(controlPlaneEvents.runCreated, {
-            runId: startedRun.id,
-            entityId: startedRun.id,
-            status: startedRun.status,
+            runId: result.run.id,
+            entityId: result.run.id,
+            status: result.run.status,
             summary: `Run created from webhook trigger ${result.receipt.repeatableRunTriggerId}`,
             metadata: {
               receiptId: result.receipt.id,
               repeatableRunId: result.receipt.repeatableRunId
             }
           }));
+
+          void startRunNow(app, {
+            authContext: webhookAuthContext,
+            runId: result.run.id,
+            startedFrom: `webhook trigger ${result.receipt.repeatableRunTriggerId}`
+          }).catch((error) => {
+            request.log.error({
+              err: error,
+              runId: result.run?.id,
+              receiptId: result.receipt.id,
+              triggerId: result.receipt.repeatableRunTriggerId
+            }, "failed to auto-start webhook-created run");
+          });
         }
 
         return reply.code(202).send({

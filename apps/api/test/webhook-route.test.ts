@@ -20,7 +20,8 @@ afterEach(() => {
 });
 
 describe("webhookRoutes", () => {
-  it("accepts public webhook ingress without bearer auth and returns the created run linkage", async () => {
+  it("accepts public webhook ingress without bearer auth and acknowledges before background start completes", async () => {
+    const pendingStart = new Promise(() => undefined);
     const pendingRun = {
       id: "55555555-5555-4555-8555-555555555555",
       repositoryId: "44444444-4444-4444-8444-444444444444",
@@ -141,10 +142,7 @@ describe("webhookRoutes", () => {
           ...pendingRun
         }
       })),
-      getRun: vi.fn()
-        .mockResolvedValueOnce(pendingRun)
-        .mockResolvedValueOnce(pendingRun)
-        .mockResolvedValueOnce(startedRun),
+      getRun: vi.fn().mockImplementation(async () => pendingStart),
       getProjectTeam: vi.fn(),
       updateRunStatus: vi.fn(async () => startedRun),
       enqueueRunnableWorkerDispatches: vi.fn(async () => undefined),
@@ -169,23 +167,16 @@ describe("webhookRoutes", () => {
       endpointPath: "/webhooks/triggers/22222222-2222-4222-8222-222222222222",
       method: "POST"
     }));
-    expect(controlPlane.updateRunStatus).toHaveBeenCalledWith(
-      "55555555-5555-4555-8555-555555555555",
-      expect.objectContaining({
-        status: "in_progress"
-      }),
-      expect.objectContaining({
-        principal: "webhook-ingress",
-        workspaceId: "workspace-1",
-        teamId: "team-1"
-      })
-    );
+    expect(controlPlane.updateRunStatus).not.toHaveBeenCalled();
     expect(response.json()).toEqual({
       receiptId: "11111111-1111-4111-8111-111111111111",
       status: "run_created",
       runId: "55555555-5555-4555-8555-555555555555",
       rejectionReason: null
     });
+    expect(observability.recordTimelineEvent).toHaveBeenCalledWith(expect.objectContaining({
+      eventType: "run.created"
+    }));
 
     await app.close();
   });
