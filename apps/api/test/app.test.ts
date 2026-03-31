@@ -609,6 +609,7 @@ class FakeVerticalSliceControlPlane {
       priority: input.priority,
       ownerAgentId: input.ownerAgentId ?? null,
       dependencyIds: input.dependencyIds,
+      definitionOfDone: input.definitionOfDone,
       acceptanceCriteria: input.acceptanceCriteria,
       validationTemplates: input.validationTemplates ?? [],
       createdAt: new Date(),
@@ -4078,12 +4079,16 @@ describe("buildApp", () => {
         role: "backend-developer",
         priority: 2,
         dependencyIds: [],
+        definitionOfDone: ["task record persists a reusable definition of done"],
         acceptanceCriteria: ["task is saved"]
       }
     });
 
     expect(createTaskAResponse.statusCode).toBe(201);
-    expect(createTaskAResponse.json().status).toBe("pending");
+    expect(createTaskAResponse.json()).toMatchObject({
+      status: "pending",
+      definitionOfDone: ["task record persists a reusable definition of done"]
+    });
 
     const createTaskBResponse = await app.inject({
       method: "POST",
@@ -4096,12 +4101,16 @@ describe("buildApp", () => {
         role: "backend-developer",
         priority: 3,
         dependencyIds: [ids.taskA],
+        definitionOfDone: ["dependency relationship stays intact while task waits"],
         acceptanceCriteria: ["task unblocks when dependency completes"]
       }
     });
 
     expect(createTaskBResponse.statusCode).toBe(201);
-    expect(createTaskBResponse.json().status).toBe("blocked");
+    expect(createTaskBResponse.json()).toMatchObject({
+      status: "blocked",
+      definitionOfDone: ["dependency relationship stays intact while task waits"]
+    });
 
     const completeTaskResponse = await app.inject({
       method: "PATCH",
@@ -4402,6 +4411,7 @@ describe("buildApp", () => {
           role: "backend-developer",
           priority: 2,
           dependencyIds: [],
+          definitionOfDone: ["control-plane route exists and is callable"],
           acceptanceCriteria: ["control-plane route exists"]
         }
       });
@@ -4417,6 +4427,7 @@ describe("buildApp", () => {
           role: "frontend-developer",
           priority: 3,
           dependencyIds: [ids.taskA],
+          definitionOfDone: ["board renders the task graph for reviewers"],
           acceptanceCriteria: ["board shows the task graph"]
         }
       });
@@ -4432,12 +4443,14 @@ describe("buildApp", () => {
             title: "Define API scope",
             role: "backend-developer",
             description: "Establish the first backend deliverable",
+            definitionOfDone: ["control-plane route exists and is callable"],
             acceptanceCriteria: ["control-plane route exists"]
           },
           {
             title: "Render review board",
             role: "frontend-developer",
             description: "Expose plan progress to reviewers",
+            definitionOfDone: ["board renders the task graph for reviewers"],
             acceptanceCriteria: ["board shows the task graph"]
           }
         ]
@@ -4453,12 +4466,14 @@ describe("buildApp", () => {
               title: "Define API scope",
               role: "backend-developer",
               description: "Establish the first backend deliverable",
+              definitionOfDone: ["control-plane route exists and is callable"],
               acceptanceCriteria: ["control-plane route exists"]
             },
             {
               title: "Render review board",
               role: "frontend-developer",
               description: "Expose plan progress to reviewers",
+              definitionOfDone: ["board renders the task graph for reviewers"],
               acceptanceCriteria: ["board shows the task graph"]
             }
           ]
@@ -4467,6 +4482,8 @@ describe("buildApp", () => {
 
       expect(planArtifact.path).toBe(join(cwd, ".swarm/plan.md"));
       expect(await readFile(planArtifact.path, "utf8")).toBe(markdown);
+      expect(markdown).toContain("Definition of Done:");
+      expect(markdown).toContain("control-plane route exists and is callable");
 
       const createArtifactResponse = await app.inject({
         method: "POST",
@@ -4781,6 +4798,10 @@ describe("buildApp", () => {
                   title: "Draft the leader plan",
                   role: "tech-lead",
                   description: "Persist the plan artifact and review the DAG",
+                  definitionOfDone: [
+                    ".swarm/plan.md exists and includes the planned tasks",
+                    "plan artifact is linked to the run detail"
+                  ],
                   acceptanceCriteria: [
                     ".swarm/plan.md exists",
                     "plan artifact is linked to the run"
@@ -4792,6 +4813,10 @@ describe("buildApp", () => {
                   title: "Implement the hello-world backend slice",
                   role: "backend-developer",
                   description: "Pick up the first delegated coding task",
+                  definitionOfDone: [
+                    "task is ready for implementation",
+                    "leader handoff metadata is persisted for the worker"
+                  ],
                   acceptanceCriteria: [
                     "task is ready for implementation",
                     "leader handoff is persisted"
@@ -4840,6 +4865,8 @@ describe("buildApp", () => {
       const planMarkdown = await readFile(result.planArtifactPath, "utf8");
       expect(planMarkdown).toContain("Draft the leader plan");
       expect(planMarkdown).toContain("Implement the hello-world backend slice");
+      expect(planMarkdown).toContain("Definition of Done:");
+      expect(planMarkdown).toContain("plan artifact is linked to the run detail");
 
       const runDetailResponse = await app.inject({
         method: "GET",
@@ -4968,6 +4995,7 @@ describe("buildApp", () => {
                   title: "Verify prerequisites",
                   role: "infrastructure-engineer",
                   description: "Check the environment",
+                  definitionOfDone: ["environment prerequisites are verified before stack start"],
                   acceptanceCriteria: ["environment is ready"],
                   dependencyKeys: ["stack-start"]
                 },
@@ -4976,6 +5004,7 @@ describe("buildApp", () => {
                   title: "Start the stack",
                   role: "backend-developer",
                   description: "Boot the local services",
+                  definitionOfDone: ["local services start successfully"],
                   acceptanceCriteria: ["services start"],
                   dependencyKeys: ["env-check", "ui-validate"]
                 },
@@ -4984,6 +5013,7 @@ describe("buildApp", () => {
                   title: "Validate the UI",
                   role: "frontend-developer",
                   description: "Open the app",
+                  definitionOfDone: ["UI is reachable after the stack starts"],
                   acceptanceCriteria: ["UI is reachable"],
                   dependencyKeys: ["stack-start"]
                 }
@@ -5232,6 +5262,7 @@ describe("buildApp", () => {
             priority: payload?.priority ?? 1,
             ownerAgentId: null,
             dependencyIds: payload?.dependencyIds ?? [],
+            definitionOfDone: payload?.definitionOfDone ?? [],
             acceptanceCriteria: payload?.acceptanceCriteria ?? [],
             validationTemplates: [],
             createdAt: new Date(),
@@ -5276,6 +5307,7 @@ describe("buildApp", () => {
                   title: "Research the audience",
                   role: "design-researcher",
                   description: "Collect audience and reference context.",
+                  definitionOfDone: ["research findings are captured for downstream design work"],
                   acceptanceCriteria: ["research plan exists"],
                   dependencyKeys: []
                 },
@@ -5284,6 +5316,7 @@ describe("buildApp", () => {
                   title: "Set visual direction",
                   role: "art-director",
                   description: "Turn the research into art direction.",
+                  definitionOfDone: ["visual direction is defined from the research findings"],
                   acceptanceCriteria: ["visual thesis is defined"],
                   dependencyKeys: ["research"]
                 }
@@ -7326,6 +7359,7 @@ describe("buildApp", () => {
                   title: "Prepare schema slice",
                   role: "backend-developer",
                   description: "Create the schema-facing preparation slice.",
+                  definitionOfDone: ["schema concerns are isolated in a dedicated slice"],
                   acceptanceCriteria: ["schema concerns are isolated"],
                   dependencyKeys: []
                 },
@@ -7334,6 +7368,7 @@ describe("buildApp", () => {
                   title: "Finish API follow-up slice",
                   role: "backend-developer",
                   description: "Finish the API wiring after the schema slice lands.",
+                  definitionOfDone: ["API wiring follows the schema prep work cleanly"],
                   acceptanceCriteria: ["API wiring follows the schema prep work"],
                   dependencyKeys: ["schema-slice"]
                 }
@@ -7831,6 +7866,7 @@ describe("buildApp", () => {
                   title: "Create scaffold files",
                   role: "backend-developer",
                   description: "Add the missing scaffold files needed by implementation.",
+                  definitionOfDone: ["required scaffold files exist for the blocked task"],
                   acceptanceCriteria: ["scaffold files exist"],
                   dependencyKeys: []
                 },
@@ -7839,6 +7875,7 @@ describe("buildApp", () => {
                   title: "Prepare scaffold fixtures",
                   role: "backend-developer",
                   description: "Add fixtures that validate the scaffold.",
+                  definitionOfDone: ["fixtures validate the new scaffold files"],
                   acceptanceCriteria: ["fixtures cover the scaffold"],
                   dependencyKeys: ["scaffold"]
                 }

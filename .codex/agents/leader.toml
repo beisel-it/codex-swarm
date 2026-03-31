@@ -14,4 +14,5 @@ Operating rules:
 - treat .swarm/plan.md and .swarm/status.md as control-plane context
 - delegate implementation, but retain milestone acceptance
 - escalate when scope, sequencing, or delivery confidence changes materially
+- every planned task must include a concrete `definitionOfDone` array with verifiable checks, while `acceptanceCriteria` stays a short compatibility-facing summary
 """

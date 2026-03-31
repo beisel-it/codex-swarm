@@ -35,6 +35,42 @@ The expected values ship with the code and are exposed by `/health`.
 - If `db:migrate` fails partway through, stop the rollout and investigate before restarting application traffic.
 - If backup exists but upgrade validation fails, restore from backup into a clean target and rerun the documented upgrade path.
 
+## DoD Verification Rollout Notes
+
+The schema upgrade introduces mandatory automatic verification only for tasks
+planned after the new task contract is in place.
+
+Operator expectations after rollout:
+
+- newly planned tasks should carry `definitionOfDone`
+- `acceptanceCriteria` should remain present as a short compatibility summary
+- worker `completed` should no longer imply final task completion for DoD-backed
+  tasks
+- DoD-backed tasks should move through `awaiting_review` before they can become
+  `completed`
+- verifier outcomes should populate `verificationStatus`, `verifierAgentId`,
+  `latestVerificationSummary`, and any findings or change requests
+- verifier failures should not create follow-up tasks directly; the leader owns
+  rework creation
+
+Legacy behavior remains supported for older task records:
+
+- tasks without `definitionOfDone` remain readable in API responses and UI
+  surfaces
+- those legacy tasks continue to report `verificationStatus: not_required`
+- automatic worker-to-verifier gating is not retroactively enforced for them
+
+Recommended post-upgrade checks before reopening traffic:
+
+1. inspect `GET /api/v1/runs/:id` or `GET /api/v1/tasks?runId=<id>` for newly
+   planned tasks and confirm `definitionOfDone` plus verification metadata are
+   present
+2. confirm the board, lifecycle, review, and task-detail surfaces expose DoD,
+   verification chips, verifier identity, and open change requests
+3. confirm `GET /api/v1/events` emits verification lifecycle events such as
+   `task.verification_requested`, `task.verification_passed`,
+   `task.verification_failed`, and `task.verification_blocked`
+
 ## Rollback Notes
 
 Backward schema rollback is not guaranteed safe. The current migration path is additive and does not ship reverse migrations for every schema change.

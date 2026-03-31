@@ -160,7 +160,14 @@ const statements = [
     status text not null,
     priority integer not null default 3,
     owner_agent_id text,
+    verification_status text not null default 'not_required',
+    verifier_agent_id text,
+    latest_verification_summary text,
+    latest_verification_findings jsonb not null default '[]'::jsonb,
+    latest_verification_change_requests jsonb not null default '[]'::jsonb,
+    latest_verification_evidence jsonb not null default '[]'::jsonb,
     dependency_ids jsonb not null default '[]'::jsonb,
+    definition_of_done jsonb not null default '[]'::jsonb,
     acceptance_criteria jsonb not null default '[]'::jsonb,
     validation_templates jsonb not null default '[]'::jsonb,
     created_at timestamptz not null default now(),
@@ -345,6 +352,13 @@ async function main() {
   await db.execute(sql.raw("alter table approvals add column if not exists delegated_by text"));
   await db.execute(sql.raw("alter table approvals add column if not exists delegated_at timestamptz"));
   await db.execute(sql.raw("alter table approvals add column if not exists delegation_reason text"));
+  await db.execute(sql.raw("alter table tasks add column if not exists verification_status text not null default 'not_required'"));
+  await db.execute(sql.raw("alter table tasks add column if not exists verifier_agent_id text"));
+  await db.execute(sql.raw("alter table tasks add column if not exists latest_verification_summary text"));
+  await db.execute(sql.raw("alter table tasks add column if not exists latest_verification_findings jsonb not null default '[]'::jsonb"));
+  await db.execute(sql.raw("alter table tasks add column if not exists latest_verification_change_requests jsonb not null default '[]'::jsonb"));
+  await db.execute(sql.raw("alter table tasks add column if not exists latest_verification_evidence jsonb not null default '[]'::jsonb"));
+  await db.execute(sql.raw("alter table tasks add column if not exists definition_of_done jsonb not null default '[]'::jsonb"));
   await db.execute(sql.raw("alter table tasks add column if not exists validation_templates jsonb not null default '[]'::jsonb"));
   await db.execute(sql.raw("alter table validations add column if not exists artifact_ids jsonb not null default '[]'::jsonb"));
   await db.execute(sql.raw("alter table sessions add column if not exists last_heartbeat_at timestamptz"));

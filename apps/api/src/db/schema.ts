@@ -180,7 +180,14 @@ export const tasks = pgTable("tasks", {
   status: text("status").notNull(),
   priority: integer("priority").notNull().default(3),
   ownerAgentId: text("owner_agent_id"),
+  verificationStatus: text("verification_status").notNull().default("not_required"),
+  verifierAgentId: text("verifier_agent_id"),
+  latestVerificationSummary: text("latest_verification_summary"),
+  latestVerificationFindings: jsonb("latest_verification_findings").$type<string[]>().notNull().default([]),
+  latestVerificationChangeRequests: jsonb("latest_verification_change_requests").$type<string[]>().notNull().default([]),
+  latestVerificationEvidence: jsonb("latest_verification_evidence").$type<string[]>().notNull().default([]),
   dependencyIds: jsonb("dependency_ids").$type<string[]>().notNull().default([]),
+  definitionOfDone: jsonb("definition_of_done").$type<string[]>().notNull().default([]),
   acceptanceCriteria: jsonb("acceptance_criteria").$type<string[]>().notNull().default([]),
   validationTemplates: jsonb("validation_templates").$type<Array<{
     name: string;

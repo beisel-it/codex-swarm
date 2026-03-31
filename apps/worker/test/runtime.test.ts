@@ -257,6 +257,7 @@ describe("worker runtime helpers", () => {
               title: "Define the control-plane API",
               role: "backend-developer",
               description: "Document and expose the first run endpoints",
+              definitionOfDone: ["run creation route responds successfully", "shared contract types include the new endpoint"],
               acceptanceCriteria: ["run creation is routable", "contracts are typed"]
             },
             {
@@ -271,6 +272,8 @@ describe("worker runtime helpers", () => {
       expect(artifact.path).toBe(join(cwd, ".swarm/plan.md"));
       expect(artifact.markdown).toContain("# Swarm Plan");
       expect(artifact.markdown).toContain("1. Define the control-plane API");
+      expect(artifact.markdown).toContain("Definition of Done:");
+      expect(artifact.markdown).toContain("run creation route responds successfully");
 
       const persisted = await readFile(artifact.path, "utf8");
       expect(persisted).toBe(artifact.markdown);

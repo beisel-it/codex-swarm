@@ -98,6 +98,7 @@ export interface PlanTaskDocument {
   title: string;
   role: string;
   description?: string;
+  definitionOfDone?: string[];
   acceptanceCriteria?: string[];
 }
 
@@ -280,6 +281,14 @@ export function buildPlanMarkdown(input: PlanDocumentInput) {
 
     if (task.description) {
       lines.push(`   Description: ${task.description}`);
+    }
+
+    if (task.definitionOfDone && task.definitionOfDone.length > 0) {
+      lines.push("   Definition of Done:");
+
+      for (const criterion of task.definitionOfDone) {
+        lines.push(`   - ${criterion}`);
+      }
     }
 
     if (task.acceptanceCriteria && task.acceptanceCriteria.length > 0) {

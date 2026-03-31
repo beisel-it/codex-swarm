@@ -118,12 +118,30 @@ type Run = {
 type Task = {
   id: string
   runId: string
+  parentTaskId: string | null
   title: string
   description: string
   role: string
   status: TaskStatus
   priority: number
+  ownerAgentId: string | null
+  verificationStatus: 'not_required' | 'pending' | 'requested' | 'in_progress' | 'passed' | 'failed' | 'blocked'
+  verifierAgentId: string | null
+  latestVerificationSummary: string | null
+  latestVerificationFindings: string[]
+  latestVerificationChangeRequests: string[]
+  latestVerificationEvidence: string[]
   dependencyIds: string[]
+  definitionOfDone: string[]
+  acceptanceCriteria: string[]
+  validationTemplates: Array<{
+    name: string
+    command: string
+    summary?: string
+    artifactPath?: string
+  }>
+  createdAt: string
+  updatedAt: string
 }
 
 type Agent = {
@@ -313,6 +331,33 @@ type Route =
   | { kind: 'adhoc-runs'; mode?: 'new' }
   | { kind: 'settings' }
   | { kind: 'run'; runId: string; section: 'overview' | 'board' | 'lifecycle' | 'review' }
+
+type VerificationViewState =
+  | 'legacy'
+  | 'not_requested'
+  | 'awaiting_verification'
+  | 'verification_running'
+  | 'verified_complete'
+  | 'verification_failed'
+  | 'rework_requested'
+  | 'verification_blocked'
+
+type ReviewQueueFilter = 'awaiting' | 'running' | 'failed' | 'verified' | 'all'
+
+type TaskPresentation = {
+  verificationState: VerificationViewState
+  primaryStatusTone: string
+  verificationTone: string
+  verificationLabel: string
+  verificationSummary: string
+  verificationSubtitle: string
+  ownerLabel: string
+  verifierLabel: string
+  latestSummary: string
+  hasDefinitionOfDone: boolean
+  isLegacy: boolean
+  reworkTasks: Task[]
+}
 
 const SIDEBAR_WIDTH_STORAGE_KEY = 'codex-swarm-sidebar-width-v1'
 const APPROVAL_RESOLVER = 'Codex reviewer'
@@ -634,6 +679,7 @@ async function createTask(input: {
     method: 'POST',
     body: JSON.stringify({
       ...input,
+      definitionOfDone: [],
       acceptanceCriteria: [],
       dependencyIds: [],
       validationTemplates: [],
@@ -828,6 +874,146 @@ function toneForStatus(status: string) {
   return 'active'
 }
 
+function compareTasks(left: Task, right: Task) {
+  if (left.priority !== right.priority) {
+    return left.priority - right.priority
+  }
+
+  return new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime()
+}
+
+function agentLabel(agentId: string | null, agentsById: Map<string, Agent>) {
+  if (!agentId) {
+    return 'Unassigned'
+  }
+
+  const agent = agentsById.get(agentId)
+  if (!agent) {
+    return `Agent ${agentId.slice(0, 8)}`
+  }
+
+  return agent.profile ? `${agent.name} (${agent.profile})` : agent.name
+}
+
+function buildTaskPresentation(task: Task, allTasks: Task[], agentsById: Map<string, Agent>): TaskPresentation {
+  const reworkTasks = allTasks.filter((candidate) =>
+    candidate.parentTaskId === task.id
+    && candidate.status !== 'completed'
+    && candidate.status !== 'cancelled',
+  )
+  const hasDefinitionOfDone = task.definitionOfDone.length > 0
+  const isLegacy = !hasDefinitionOfDone && task.verificationStatus === 'not_required'
+
+  let verificationState: VerificationViewState
+  if (isLegacy) {
+    verificationState = 'legacy'
+  } else if (task.latestVerificationChangeRequests.length > 0 && reworkTasks.length > 0) {
+    verificationState = 'rework_requested'
+  } else if (task.verificationStatus === 'requested' || (task.status === 'awaiting_review' && task.verificationStatus === 'pending')) {
+    verificationState = 'awaiting_verification'
+  } else if (task.verificationStatus === 'in_progress') {
+    verificationState = 'verification_running'
+  } else if (task.verificationStatus === 'passed') {
+    verificationState = 'verified_complete'
+  } else if (task.verificationStatus === 'failed') {
+    verificationState = 'verification_failed'
+  } else if (task.verificationStatus === 'blocked') {
+    verificationState = 'verification_blocked'
+  } else {
+    verificationState = 'not_requested'
+  }
+
+  const verificationLabelMap: Record<VerificationViewState, string> = {
+    legacy: 'Legacy task',
+    not_requested: 'Verification not requested',
+    awaiting_verification: 'Awaiting verification',
+    verification_running: 'Verification in progress',
+    verified_complete: 'Verified complete',
+    verification_failed: 'Verification failed',
+    rework_requested: 'Rework requested',
+    verification_blocked: 'Verification blocked',
+  }
+  const verificationToneMap: Record<VerificationViewState, string> = {
+    legacy: 'muted',
+    not_requested: 'muted',
+    awaiting_verification: 'warning',
+    verification_running: 'warning',
+    verified_complete: 'success',
+    verification_failed: 'danger',
+    rework_requested: 'danger',
+    verification_blocked: 'danger',
+  }
+  const verificationCopyMap: Record<VerificationViewState, string> = {
+    legacy: 'This task was created before mandatory verification metadata was stored.',
+    not_requested: 'Verification has not been requested yet.',
+    awaiting_verification: 'Worker finished. Waiting for verifier assignment.',
+    verification_running: 'Verifier is checking delivered work against the definition of done.',
+    verified_complete: 'Passed verification against the definition of done.',
+    verification_failed: 'Verifier found unmet definition-of-done items.',
+    rework_requested: 'Leader opened follow-up work from verifier change requests.',
+    verification_blocked: 'Verifier escalated a blocker to the leader.',
+  }
+  const verificationSubtitleMap: Record<VerificationViewState, string> = {
+    legacy: 'Legacy task metadata remains readable, but automatic verification does not apply.',
+    not_requested: 'Execution has not reached the verification step yet.',
+    awaiting_verification: 'Execution is finished. Verification has not started yet.',
+    verification_running: 'Verifier is reviewing delivered work against the stored definition of done.',
+    verified_complete: 'All required definition-of-done checks passed.',
+    verification_failed: 'Verification failed. Review findings are listed below.',
+    rework_requested: 'Rework was requested from verifier findings. The original task stays open until follow-up work lands.',
+    verification_blocked: 'Verification could not complete and was escalated to the leader.',
+  }
+
+  return {
+    verificationState,
+    primaryStatusTone: toneForStatus(task.status),
+    verificationTone: verificationToneMap[verificationState],
+    verificationLabel: verificationLabelMap[verificationState],
+    verificationSummary: verificationCopyMap[verificationState],
+    verificationSubtitle: verificationSubtitleMap[verificationState],
+    ownerLabel: agentLabel(task.ownerAgentId, agentsById),
+    verifierLabel: task.verifierAgentId
+      ? agentLabel(task.verifierAgentId, agentsById)
+      : (verificationState === 'awaiting_verification'
+        || verificationState === 'verification_running'
+        || verificationState === 'verification_failed'
+        || verificationState === 'verification_blocked'
+        || verificationState === 'rework_requested')
+        ? 'Assignment pending'
+        : 'Not assigned',
+    latestSummary: task.latestVerificationSummary?.trim() || (
+      verificationState === 'legacy'
+        ? 'This task predates stored definition of done.'
+        : verificationState === 'not_requested'
+          ? 'No verification summary published yet.'
+          : verificationCopyMap[verificationState]
+    ),
+    hasDefinitionOfDone,
+    isLegacy,
+    reworkTasks,
+  }
+}
+
+function matchesReviewFilter(presentation: TaskPresentation, filter: ReviewQueueFilter) {
+  if (filter === 'all') {
+    return true
+  }
+
+  if (filter === 'awaiting') {
+    return presentation.verificationState === 'awaiting_verification'
+  }
+
+  if (filter === 'running') {
+    return presentation.verificationState === 'verification_running'
+  }
+
+  if (filter === 'failed') {
+    return presentation.verificationState === 'verification_failed' || presentation.verificationState === 'rework_requested'
+  }
+
+  return presentation.verificationState === 'verified_complete'
+}
+
 function runKindLabel(projectId: string | null) {
   return projectId ? 'Project run' : 'Ad-hoc run'
 }
@@ -870,8 +1056,10 @@ function App() {
   const [runForm, setRunForm] = useState({ repositoryId: '', projectTeamId: '', goal: '', branchName: 'main', concurrencyCap: '1' })
   const [boardDraft, setBoardDraft] = useState({ title: '', description: '', role: 'implementer' })
   const [reviewNotes, setReviewNotes] = useState('')
+  const [reviewFilter, setReviewFilter] = useState<ReviewQueueFilter>('awaiting')
   const [selectedApprovalId, setSelectedApprovalId] = useState('')
   const [selectedArtifactId, setSelectedArtifactId] = useState('')
+  const [selectedTaskId, setSelectedTaskId] = useState('')
   const [approvalDetail, setApprovalDetail] = useState<Approval | null>(null)
   const [artifactDetail, setArtifactDetail] = useState<ArtifactDetail | null>(null)
   const [runEvents, setRunEvents] = useState<ControlPlaneEvent[]>([])
@@ -1018,6 +1206,14 @@ function App() {
     () => (selectedRun ? data.agents.filter((agent) => agent.runId === selectedRun.id) : []),
     [data.agents, selectedRun],
   )
+  const runAgentsById = useMemo(
+    () => new Map(runAgents.map((agent) => [agent.id, agent] as const)),
+    [runAgents],
+  )
+  const runTaskPresentations = useMemo(
+    () => new Map(runTasks.map((task) => [task.id, buildTaskPresentation(task, runTasks, runAgentsById)] as const)),
+    [runAgentsById, runTasks],
+  )
   useEffect(() => {
     if (!selectedRun) {
       setRunEvents([])
@@ -1092,6 +1288,12 @@ function App() {
     const nextSession = runSessions[0]?.id ?? ''
     setSelectedSessionId(nextSession)
   }, [selectedRun?.id, runSessions])
+
+  useEffect(() => {
+    if (!runTasks.some((task) => task.id === selectedTaskId)) {
+      setSelectedTaskId(runTasks[0]?.id ?? '')
+    }
+  }, [runTasks, selectedTaskId])
 
   useEffect(() => {
     if (!selectedSessionId) {
@@ -1506,10 +1708,46 @@ function App() {
   })
 
   const activeTasks = runTasks.filter((task) => task.status !== 'completed')
-  const completedTasks = runTasks.filter((task) => task.status === 'completed')
-  const waitingTasks = activeTasks.filter((task) => task.status === 'pending')
-  const blockedTasks = activeTasks.filter((task) => task.status === 'blocked')
-  const inFlightTasks = activeTasks.filter((task) => task.status === 'in_progress' || task.status === 'awaiting_review')
+  const completedTasks = runTasks.filter((task) => {
+    const presentation = runTaskPresentations.get(task.id)
+    return presentation?.verificationState === 'verified_complete' || (task.status === 'completed' && presentation?.isLegacy)
+  })
+  const waitingTasks = activeTasks.filter((task) => {
+    const presentation = runTaskPresentations.get(task.id)
+    return presentation?.verificationState === 'awaiting_verification' || presentation?.verificationState === 'verification_running'
+  })
+  const blockedTasks = activeTasks.filter((task) => {
+    const presentation = runTaskPresentations.get(task.id)
+    return task.status === 'blocked'
+      || presentation?.verificationState === 'verification_failed'
+      || presentation?.verificationState === 'rework_requested'
+      || presentation?.verificationState === 'verification_blocked'
+  })
+  const inFlightTasks = activeTasks.filter((task) => {
+    const presentation = runTaskPresentations.get(task.id)
+    return task.status === 'pending' || task.status === 'in_progress' || presentation?.verificationState === 'not_requested'
+  })
+  const verificationTasks = runTasks
+    .filter((task) => {
+      const presentation = runTaskPresentations.get(task.id)
+      return Boolean(
+        presentation
+        && (
+          presentation.hasDefinitionOfDone
+          || task.verificationStatus !== 'not_required'
+          || task.latestVerificationSummary
+          || task.latestVerificationChangeRequests.length > 0
+          || task.latestVerificationFindings.length > 0
+        ),
+      )
+    })
+    .sort(compareTasks)
+  const filteredVerificationTasks = verificationTasks.filter((task) => {
+    const presentation = runTaskPresentations.get(task.id)
+    return presentation ? matchesReviewFilter(presentation, reviewFilter) : false
+  })
+  const selectedTask = runTasks.find((task) => task.id === selectedTaskId) ?? runTasks[0] ?? null
+  const selectedVerificationTask = filteredVerificationTasks.find((task) => task.id === selectedTaskId) ?? filteredVerificationTasks[0] ?? null
 
   return (
     <div className="app-shell">
@@ -2532,27 +2770,44 @@ function App() {
                   <button type="submit" className="action-button" disabled={busy}>Add</button>
                 </form>
                 <div className="board-grid">
-                  <BoardColumn title="In flight" tasks={inFlightTasks} />
-                  <BoardColumn title="Blocked" tasks={blockedTasks} />
-                  <BoardColumn title="Waiting" tasks={waitingTasks} />
+                  <BoardColumn title="In flight" tasks={inFlightTasks} selectedTaskId={selectedTaskId} onSelectTask={setSelectedTaskId} presentations={runTaskPresentations} />
+                  <BoardColumn title="Blocked" tasks={blockedTasks} selectedTaskId={selectedTaskId} onSelectTask={setSelectedTaskId} presentations={runTaskPresentations} />
+                  <BoardColumn title="Waiting" tasks={waitingTasks} selectedTaskId={selectedTaskId} onSelectTask={setSelectedTaskId} presentations={runTaskPresentations} />
                 </div>
                 <details className="secondary-panel" open={showCompletedTasks} onToggle={(event) => setShowCompletedTasks((event.currentTarget as HTMLDetailsElement).open)}>
                   <summary>Completed ({completedTasks.length})</summary>
-                  <BoardTaskList tasks={completedTasks} />
+                  <BoardTaskList tasks={completedTasks} selectedTaskId={selectedTaskId} onSelectTask={setSelectedTaskId} presentations={runTaskPresentations} />
                 </details>
               </section>
               <section className="panel split-panel">
+                <TaskDetailPanel
+                  task={selectedTask}
+                  presentations={runTaskPresentations}
+                  validations={runValidations}
+                  artifacts={runArtifacts}
+                  events={runEvents}
+                />
                 <article className="surface-card">
                   <p className="eyebrow">Board signals</p>
-                  <h3>Blockers and approvals</h3>
+                  <h3>Queue health</h3>
                   <div className="compact-list">
-                    {runApprovals.slice(0, 4).map((approval) => (
+                    {[
+                      ['In execution', inFlightTasks.length],
+                      ['Awaiting verification', waitingTasks.length],
+                      ['Failed / rework', blockedTasks.length],
+                      ['Verified', completedTasks.length],
+                    ].map(([label, count]) => (
+                      <div key={label} className="compact-list-row">
+                        <span>{label}</span>
+                        <strong>{count}</strong>
+                      </div>
+                    ))}
+                    {runApprovals.slice(0, 2).map((approval) => (
                       <div key={approval.id} className="compact-list-row">
                         <span>{approval.kind}</span>
                         <strong>{approval.status === 'pending' ? String(approval.requestedPayload?.summary ?? 'Awaiting decision') : String(approval.resolutionPayload?.feedback ?? 'Resolved')}</strong>
                       </div>
                     ))}
-                    {runApprovals.length === 0 ? <div className="compact-empty">No pending approvals on this run.</div> : null}
                   </div>
                 </article>
                 <article className="surface-card">
@@ -2576,6 +2831,7 @@ function App() {
                           <strong>{validation.name}</strong>
                         </div>
                       ))}
+                      {runValidations.length === 0 ? <div className="compact-empty">No validation evidence published yet.</div> : null}
                     </div>
                   </details>
                 </article>
@@ -2589,44 +2845,61 @@ function App() {
                 <div className="section-header">
                   <div>
                     <p className="eyebrow">Lifecycle</p>
-                    <h2>Placement, recovery, and events</h2>
+                    <h2>Task verification history</h2>
                   </div>
                 </div>
                 <table className="data-table">
                   <thead>
                     <tr>
-                      <th>Session</th>
-                      <th>Agent</th>
-                      <th>Worker node</th>
-                      <th>Status</th>
+                      <th>Task</th>
+                      <th>Owner</th>
+                      <th>Verifier</th>
+                      <th>Task status</th>
+                      <th>Verification</th>
+                      <th>Change requests</th>
                       <th>Updated</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {runSessions.map((session) => {
-                      const agent = runAgents.find((item) => item.id === session.agentId)
-                      const node = data.workerNodes.find((item) => item.id === session.workerNodeId)
+                    {runTasks.slice().sort(compareTasks).map((task) => {
+                      const presentation = runTaskPresentations.get(task.id)
+                      if (!presentation) {
+                        return null
+                      }
+
                       return (
-                        <tr key={session.id}>
-                          <td>{session.id.slice(0, 8)}</td>
-                          <td>{agent?.name ?? 'Unknown agent'}</td>
-                          <td>{node?.name ?? 'Unplaced'}</td>
-                          <td>{session.status}</td>
-                          <td>{formatDate(session.updatedAt)}</td>
+                        <tr key={task.id} className={task.id === selectedTask?.id ? 'task-row is-selected' : 'task-row'} onClick={() => setSelectedTaskId(task.id)}>
+                          <td>
+                            <strong>{task.title}</strong>
+                            <div className="cell-subtitle">{task.role}</div>
+                          </td>
+                          <td>{presentation.ownerLabel}</td>
+                          <td>{presentation.verifierLabel}</td>
+                          <td><span className={`tone-chip tone-${presentation.primaryStatusTone}`}>{formatLabel(task.status)}</span></td>
+                          <td><span className={`tone-chip tone-${presentation.verificationTone}`}>{presentation.verificationLabel}</span></td>
+                          <td>{task.latestVerificationChangeRequests.length}</td>
+                          <td>{formatDate(task.updatedAt)}</td>
                         </tr>
                       )
                     })}
-                    {runSessions.length === 0 ? <tr><td colSpan={5}><div className="compact-empty">No sessions recorded yet.</div></td></tr> : null}
+                    {runTasks.length === 0 ? <tr><td colSpan={7}><div className="compact-empty">No tasks recorded for this run yet.</div></td></tr> : null}
                   </tbody>
                 </table>
               </section>
               <section className="panel split-panel">
+                <TaskDetailPanel
+                  task={selectedTask}
+                  presentations={runTaskPresentations}
+                  validations={runValidations}
+                  artifacts={runArtifacts}
+                  events={runEvents}
+                />
                 <article className="surface-card">
                   <p className="eyebrow">Recent events</p>
                   <div className="compact-list">
                     {runEvents.slice(0, 8).map((event) => (
                       <div key={event.id} className="compact-list-row">
-                        <span>{formatLabel(event.status)}</span>
+                        <span>{formatLabel(event.eventType)}</span>
                         <strong>{event.summary}</strong>
                       </div>
                     ))}
@@ -2664,39 +2937,93 @@ function App() {
                 <div className="section-header">
                   <div>
                     <p className="eyebrow">Review</p>
-                    <h2>Approvals and evidence</h2>
+                    <h2>Verification queue and approvals</h2>
                   </div>
                 </div>
-                {runApprovals.length === 0 ? (
-                  <div className="compact-empty">No approvals returned for this run.</div>
+                <div className="filter-row">
+                  {([
+                    ['awaiting', 'Awaiting verification'],
+                    ['running', 'Verification running'],
+                    ['failed', 'Failed / rework'],
+                    ['verified', 'Verified'],
+                    ['all', 'All tasks'],
+                  ] as const).map(([value, label]) => (
+                    <button key={value} type="button" className={sidebarPillClassName(reviewFilter === value)} onClick={() => setReviewFilter(value)}>
+                      {label}
+                    </button>
+                  ))}
+                </div>
+                {filteredVerificationTasks.length === 0 ? (
+                  <div className="compact-empty">No tasks currently match this verification filter.</div>
                 ) : (
                   <div className="review-layout">
                     <div className="review-list">
-                      {runApprovals.map((approval) => (
-                        <button key={approval.id} type="button" className={`review-item ${approval.id === selectedApprovalId ? 'is-selected' : ''}`} onClick={() => setSelectedApprovalId(approval.id)}>
-                          <strong>{approval.kind}</strong>
-                          <span className={`tone-chip tone-${toneForStatus(approval.status)}`}>{formatLabel(approval.status)}</span>
-                          <p>{approval.status === 'pending' ? String(approval.requestedPayload?.summary ?? 'Awaiting decision') : String(approval.resolutionPayload?.feedback ?? 'Resolved')}</p>
-                        </button>
-                      ))}
+                      {filteredVerificationTasks.map((task) => {
+                        const presentation = runTaskPresentations.get(task.id)
+                        if (!presentation) {
+                          return null
+                        }
+
+                        return (
+                          <button key={task.id} type="button" className={`review-item ${task.id === selectedVerificationTask?.id ? 'is-selected' : ''}`} onClick={() => setSelectedTaskId(task.id)}>
+                            <strong>{task.title}</strong>
+                            <span className={`tone-chip tone-${presentation.verificationTone}`}>{presentation.verificationLabel}</span>
+                            <p>{presentation.latestSummary}</p>
+                            <div className="review-item-meta">
+                              <span>{presentation.verifierLabel}</span>
+                              <span>{task.latestVerificationChangeRequests.length} change requests</span>
+                            </div>
+                          </button>
+                        )
+                      })}
                     </div>
                     <div className="review-detail">
-                      <div className="surface-card">
-                        <p className="eyebrow">Decision</p>
-                        <h3>{approvalDetail?.kind ?? 'Approval detail'}</h3>
-                        <p>{String(approvalDetail?.requestedPayload?.summary ?? 'No structured request summary attached.')}</p>
-                        <label className="field">
-                          <span>Notes</span>
-                          <textarea rows={6} value={reviewNotes} onChange={(event) => setReviewNotes(event.target.value)} />
-                        </label>
-                        <div className="action-row">
-                          <button type="button" className="action-button" onClick={() => void handleApproval('approved')} disabled={busy}>Approve</button>
-                          <button type="button" className="action-button secondary" onClick={() => void handleApproval('rejected')} disabled={busy}>Reject</button>
-                        </div>
-                      </div>
+                      <TaskDetailPanel
+                        task={selectedVerificationTask}
+                        presentations={runTaskPresentations}
+                        validations={runValidations}
+                        artifacts={runArtifacts}
+                        events={runEvents}
+                      />
                     </div>
                   </div>
                 )}
+              </section>
+              <section className="panel split-panel">
+                <article className="surface-card">
+                  <p className="eyebrow">Approvals</p>
+                  <h3>Pending decisions</h3>
+                  {runApprovals.length === 0 ? (
+                    <div className="compact-empty">No approvals returned for this run.</div>
+                  ) : (
+                    <div className="review-layout">
+                      <div className="review-list">
+                        {runApprovals.map((approval) => (
+                          <button key={approval.id} type="button" className={`review-item ${approval.id === selectedApprovalId ? 'is-selected' : ''}`} onClick={() => setSelectedApprovalId(approval.id)}>
+                            <strong>{approval.kind}</strong>
+                            <span className={`tone-chip tone-${toneForStatus(approval.status)}`}>{formatLabel(approval.status)}</span>
+                            <p>{approval.status === 'pending' ? String(approval.requestedPayload?.summary ?? 'Awaiting decision') : String(approval.resolutionPayload?.feedback ?? 'Resolved')}</p>
+                          </button>
+                        ))}
+                      </div>
+                      <div className="review-detail">
+                        <div className="surface-card">
+                          <p className="eyebrow">Decision</p>
+                          <h3>{approvalDetail?.kind ?? 'Approval detail'}</h3>
+                          <p>{String(approvalDetail?.requestedPayload?.summary ?? 'No structured request summary attached.')}</p>
+                          <label className="field">
+                            <span>Notes</span>
+                            <textarea rows={6} value={reviewNotes} onChange={(event) => setReviewNotes(event.target.value)} />
+                          </label>
+                          <div className="action-row">
+                            <button type="button" className="action-button" onClick={() => void handleApproval('approved')} disabled={busy}>Approve</button>
+                            <button type="button" className="action-button secondary" onClick={() => void handleApproval('rejected')} disabled={busy}>Reject</button>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </article>
               </section>
               <section className="panel split-panel">
                 <article className="surface-card">
@@ -2748,19 +3075,41 @@ function App() {
   )
 }
 
-function BoardColumn({ title, tasks }: { title: string; tasks: Task[] }) {
+function BoardColumn({
+  title,
+  tasks,
+  selectedTaskId,
+  onSelectTask,
+  presentations,
+}: {
+  title: string
+  tasks: Task[]
+  selectedTaskId: string
+  onSelectTask: (taskId: string) => void
+  presentations: Map<string, TaskPresentation>
+}) {
   return (
     <section className="board-column">
       <header className="board-column-header">
         <h3>{title}</h3>
         <span>{tasks.length}</span>
       </header>
-      <BoardTaskList tasks={tasks} />
+      <BoardTaskList tasks={tasks} selectedTaskId={selectedTaskId} onSelectTask={onSelectTask} presentations={presentations} />
     </section>
   )
 }
 
-function BoardTaskList({ tasks }: { tasks: Task[] }) {
+function BoardTaskList({
+  tasks,
+  selectedTaskId,
+  onSelectTask,
+  presentations,
+}: {
+  tasks: Task[]
+  selectedTaskId: string
+  onSelectTask: (taskId: string) => void
+  presentations: Map<string, TaskPresentation>
+}) {
   if (tasks.length === 0) {
     return <div className="compact-empty">No tasks in this lane.</div>
   }
@@ -2769,22 +3118,196 @@ function BoardTaskList({ tasks }: { tasks: Task[] }) {
     <div className="task-list">
       {tasks
         .slice()
-        .sort((left, right) => left.priority - right.priority)
-        .map((task) => (
-          <article key={task.id} className="task-card">
+        .sort(compareTasks)
+        .map((task) => {
+          const presentation = presentations.get(task.id)
+          if (!presentation) {
+            return null
+          }
+
+          return (
+            <button key={task.id} type="button" className={`task-card ${task.id === selectedTaskId ? 'is-selected' : ''}`} onClick={() => onSelectTask(task.id)}>
             <div className="task-card-topline">
-              <span className={`tone-chip tone-${toneForStatus(task.status)}`}>{formatLabel(task.status)}</span>
+              <span className={`tone-chip tone-${presentation.primaryStatusTone}`}>{formatLabel(task.status)}</span>
+              <span className={`tone-chip tone-${presentation.verificationTone}`}>{presentation.verificationLabel}</span>
               <span>P{task.priority}</span>
             </div>
             <strong>{task.title}</strong>
             <p>{task.description}</p>
+            <div className="task-card-checklist">
+              {presentation.hasDefinitionOfDone ? (
+                <>
+                  {task.definitionOfDone.slice(0, 2).map((criterion) => (
+                    <span key={criterion}>{criterion}</span>
+                  ))}
+                  {task.definitionOfDone.length > 2 ? <span>+{task.definitionOfDone.length - 2} more DoD items</span> : null}
+                </>
+              ) : (
+                <span>No stored definition of done</span>
+              )}
+            </div>
+            <div className="task-card-summary">{presentation.latestSummary}</div>
             <div className="inline-facts">
               <span>{task.role}</span>
+              <span>Owner: {presentation.ownerLabel}</span>
+              <span>Verifier: {presentation.verifierLabel}</span>
               <span>{task.dependencyIds.length} deps</span>
+              {task.latestVerificationChangeRequests.length > 0 ? <span>{task.latestVerificationChangeRequests.length} change requests</span> : null}
             </div>
-          </article>
-        ))}
+          </button>
+          )
+        })}
     </div>
+  )
+}
+
+function TaskDetailPanel({
+  task,
+  presentations,
+  validations,
+  artifacts,
+  events,
+}: {
+  task: Task | null
+  presentations: Map<string, TaskPresentation>
+  validations: Validation[]
+  artifacts: Artifact[]
+  events: ControlPlaneEvent[]
+}) {
+  if (!task) {
+    return (
+      <article className="surface-card task-detail-card">
+        <p className="eyebrow">Task detail</p>
+        <div className="compact-empty">Select a task to inspect its definition of done and verification state.</div>
+      </article>
+    )
+  }
+
+  const presentation = presentations.get(task.id)
+  if (!presentation) {
+    return null
+  }
+
+  const relatedArtifacts = artifacts.filter((artifact) => artifact.runId === task.runId).slice(0, 5)
+  const relatedEvents = events.filter((event) =>
+    event.eventType.startsWith('task.')
+    || event.summary.toLowerCase().includes(task.title.toLowerCase()),
+  ).slice(0, 5)
+  const openChangeRequests = task.latestVerificationChangeRequests
+  const findings = task.latestVerificationFindings
+
+  return (
+    <article className="surface-card task-detail-card">
+      <p className="eyebrow">Task detail</p>
+      <div className="task-detail-header">
+        <div>
+          <h3>{task.title}</h3>
+          <p className="task-detail-copy">{task.description}</p>
+        </div>
+        <div className="task-detail-chips">
+          <span className={`tone-chip tone-${presentation.primaryStatusTone}`}>{formatLabel(task.status)}</span>
+          <span className={`tone-chip tone-${presentation.verificationTone}`}>{presentation.verificationLabel}</span>
+        </div>
+      </div>
+      <div className="inline-facts">
+        <span>{task.role}</span>
+        <span>P{task.priority}</span>
+        <span>{task.dependencyIds.length} deps</span>
+        <span>Owner: {presentation.ownerLabel}</span>
+      </div>
+      <div className="detail-stack">
+        <section className="detail-block">
+          <p className="eyebrow">Verification</p>
+          <p className="detail-copy">{presentation.verificationSubtitle}</p>
+          <ul className="plain-list">
+            <li>Verifier: {presentation.verifierLabel}</li>
+            <li>Latest summary: {presentation.latestSummary}</li>
+            <li>Updated: {formatDate(task.updatedAt)}</li>
+          </ul>
+        </section>
+        <section className="detail-block">
+          <p className="eyebrow">Definition of done</p>
+          {presentation.hasDefinitionOfDone ? (
+            <ol className="detail-list">
+              {task.definitionOfDone.map((criterion) => (
+                <li key={criterion}>{criterion}</li>
+              ))}
+            </ol>
+          ) : (
+            <div className="compact-empty">No definition of done was stored for this task.</div>
+          )}
+        </section>
+        <details className="secondary-panel" open={!presentation.hasDefinitionOfDone}>
+          <summary>Acceptance criteria (summary / compatibility)</summary>
+          {task.acceptanceCriteria.length > 0 ? (
+            <ol className="detail-list">
+              {task.acceptanceCriteria.map((criterion) => (
+                <li key={criterion}>{criterion}</li>
+              ))}
+            </ol>
+          ) : (
+            <div className="compact-empty">No acceptance criteria were published for this task.</div>
+          )}
+        </details>
+        {(findings.length > 0 || openChangeRequests.length > 0 || presentation.reworkTasks.length > 0) ? (
+          <section className="detail-block">
+            <p className="eyebrow">Change requests</p>
+            {findings.length > 0 ? (
+              <>
+                <strong>Findings</strong>
+                <ol className="detail-list">
+                  {findings.map((finding) => (
+                    <li key={finding}>{finding}</li>
+                  ))}
+                </ol>
+              </>
+            ) : null}
+            {openChangeRequests.length > 0 ? (
+              <>
+                <strong>Open change requests</strong>
+                <ol className="detail-list">
+                  {openChangeRequests.map((request) => (
+                    <li key={request}>{request}</li>
+                  ))}
+                </ol>
+              </>
+            ) : null}
+            {presentation.reworkTasks.length > 0 ? (
+              <>
+                <strong>Rework follow-ups</strong>
+                <ul className="plain-list">
+                  {presentation.reworkTasks.map((reworkTask) => (
+                    <li key={reworkTask.id}>{reworkTask.title} ({formatLabel(reworkTask.status)})</li>
+                  ))}
+                </ul>
+              </>
+            ) : null}
+          </section>
+        ) : null}
+        <section className="detail-block">
+          <p className="eyebrow">Evidence</p>
+          <ul className="plain-list">
+            <li>{presentation.verificationSummary}</li>
+            {task.validationTemplates.length > 0 ? <li>{task.validationTemplates.length} validation templates attached.</li> : null}
+            {task.latestVerificationEvidence.length > 0 ? <li>{task.latestVerificationEvidence.length} verification evidence references attached.</li> : null}
+            {validations.length > 0 ? <li>{validations.length} run validations available.</li> : null}
+            {relatedArtifacts.length > 0 ? <li>{relatedArtifacts.length} recent artifacts available.</li> : null}
+          </ul>
+        </section>
+        <section className="detail-block">
+          <p className="eyebrow">Lifecycle</p>
+          <div className="compact-list">
+            {relatedEvents.map((event) => (
+              <div key={event.id} className="compact-list-row">
+                <span>{formatLabel(event.eventType)}</span>
+                <strong>{event.summary}</strong>
+              </div>
+            ))}
+            {relatedEvents.length === 0 ? <div className="compact-empty">No verification events have been published for this task yet.</div> : null}
+          </div>
+        </section>
+      </div>
+    </article>
   )
 }
 

@@ -2,6 +2,7 @@ import { z } from "zod";
 
 export const runStatuses = ["pending", "planning", "in_progress", "awaiting_approval", "completed", "failed", "cancelled"] as const;
 export const taskStatuses = ["pending", "blocked", "in_progress", "awaiting_review", "completed", "failed", "cancelled"] as const;
+export const taskVerificationStatuses = ["not_required", "pending", "requested", "in_progress", "passed", "failed", "blocked"] as const;
 export const agentStatuses = ["provisioning", "idle", "busy", "paused", "stopped", "failed"] as const;
 export const approvalStatuses = ["pending", "approved", "rejected"] as const;
 export const approvalKinds = ["plan", "patch", "merge", "network", "policy_exception"] as const;
@@ -50,6 +51,10 @@ export const controlPlaneEventTypes = [
   "run.status_updated",
   "task.created",
   "task.status_updated",
+  "task.verification_requested",
+  "task.verification_passed",
+  "task.verification_failed",
+  "task.verification_blocked",
   "task.unblocked",
   "validation.created",
   "worker_dispatch_assignment.claimed",
@@ -610,9 +615,27 @@ export const taskCreateSchema = z.object({
   priority: z.number().int().min(1).max(5).default(3),
   ownerAgentId: z.uuid().optional(),
   dependencyIds: z.array(z.uuid()).default([]),
+  definitionOfDone: z.array(z.string().min(1)).default([]),
   acceptanceCriteria: z.array(z.string().min(1)).default([]),
   validationTemplates: z.array(validationTemplateSchema).default([])
 });
+
+export const workerDispatchCompletionOutcomeSchema = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("worker"),
+    summary: z.string().min(1),
+    outcomeStatus: z.enum(["completed", "needs_slicing", "blocked"]),
+    blockingIssues: z.array(z.string().min(1)).default([])
+  }),
+  z.object({
+    kind: z.literal("verification"),
+    summary: z.string().min(1),
+    outcomeStatus: z.enum(["passed", "failed", "blocked"]),
+    findings: z.array(z.string().min(1)).default([]),
+    changeRequests: z.array(z.string().min(1)).default([]),
+    evidence: z.array(z.string().min(1)).default([])
+  })
+]);
 
 export const taskStatusUpdateSchema = z.object({
   status: z.enum(taskStatuses),
@@ -736,6 +759,12 @@ export const runsByJobScopeSchema = z.object({
 export const taskSchema = taskCreateSchema.extend({
   id: z.uuid(),
   status: z.enum(taskStatuses),
+  verificationStatus: z.enum(taskVerificationStatuses).default("not_required"),
+  verifierAgentId: z.uuid().nullable().default(null),
+  latestVerificationSummary: z.string().min(1).nullable().default(null),
+  latestVerificationFindings: z.array(z.string().min(1)).default([]),
+  latestVerificationChangeRequests: z.array(z.string().min(1)).default([]),
+  latestVerificationEvidence: z.array(z.string().min(1)).default([]),
   parentTaskId: z.uuid().nullable(),
   ownerAgentId: z.uuid().nullable(),
   createdAt: z.date(),
@@ -1372,7 +1401,8 @@ export const workerDispatchListQuerySchema = z.object({
 export const workerDispatchCompleteSchema = z.object({
   nodeId: z.uuid(),
   status: z.enum(["completed", "failed"]),
-  reason: z.string().min(1).optional()
+  reason: z.string().min(1).optional(),
+  outcome: workerDispatchCompletionOutcomeSchema.optional()
 });
 
 export const workerNodeReconcileSchema = z.object({
@@ -1728,6 +1758,7 @@ export type Workspace = z.infer<typeof workspaceSchema>;
 export type Team = z.infer<typeof teamSchema>;
 export type IdentityContext = z.infer<typeof identityContextSchema>;
 export type Task = z.infer<typeof taskSchema>;
+export type TaskVerificationStatus = typeof taskVerificationStatuses[number];
 export type TaskDagNode = z.infer<typeof taskDagNodeSchema>;
 export type TaskDagEdge = z.infer<typeof taskDagEdgeSchema>;
 export type TaskDagUnblockPath = z.infer<typeof taskDagUnblockPathSchema>;
@@ -1779,6 +1810,7 @@ export type WorkerDispatchAssignment = z.infer<typeof workerDispatchAssignmentSc
 export type WorkerDispatchCreateInput = z.infer<typeof workerDispatchCreateSchema>;
 export type WorkerDispatchListQuery = z.infer<typeof workerDispatchListQuerySchema>;
 export type WorkerDispatchCompleteInput = z.infer<typeof workerDispatchCompleteSchema>;
+export type WorkerDispatchCompletionOutcome = z.infer<typeof workerDispatchCompletionOutcomeSchema>;
 export type CodexMcpTransport = z.infer<typeof codexMcpTransportSchema>;
 export type WorkerNodeRuntime = z.infer<typeof workerNodeRuntimeSchema>;
 export type WorkerRuntimeDependencyCheck = z.infer<typeof workerRuntimeDependencyCheckSchema>;

@@ -53,7 +53,14 @@ model Task {
   status             String
   priority           Int      @default(3)
   ownerAgentId       String?
+  verificationStatus String   @default("not_required")
+  verifierAgentId    String?
+  latestVerificationSummary String?
+  latestVerificationFindings Json
+  latestVerificationChangeRequests Json
+  latestVerificationEvidence Json
   dependencyIds      Json
+  definitionOfDone   Json
   acceptanceCriteria Json
   validationTemplates Json
   createdAt          DateTime @default(now())

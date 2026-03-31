@@ -72,7 +72,14 @@ const runDetail: RunDetail = {
       status: "in_progress",
       priority: 1,
       ownerAgentId: null,
+      verificationStatus: "not_required",
+      verifierAgentId: null,
+      latestVerificationSummary: null,
+      latestVerificationFindings: [],
+      latestVerificationChangeRequests: [],
+      latestVerificationEvidence: [],
       dependencyIds: [],
+      definitionOfDone: [],
       acceptanceCriteria: [],
       validationTemplates: [
         {

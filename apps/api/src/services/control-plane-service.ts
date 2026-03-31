@@ -60,6 +60,7 @@ import {
   type SecretAccessPlan,
   type WorkerDispatchAssignment,
   type WorkerDispatchCompleteInput,
+  type WorkerDispatchCompletionOutcome,
   type WorkerDispatchCreateInput,
   type WorkerDispatchListQuery,
   type WorkerNodeReconcileInput,
@@ -73,6 +74,7 @@ import {
   type TaskDagGraph,
   type TaskCreateInput,
   type TaskStatusUpdateInput,
+  type TaskVerificationStatus,
   type ValidationCreateInput,
   type ValidationHistoryEntry,
   type WorkerNode,
@@ -135,6 +137,7 @@ import type {
   validationsListQuerySchema
 } from "../http/schemas.js";
 import { z } from "zod";
+import { controlPlaneEvents as controlPlaneEventDefinitions } from "../lib/control-plane-events.js";
 
 type RepositoryCreate = RepositoryCreateInput;
 type RepositoryUpdate = RepositoryUpdateInput;
@@ -226,6 +229,20 @@ export interface IngestWebhookResult {
 }
 
 const activeAgentStatuses = new Set<Agent["status"]>(["provisioning", "idle", "busy", "paused"]);
+const preferredReviewerRoles = ["reviewer"];
+
+function normalizeAssignmentKind(metadata: Record<string, unknown> | null | undefined) {
+  const kind = metadata?.assignmentKind;
+  return kind === "verification" ? "verification" : "worker";
+}
+
+function normalizeReviewLikeRole(role: string) {
+  return role.trim().toLowerCase().includes("review");
+}
+
+function taskRequiresVerification(task: Pick<Task, "definitionOfDone">) {
+  return task.definitionOfDone.length > 0;
+}
 
 function readSessionTranscript(metadata: Record<string, unknown> | null | undefined) {
   const transcript = metadata?.transcript;
@@ -1735,10 +1752,7 @@ export class ControlPlaneService {
         .orderBy(asc(sessions.createdAt))
     ]);
 
-    const mappedTasks = runTasks.map((task): Task => ({
-      ...task,
-      status: task.status as Task["status"]
-    }));
+    const mappedTasks = runTasks.map((task) => this.mapTask(task));
 
     const mappedSessions = runSessions.map(({ session }): Session => this.mapSession(session));
 
@@ -2305,10 +2319,11 @@ export class ControlPlaneService {
     const boundary = requireAccessBoundary(access);
     if (runId) {
       await this.assertRunExists(runId, boundary);
-      return this.db.select().from(tasks).where(eq(tasks.runId, runId)).orderBy(asc(tasks.createdAt));
+      const taskRows = await this.db.select().from(tasks).where(eq(tasks.runId, runId)).orderBy(asc(tasks.createdAt));
+      return taskRows.map((task) => this.mapTask(task));
     }
 
-    return this.db.select({
+    const taskRows = await this.db.select({
       id: tasks.id,
       runId: tasks.runId,
       parentTaskId: tasks.parentTaskId,
@@ -2318,7 +2333,14 @@ export class ControlPlaneService {
       status: tasks.status,
       priority: tasks.priority,
       ownerAgentId: tasks.ownerAgentId,
+      verificationStatus: tasks.verificationStatus,
+      verifierAgentId: tasks.verifierAgentId,
+      latestVerificationSummary: tasks.latestVerificationSummary,
+      latestVerificationFindings: tasks.latestVerificationFindings,
+      latestVerificationChangeRequests: tasks.latestVerificationChangeRequests,
+      latestVerificationEvidence: tasks.latestVerificationEvidence,
       dependencyIds: tasks.dependencyIds,
+      definitionOfDone: tasks.definitionOfDone,
       acceptanceCriteria: tasks.acceptanceCriteria,
       validationTemplates: tasks.validationTemplates,
       createdAt: tasks.createdAt,
@@ -2328,10 +2350,14 @@ export class ControlPlaneService {
       .innerJoin(runs, eq(tasks.runId, runs.id))
       .where(and(eq(runs.workspaceId, boundary.workspaceId), eq(runs.teamId, boundary.teamId)))
       .orderBy(asc(tasks.createdAt));
+
+    return taskRows.map((task) => this.mapTask(task));
   }
 
   async createTask(input: TaskCreate, access?: AccessBoundary) {
     const run = await this.assertRunExists(input.runId, access);
+    const definitionOfDone = input.definitionOfDone ?? [];
+    const acceptanceCriteria = input.acceptanceCriteria ?? [];
 
     if (input.ownerAgentId) {
       await this.assertAgentExists(input.ownerAgentId, access);
@@ -2360,8 +2386,15 @@ export class ControlPlaneService {
       status: initialStatus,
       priority: input.priority,
       ownerAgentId: input.ownerAgentId ?? null,
+      verificationStatus: definitionOfDone.length > 0 ? "pending" : "not_required",
+      verifierAgentId: null,
+      latestVerificationSummary: null,
+      latestVerificationFindings: [],
+      latestVerificationChangeRequests: [],
+      latestVerificationEvidence: [],
       dependencyIds: input.dependencyIds,
-      acceptanceCriteria: input.acceptanceCriteria,
+      definitionOfDone,
+      acceptanceCriteria,
       validationTemplates: normalizeValidationTemplates(input.validationTemplates),
       createdAt: now,
       updatedAt: now
@@ -2373,7 +2406,7 @@ export class ControlPlaneService {
       await this.enqueueRunnableWorkerDispatches(input.runId, access);
     }
 
-    return persistedTask;
+    return this.mapTask(persistedTask);
   }
 
   async updateTaskStatus(taskId: string, input: TaskStatusUpdate, access?: AccessBoundary) {
@@ -2410,7 +2443,7 @@ export class ControlPlaneService {
       await this.reconcileRunExecutionState(task.runId, access);
     }
 
-    return expectPersistedRecord(updated, "task");
+    return this.mapTask(expectPersistedRecord(updated, "task"));
   }
 
   async createAgent(input: AgentCreate, access?: AccessBoundary) {
@@ -3001,6 +3034,63 @@ export class ControlPlaneService {
     )[0] ?? null;
   }
 
+  private selectVerifierProjectTeamMember(
+    projectTeam: ProjectTeamDetail | null,
+    taskRole: string,
+    runAgents: Agent[],
+    workerAgentId: string
+  ): ProjectTeamMember | null {
+    if (!projectTeam) {
+      return null;
+    }
+
+    const selectCandidate = (roles: string[], excludeMemberId?: string | null) => {
+      const candidates = projectTeam.members
+        .filter((member) => roles.includes(member.role))
+        .filter((member) => member.id !== excludeMemberId)
+        .sort((left, right) => left.position - right.position || left.name.localeCompare(right.name));
+
+      if (candidates.length === 0) {
+        return null;
+      }
+
+      const assignmentCounts = new Map<string, number>(candidates.map((member) => [member.id, 0]));
+      for (const agent of runAgents) {
+        if (agent.id === workerAgentId || !agent.projectTeamMemberId || !assignmentCounts.has(agent.projectTeamMemberId)) {
+          continue;
+        }
+
+        assignmentCounts.set(agent.projectTeamMemberId, (assignmentCounts.get(agent.projectTeamMemberId) ?? 0) + 1);
+      }
+
+      return [...candidates].sort((left, right) =>
+        (assignmentCounts.get(left.id) ?? 0) - (assignmentCounts.get(right.id) ?? 0)
+        || left.position - right.position
+        || left.name.localeCompare(right.name)
+      )[0] ?? null;
+    };
+
+    const workerAgent = runAgents.find((agent) => agent.id === workerAgentId) ?? null;
+    const workerMemberId = workerAgent?.projectTeamMemberId ?? null;
+    const explicitReviewer = selectCandidate(preferredReviewerRoles, workerMemberId);
+
+    if (explicitReviewer) {
+      return explicitReviewer;
+    }
+
+    const reviewLikeRoles = projectTeam.members
+      .map((member) => member.role)
+      .filter((role, index, allRoles) => allRoles.indexOf(role) === index)
+      .filter((role) => !preferredReviewerRoles.includes(role) && normalizeReviewLikeRole(role));
+    const reviewLikeMember = selectCandidate(reviewLikeRoles, workerMemberId);
+
+    if (reviewLikeMember) {
+      return reviewLikeMember;
+    }
+
+    return selectCandidate([taskRole], workerMemberId);
+  }
+
   async enqueueRunnableWorkerDispatches(runId: string, access?: AccessBoundary) {
     const runDetail = await this.getRun(runId, access);
     const repository = this.mapRepository(await this.assertRepositoryExists(runDetail.repositoryId, access));
@@ -3109,6 +3199,7 @@ export class ControlPlaneService {
         includePlanTool: false,
         requiredCapabilities: ["workspace-write"],
         metadata: {
+          assignmentKind: "worker",
           runContext: runDetail.context
         },
         maxAttempts: 3,
@@ -3124,6 +3215,9 @@ export class ControlPlaneService {
           body: [
             `Take task ${task.title}.`,
             task.description,
+            task.definitionOfDone.length > 0
+              ? `Definition of done: ${task.definitionOfDone.join("; ")}`
+              : "Definition of done: no persisted task-specific checks were provided.",
             task.acceptanceCriteria.length > 0
               ? `Acceptance criteria: ${task.acceptanceCriteria.join("; ")}`
               : "Acceptance criteria: complete the assigned slice and report blockers."
@@ -3213,11 +3307,21 @@ export class ControlPlaneService {
       updatedAt: now
     }).where(eq(agents.id, nextAssignment.agentId));
 
-    await this.db.update(tasks).set({
-      status: "in_progress",
-      ownerAgentId: nextAssignment.agentId,
-      updatedAt: now
-    }).where(eq(tasks.id, nextAssignment.taskId));
+    if (normalizeAssignmentKind(nextAssignment.metadata) === "verification") {
+      await this.db.update(tasks).set({
+        status: "awaiting_review",
+        ownerAgentId: nextAssignment.agentId,
+        verificationStatus: "in_progress",
+        verifierAgentId: nextAssignment.agentId,
+        updatedAt: now
+      }).where(eq(tasks.id, nextAssignment.taskId));
+    } else {
+      await this.db.update(tasks).set({
+        status: "in_progress",
+        ownerAgentId: nextAssignment.agentId,
+        updatedAt: now
+      }).where(eq(tasks.id, nextAssignment.taskId));
+    }
 
     await this.reconcileRunExecutionState(nextAssignment.runId);
 
@@ -3231,7 +3335,7 @@ export class ControlPlaneService {
       throw new HttpError(409, `worker dispatch assignment ${assignmentId} is claimed by a different node`);
     }
 
-    return this.transitionWorkerDispatchFailureOrCompletion(assignment, input.status, input.reason ?? null, input.nodeId);
+    return this.transitionWorkerDispatchFailureOrCompletion(assignment, input);
   }
 
   async reconcileWorkerNode(nodeId: string, input: WorkerNodeReconcile): Promise<WorkerNodeReconcileReport> {
@@ -3260,9 +3364,11 @@ export class ControlPlaneService {
     for (const assignment of nodeAssignments) {
       const updated = await this.transitionWorkerDispatchFailureOrCompletion(
         assignment,
-        "failed",
-        `node_lost:${input.reason}`,
-        nodeId
+        {
+          nodeId,
+          status: "failed",
+          reason: `node_lost:${input.reason}`
+        }
       );
 
       if (updated.state === "retrying") {
@@ -4408,6 +4514,19 @@ export class ControlPlaneService {
     };
   }
 
+  private mapTask(task: typeof tasks.$inferSelect): Task {
+    return {
+      ...task,
+      status: task.status as Task["status"],
+      verificationStatus: task.verificationStatus as TaskVerificationStatus,
+      verifierAgentId: task.verifierAgentId ?? null,
+      latestVerificationSummary: task.latestVerificationSummary ?? null,
+      latestVerificationFindings: task.latestVerificationFindings ?? [],
+      latestVerificationChangeRequests: task.latestVerificationChangeRequests ?? [],
+      latestVerificationEvidence: task.latestVerificationEvidence ?? []
+    };
+  }
+
   private buildApprovalAuditEntries(
     approvalsList: Approval[],
     run: Run,
@@ -4453,6 +4572,9 @@ export class ControlPlaneService {
   }
 
   private buildTaskExecutionPrompt(run: RunDetail, repository: Repository, task: Task) {
+    const definitionOfDone = task.definitionOfDone.length > 0
+      ? task.definitionOfDone.map((criterion) => `- ${criterion}`).join("\n")
+      : "- No persisted definition of done was provided.";
     const acceptanceCriteria = task.acceptanceCriteria.length > 0
       ? task.acceptanceCriteria.map((criterion) => `- ${criterion}`).join("\n")
       : "- Complete the assigned task and leave clear implementation notes.";
@@ -4467,9 +4589,150 @@ export class ControlPlaneService {
       "",
       task.description,
       "",
+      "Definition of done:",
+      definitionOfDone,
+      "",
       "Acceptance criteria:",
       acceptanceCriteria
     ].join("\n");
+  }
+
+  private buildVerifierAssignmentPrompt(run: RunDetail, repository: Repository, task: Task, workerSummary: string) {
+    const definitionOfDone = task.definitionOfDone.length > 0
+      ? task.definitionOfDone.map((criterion) => `- ${criterion}`).join("\n")
+      : "- No persisted definition of done was provided.";
+    const acceptanceCriteria = task.acceptanceCriteria.length > 0
+      ? task.acceptanceCriteria.map((criterion) => `- ${criterion}`).join("\n")
+      : "- No separate acceptance summary was provided.";
+    const runContext = formatRunExecutionContext(run.context);
+
+    return [
+      `Repository: ${repository.name}`,
+      `Run goal: ${run.goal}`,
+      ...(runContext ? [runContext] : []),
+      `Task: ${task.title}`,
+      `Worker role: ${task.role}`,
+      "",
+      task.description,
+      "",
+      "Definition of done:",
+      definitionOfDone,
+      "",
+      "Acceptance criteria:",
+      acceptanceCriteria,
+      "",
+      `Worker summary: ${workerSummary}`,
+      "",
+      "Review the delivered work against the persisted task contract."
+    ].join("\n");
+  }
+
+  private async enqueueVerifierAssignment(input: {
+    run: RunDetail;
+    repository: Repository;
+    projectTeam: ProjectTeamDetail | null;
+    task: Task;
+    workerAssignment: WorkerDispatchAssignment;
+    workerOutcome: Extract<WorkerDispatchCompletionOutcome, { kind: "worker" }>;
+    access?: AccessBoundary;
+  }) {
+    const now = this.clock.now();
+    const workerAgent = input.run.agents.find((agent) => agent.id === input.workerAssignment.agentId) ?? null;
+    const verifierMember = this.selectVerifierProjectTeamMember(
+      input.projectTeam,
+      input.task.role,
+      input.run.agents,
+      input.workerAssignment.agentId
+    );
+    const fallbackReviewerAgent = input.run.agents.find((agent) =>
+      agent.id !== input.workerAssignment.agentId && (
+      preferredReviewerRoles.includes(agent.role) || normalizeReviewLikeRole(agent.role)
+      )) ?? null;
+    const fallbackRole = verifierMember?.role
+      ?? fallbackReviewerAgent?.role
+      ?? input.task.role;
+    const fallbackProfile = verifierMember?.profile
+      ?? fallbackReviewerAgent?.profile
+      ?? workerAgent?.profile
+      ?? "default";
+    const verifierAgent = await this.createAgent({
+      runId: input.run.id,
+      projectTeamMemberId: verifierMember?.id,
+      name: (verifierMember?.name ?? `${fallbackRole}-${input.task.title}-verifier`).slice(0, 72),
+      role: fallbackRole,
+      profile: fallbackProfile,
+      status: "idle",
+      worktreePath: input.workerAssignment.worktreePath,
+      branchName: input.run.branchName ?? input.repository.defaultBranch,
+      currentTaskId: input.task.id
+    }, input.access);
+    const verifierPrompt = this.buildVerifierAssignmentPrompt(
+      input.run,
+      input.repository,
+      input.task,
+      input.workerOutcome.summary
+    );
+    const verifierAssignment = await this.createWorkerDispatchAssignment({
+      runId: input.run.id,
+      taskId: input.task.id,
+      agentId: verifierAgent.id,
+      repositoryId: input.repository.id,
+      repositoryName: input.repository.name,
+      queue: "worker-dispatch",
+      stickyNodeId: null,
+      preferredNodeId: null,
+      requiredCapabilities: ["workspace-write"],
+      worktreePath: input.workerAssignment.worktreePath,
+      branchName: input.run.branchName ?? input.repository.defaultBranch,
+      prompt: verifierPrompt,
+      profile: verifierAgent.profile,
+      sandbox: process.env.CODEX_SWARM_WORKER_SANDBOX?.trim() || "workspace-write",
+      approvalPolicy: process.env.CODEX_SWARM_WORKER_APPROVAL_POLICY?.trim() || "on-request",
+      includePlanTool: false,
+      metadata: {
+        assignmentKind: "verification",
+        workerAssignmentId: input.workerAssignment.id,
+        workerAgentId: input.workerAssignment.agentId,
+        workerSummary: input.workerOutcome.summary,
+        workerOutcomeStatus: input.workerOutcome.outcomeStatus,
+        blockingIssues: input.workerOutcome.blockingIssues,
+        requestedAt: now.toISOString(),
+        runContext: input.run.context
+      },
+      maxAttempts: 3,
+      leaseTtlSeconds: 300
+    });
+
+    await this.db.update(tasks).set({
+      status: "awaiting_review",
+      ownerAgentId: input.workerAssignment.agentId,
+      verificationStatus: "requested",
+      verifierAgentId: verifierAgent.id,
+      latestVerificationSummary: `Verification requested after worker completion: ${input.workerOutcome.summary}`,
+      latestVerificationFindings: [],
+      latestVerificationChangeRequests: [],
+      latestVerificationEvidence: [],
+      updatedAt: now
+    }).where(eq(tasks.id, input.task.id));
+
+    await this.db.update(agents).set({
+      currentTaskId: null,
+      updatedAt: now
+    }).where(eq(agents.id, input.workerAssignment.agentId));
+
+    await this.recordControlPlaneEvent(controlPlaneEventDefinitions.taskVerificationRequested, {
+      runId: input.run.id,
+      entityId: input.task.id,
+      status: "requested",
+      summary: `Verification requested for task ${input.task.title}`,
+      metadata: {
+        workerAgentId: input.workerAssignment.agentId,
+        verifierAgentId: verifierAgent.id,
+        verifierAssignmentId: verifierAssignment.id
+      }
+    });
+
+    return verifierAssignment;
   }
 
   private async repairRunStateFromDispatchAssignments(runId: string) {
@@ -4506,13 +4769,40 @@ export class ControlPlaneService {
         continue;
       }
 
+      const assignmentKind = normalizeAssignmentKind(assignment.metadata);
+
       if (assignment.state === "completed") {
-        if (task.status !== "completed" || task.ownerAgentId !== assignment.agentId) {
-          await this.db.update(tasks).set({
-            status: "completed",
-            ownerAgentId: assignment.agentId,
-            updatedAt: now
-          }).where(eq(tasks.id, task.id));
+        if (assignmentKind === "verification") {
+          const verificationStatus = task.verificationStatus as TaskVerificationStatus;
+          const expectedStatus: Task["status"] = verificationStatus === "passed"
+            ? "completed"
+            : verificationStatus === "blocked"
+              ? "blocked"
+              : "awaiting_review";
+
+          if (task.status !== expectedStatus || task.ownerAgentId !== assignment.agentId || task.verifierAgentId !== assignment.agentId) {
+            await this.db.update(tasks).set({
+              status: expectedStatus,
+              ownerAgentId: assignment.agentId,
+              verifierAgentId: assignment.agentId,
+              updatedAt: now
+            }).where(eq(tasks.id, task.id));
+          }
+        } else {
+          const workerOutcomeStatus = assignment.metadata?.workerOutcomeStatus;
+          const expectedStatus: Task["status"] = workerOutcomeStatus === "blocked"
+            ? "blocked"
+            : taskRequiresVerification(this.mapTask(task))
+              ? "awaiting_review"
+              : "completed";
+
+          if (task.status !== expectedStatus || task.ownerAgentId !== assignment.agentId) {
+            await this.db.update(tasks).set({
+              status: expectedStatus,
+              ownerAgentId: assignment.agentId,
+              updatedAt: now
+            }).where(eq(tasks.id, task.id));
+          }
         }
 
         agentIdsToStop.add(assignment.agentId);
@@ -4528,7 +4818,17 @@ export class ControlPlaneService {
       }
 
       if (assignment.state === "claimed") {
-        if (task.status !== "in_progress" || task.ownerAgentId !== assignment.agentId) {
+        if (assignmentKind === "verification") {
+          if (task.status !== "awaiting_review" || task.ownerAgentId !== assignment.agentId || task.verificationStatus !== "in_progress" || task.verifierAgentId !== assignment.agentId) {
+            await this.db.update(tasks).set({
+              status: "awaiting_review",
+              ownerAgentId: assignment.agentId,
+              verificationStatus: "in_progress",
+              verifierAgentId: assignment.agentId,
+              updatedAt: now
+            }).where(eq(tasks.id, task.id));
+          }
+        } else if (task.status !== "in_progress" || task.ownerAgentId !== assignment.agentId) {
           await this.db.update(tasks).set({
             status: "in_progress",
             ownerAgentId: assignment.agentId,
@@ -4549,7 +4849,17 @@ export class ControlPlaneService {
       }
 
       if (assignment.state === "queued" || assignment.state === "retrying") {
-        if (task.status !== "pending" || task.ownerAgentId !== assignment.agentId) {
+        if (assignmentKind === "verification") {
+          if (task.status !== "awaiting_review" || task.ownerAgentId !== assignment.agentId || task.verificationStatus !== "requested" || task.verifierAgentId !== assignment.agentId) {
+            await this.db.update(tasks).set({
+              status: "awaiting_review",
+              ownerAgentId: assignment.agentId,
+              verificationStatus: "requested",
+              verifierAgentId: assignment.agentId,
+              updatedAt: now
+            }).where(eq(tasks.id, task.id));
+          }
+        } else if (task.status !== "pending" || task.ownerAgentId !== assignment.agentId) {
           await this.db.update(tasks).set({
             status: "pending",
             ownerAgentId: assignment.agentId,
@@ -4857,10 +5167,7 @@ export class ControlPlaneService {
     const repository = await this.assertRepositoryExists(runRecord.repositoryId, access);
     const runDetail = this.mapRun(runRecord, repository.projectId ?? null);
     const runTasks = (await this.db.select().from(tasks).where(eq(tasks.runId, runId)).orderBy(asc(tasks.createdAt)))
-      .map((task): Task => ({
-        ...task,
-        status: task.status as Task["status"]
-      }));
+      .map((task) => this.mapTask(task));
     const handoff = runDetail.handoff;
     const handoffExecution = runDetail.handoffExecution;
 
@@ -5097,44 +5404,147 @@ export class ControlPlaneService {
 
   private async transitionWorkerDispatchFailureOrCompletion(
     assignment: WorkerDispatchAssignment,
-    status: "completed" | "failed",
-    reason: string | null,
-    nodeId: string
+    input: WorkerDispatchComplete
   ) {
     const now = this.clock.now();
     const sessionId = assignment.sessionId ?? null;
+    const assignmentKind = input.outcome?.kind ?? normalizeAssignmentKind(assignment.metadata);
+    const task = await this.assertTaskExists(assignment.taskId);
 
-    if (status === "completed") {
+    if (input.status === "completed") {
+      const nextMetadata = {
+        ...assignment.metadata,
+        assignmentKind,
+        ...(input.outcome?.kind === "worker"
+          ? {
+            workerSummary: input.outcome.summary,
+            workerOutcomeStatus: input.outcome.outcomeStatus,
+            blockingIssues: input.outcome.blockingIssues
+          }
+          : {}),
+        ...(input.outcome?.kind === "verification"
+          ? {
+            verificationSummary: input.outcome.summary,
+            verificationOutcomeStatus: input.outcome.outcomeStatus,
+            verificationFindings: input.outcome.findings,
+            verificationChangeRequests: input.outcome.changeRequests,
+            verificationEvidence: input.outcome.evidence
+          }
+          : {})
+      };
       const [updatedAssignment] = await this.db.update(workerDispatchAssignments).set({
         state: "completed",
-        claimedByNodeId: nodeId,
+        claimedByNodeId: input.nodeId,
         completedAt: now,
         lastFailureReason: null,
+        metadata: nextMetadata,
         updatedAt: now
       }).where(eq(workerDispatchAssignments.id, assignment.id)).returning();
 
       await this.db.update(agents).set({
         status: "stopped",
+        currentTaskId: null,
         updatedAt: now
       }).where(eq(agents.id, assignment.agentId));
 
-      await this.db.update(tasks).set({
-        status: "completed",
-        ownerAgentId: assignment.agentId,
-        updatedAt: now
-      }).where(eq(tasks.id, assignment.taskId));
-
       if (sessionId) {
         await this.db.update(sessions).set({
-          workerNodeId: nodeId,
-          stickyNodeId: nodeId,
+          workerNodeId: input.nodeId,
+          stickyNodeId: input.nodeId,
           state: "stopped",
           staleReason: null,
           updatedAt: now
         }).where(eq(sessions.id, sessionId));
       }
 
-      await this.maybeUnblockDependentTasks(assignment.runId, assignment.taskId, "completed");
+      if (assignmentKind === "verification" && input.outcome?.kind === "verification") {
+        const verificationStatus = input.outcome.outcomeStatus;
+        const taskStatus: Task["status"] = verificationStatus === "passed"
+          ? "completed"
+          : verificationStatus === "blocked"
+            ? "blocked"
+            : "awaiting_review";
+        await this.db.update(tasks).set({
+          status: taskStatus,
+          ownerAgentId: assignment.agentId,
+          verificationStatus,
+          verifierAgentId: assignment.agentId,
+          latestVerificationSummary: input.outcome.summary,
+          latestVerificationFindings: input.outcome.findings,
+          latestVerificationChangeRequests: input.outcome.changeRequests,
+          latestVerificationEvidence: input.outcome.evidence,
+          updatedAt: now
+        }).where(eq(tasks.id, assignment.taskId));
+
+        await this.recordControlPlaneEvent(
+          verificationStatus === "passed"
+            ? controlPlaneEventDefinitions.taskVerificationPassed
+            : verificationStatus === "blocked"
+              ? controlPlaneEventDefinitions.taskVerificationBlocked
+              : controlPlaneEventDefinitions.taskVerificationFailed,
+          {
+            runId: assignment.runId,
+            entityId: assignment.taskId,
+            status: verificationStatus,
+            summary: input.outcome.summary,
+            metadata: {
+              verifierAgentId: assignment.agentId,
+              findings: input.outcome.findings,
+              changeRequests: input.outcome.changeRequests,
+              evidence: input.outcome.evidence
+            }
+          }
+        );
+
+        if (verificationStatus === "passed") {
+          await this.maybeUnblockDependentTasks(assignment.runId, assignment.taskId, "completed");
+        }
+      } else {
+        const workerOutcome = input.outcome?.kind === "worker"
+          ? input.outcome
+          : {
+            kind: "worker" as const,
+            summary: "Assignment completed.",
+            outcomeStatus: "completed" as const,
+            blockingIssues: []
+          };
+
+        if (workerOutcome.outcomeStatus === "completed") {
+          if (taskRequiresVerification(this.mapTask(task))) {
+            const runDetail = await this.getRun(assignment.runId);
+            const repository = this.mapRepository(await this.assertRepositoryExists(runDetail.repositoryId));
+            const projectTeam = await this.loadRunProjectTeam(runDetail.projectTeamId);
+            await this.enqueueVerifierAssignment({
+              run: runDetail,
+              repository,
+              projectTeam,
+              task: this.mapTask(task),
+              workerAssignment: assignment,
+              workerOutcome
+            });
+          } else {
+            await this.db.update(tasks).set({
+              status: "completed",
+              ownerAgentId: assignment.agentId,
+              verificationStatus: "not_required",
+              verifierAgentId: null,
+              latestVerificationSummary: null,
+              latestVerificationFindings: [],
+              latestVerificationChangeRequests: [],
+              latestVerificationEvidence: [],
+              updatedAt: now
+            }).where(eq(tasks.id, assignment.taskId));
+            await this.maybeUnblockDependentTasks(assignment.runId, assignment.taskId, "completed");
+          }
+        } else if (workerOutcome.outcomeStatus === "blocked") {
+          await this.db.update(tasks).set({
+            status: "blocked",
+            ownerAgentId: assignment.agentId,
+            updatedAt: now
+          }).where(eq(tasks.id, assignment.taskId));
+        }
+      }
+
       await this.enqueueRunnableWorkerDispatches(assignment.runId);
       await this.reconcileRunExecutionState(assignment.runId);
 
@@ -5143,6 +5553,10 @@ export class ControlPlaneService {
 
     const nextAttempt = assignment.attempt + 1;
     const canRetry = nextAttempt < assignment.maxAttempts;
+    const nextMetadata = {
+      ...assignment.metadata,
+      assignmentKind
+    };
     const [updatedAssignment] = await this.db.update(workerDispatchAssignments).set({
       state: canRetry ? "retrying" : "failed",
       attempt: nextAttempt,
@@ -5151,7 +5565,8 @@ export class ControlPlaneService {
       claimedByNodeId: null,
       claimedAt: null,
       completedAt: canRetry ? null : now,
-      lastFailureReason: reason,
+      lastFailureReason: input.reason ?? null,
+      metadata: nextMetadata,
       updatedAt: now
     }).where(eq(workerDispatchAssignments.id, assignment.id)).returning();
 
@@ -5160,19 +5575,31 @@ export class ControlPlaneService {
         workerNodeId: null,
         stickyNodeId: canRetry ? null : assignment.stickyNodeId,
         state: canRetry ? "pending" : "stale",
-        staleReason: reason,
+        staleReason: input.reason ?? null,
         updatedAt: now
       }).where(eq(sessions.id, sessionId));
     }
 
     await this.db.update(agents).set({
       status: canRetry ? "idle" : "failed",
+      currentTaskId: canRetry ? assignment.taskId : null,
       updatedAt: now
     }).where(eq(agents.id, assignment.agentId));
 
     await this.db.update(tasks).set({
-      status: canRetry ? "pending" : "failed",
+      status: assignmentKind === "verification"
+        ? (canRetry ? "awaiting_review" : "failed")
+        : (canRetry ? "pending" : "failed"),
       ownerAgentId: assignment.agentId,
+      verificationStatus: assignmentKind === "verification"
+        ? (canRetry ? "requested" : "blocked")
+        : task.verificationStatus,
+      verifierAgentId: assignmentKind === "verification"
+        ? assignment.agentId
+        : task.verifierAgentId,
+      latestVerificationSummary: assignmentKind === "verification" && !canRetry
+        ? `Verification dispatch failed: ${input.reason ?? "unknown failure"}`
+        : task.latestVerificationSummary,
       updatedAt: now
     }).where(eq(tasks.id, assignment.taskId));
 

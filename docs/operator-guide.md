@@ -81,6 +81,82 @@ Use these assets together:
 5. Capture evidence before and after any significant lifecycle or recovery
    action.
 
+## DoD-Based Verification
+
+`definitionOfDone` is now the normative task contract for verification. Treat
+it as the checklist a verifier must be able to confirm before a task can finish.
+`acceptanceCriteria` still exists, but only as a compatibility-oriented summary
+for humans, legacy reads, and older UI affordances.
+
+For newly planned tasks with stored `definitionOfDone`:
+
+1. the worker executes the task against the persisted DoD
+2. worker outcome `completed` means only "ready for verification"
+3. the task moves to `awaiting_review` and a verifier assignment is queued
+4. a different verifier agent reviews the delivered work against
+   `definitionOfDone`, current validations, artifacts, and recent messages
+5. only verifier outcome `passed` moves the task to `completed`
+
+Verification ownership rules:
+
+- prefer a dedicated `reviewer`
+- otherwise use another review-like role such as `visual-reviewer`
+- if no review role is available, fall back to a second agent of the worker's
+  own specialty
+- never reuse the same agent as both worker and verifier
+
+Verification outcomes:
+
+- `requested` or `in_progress`: the task stays in `awaiting_review`
+- `passed`: the task becomes `completed`
+- `failed`: the task stays open for rework and publishes verifier findings plus
+  change requests
+- `blocked`: the verifier escalates through the leader rather than inventing a
+  new task path directly
+
+Verifier authority is intentionally narrow. The verifier may report
+`findings`, `changeRequests`, and evidence, but may not create follow-up tasks
+or apply fixes. If rework is needed, the leader creates exactly one follow-up
+task from the verifier output and keeps the original task open or linked to the
+rework path.
+
+Legacy tasks without `definitionOfDone` remain readable. They continue to show
+up in the UI and API, but automatic task-bound verification is not retrofitted
+onto old task records.
+
+## How Operators Inspect Verification State
+
+Frontend surfaces:
+
+- `board`: shows whether work is still executing, `awaiting_review`, failed
+  verification, or rework requested
+- `lifecycle`: shows the handoff from worker completion to verifier activity
+  without reading `awaiting_review` as done
+- `review`: shows the verification queue, verifier identity, latest summary,
+  and open change requests
+- task detail: shows `definitionOfDone` as the primary contract and
+  `acceptanceCriteria` as the secondary summary
+
+API fields to inspect through `GET /api/v1/runs/:id` or
+`GET /api/v1/tasks?runId=<id>`:
+
+- `status`
+- `definitionOfDone`
+- `acceptanceCriteria`
+- `verificationStatus`
+- `verifierAgentId`
+- `latestVerificationSummary`
+- `latestVerificationFindings`
+- `latestVerificationChangeRequests`
+- `latestVerificationEvidence`
+
+Control-plane events to watch through `GET /api/v1/events`:
+
+- `task.verification_requested`
+- `task.verification_passed`
+- `task.verification_failed`
+- `task.verification_blocked`
+
 ## Related docs
 
 - [Webhook-Triggered Repeatable Runs](./operations/webhook-triggered-runs.md)

@@ -175,6 +175,7 @@ async function createFollowOnTasks(
         task.dependencyKeys,
         createdTaskIds
       ),
+      definitionOfDone: task.definitionOfDone,
       acceptanceCriteria: task.acceptanceCriteria
     });
 
@@ -321,6 +322,7 @@ export async function runLeaderPlanningLoop(input: LeaderPlanningLoopInput): Pro
           title: task.title,
           role: task.role,
           description: task.description,
+          definitionOfDone: task.definitionOfDone,
           acceptanceCriteria: task.acceptanceCriteria
         }))
       }
@@ -361,6 +363,7 @@ export async function runLeaderPlanningLoop(input: LeaderPlanningLoopInput): Pro
 
           return dependencyId;
         }),
+        definitionOfDone: task.definitionOfDone,
         acceptanceCriteria: task.acceptanceCriteria
       });
 
