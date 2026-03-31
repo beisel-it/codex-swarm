@@ -363,6 +363,9 @@ describe("buildWorkerTaskExecutionPrompt", () => {
     });
 
     expect(withContext).toContain("Run context:");
+    expect(withContext).toContain(
+      "Webhook note: inspect `run.context.externalInput.event.payload` for the full inbound payload and trigger metadata."
+    );
     expect(withContext).toContain("\"action\": \"opened\"");
     expect(withContext).toContain("\"receiptId\": \"receipt-1\"");
     expect(withoutContext).not.toContain("Run context:");
@@ -375,6 +378,31 @@ describe("formatRunExecutionContext", () => {
       externalInput: null,
       values: {}
     })).toBeNull();
+  });
+
+  it("includes a webhook-specific payload hint for webhook-triggered runs", () => {
+    expect(formatRunExecutionContext({
+      externalInput: {
+        kind: "webhook",
+        trigger: {
+          id: "trigger-1",
+          repeatableRunId: "repeatable-1",
+          name: "PR opened",
+          kind: "webhook",
+          metadata: {}
+        },
+        event: {
+          sourceType: "webhook",
+          eventName: "pull_request.opened",
+          payload: {
+            action: "opened"
+          }
+        }
+      },
+      values: {}
+    })).toContain(
+      "Webhook note: inspect `run.context.externalInput.event.payload` for the full inbound payload and trigger metadata."
+    );
   });
 });
 

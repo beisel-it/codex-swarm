@@ -6164,6 +6164,62 @@ export class ControlPlaneService {
       && dependencyTasks.every((dependency) => dependency.status === "completed");
   }
 
+  private async findLatestCompletedWorkerAssignmentForTask(runId: string, taskId: string) {
+    const assignmentRows = await this.db.select().from(workerDispatchAssignments)
+      .where(eq(workerDispatchAssignments.runId, runId))
+      .orderBy(asc(workerDispatchAssignments.createdAt));
+
+    return [...assignmentRows].reverse().find((assignment) =>
+      assignment.taskId === taskId
+      && assignment.state === "completed"
+      && normalizeAssignmentKind(assignment.metadata) === "worker"
+      && assignment.metadata?.workerOutcomeStatus === "completed"
+    ) ?? null;
+  }
+
+  private async retryBlockedVerificationTask(runId: string, task: TaskRecord) {
+    const latestWorkerAssignment = await this.findLatestCompletedWorkerAssignmentForTask(runId, task.id);
+
+    if (!latestWorkerAssignment) {
+      await this.recordControlPlaneEvent(controlPlaneEventDefinitions.taskVerificationBlocked, {
+        runId,
+        entityId: task.id,
+        status: "blocked",
+        summary: `Verification retry could not be requested for task ${task.title}`,
+        metadata: {
+          reason: "missing_completed_worker_assignment"
+        }
+      });
+      return false;
+    }
+
+    const workerSummary = typeof latestWorkerAssignment.metadata?.workerSummary === "string"
+      ? latestWorkerAssignment.metadata.workerSummary
+      : "Worker completed and is ready for verification.";
+    const blockingIssues = Array.isArray(latestWorkerAssignment.metadata?.blockingIssues)
+      ? latestWorkerAssignment.metadata.blockingIssues.filter((issue): issue is string => typeof issue === "string")
+      : [];
+    const runDetail = await this.getRun(runId);
+    const repository = this.mapRepository(await this.assertRepositoryExists(runDetail.repositoryId));
+    const projectTeam = await this.loadRunProjectTeam(runDetail.projectTeamId);
+
+    await this.enqueueVerifierAssignment({
+      run: runDetail,
+      repository,
+      projectTeam,
+      task: this.mapTask(task),
+      workerAssignment: this.mapWorkerDispatchAssignment(latestWorkerAssignment),
+      workerOutcome: {
+        kind: "worker",
+        summary: workerSummary,
+        outcomeStatus: "completed",
+        blockingIssues
+      }
+    });
+
+    return true;
+  }
+
   private async maybeUnblockDependentTasks(runId: string, completedTaskId: string, completedTaskStatus: string) {
     if (completedTaskStatus !== "completed") {
       return;
@@ -6180,6 +6236,11 @@ export class ControlPlaneService {
       const ready = await this.areDependenciesSatisfied(runId, candidateTask.dependencyIds);
 
       if (ready) {
+        if (candidateTask.verificationStatus === "blocked") {
+          await this.retryBlockedVerificationTask(runId, candidateTask);
+          continue;
+        }
+
         await this.db.update(tasks).set({
           status: "pending",
           updatedAt: now

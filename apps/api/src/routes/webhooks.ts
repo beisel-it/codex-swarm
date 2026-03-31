@@ -1,6 +1,8 @@
+import type { ActorIdentity } from "@codex-swarm/contracts";
 import type { FastifyPluginAsync } from "fastify";
 
 import { controlPlaneEvents, timelineEvent } from "../lib/control-plane-events.js";
+import { startRunNow } from "../lib/start-run.js";
 
 function normalizeHeaders(headers: Record<string, string | string[] | undefined>) {
   return Object.fromEntries(Object.entries(headers).flatMap(([key, value]) => {
@@ -71,10 +73,23 @@ export const webhookRoutes: FastifyPluginAsync = async (app) => {
         });
 
         if (result.run) {
-          await app.observability.recordTimelineEvent(timelineEvent(controlPlaneEvents.runCreated, {
+          const webhookAuthContext: ActorIdentity = {
+            ...request.authContext,
+            workspaceId: result.receipt.workspaceId,
+            workspaceName: request.authContext.workspaceName ?? null,
+            teamId: result.receipt.teamId,
+            teamName: request.authContext.teamName ?? null
+          };
+          const startedRun = await startRunNow(app, {
+            authContext: webhookAuthContext,
             runId: result.run.id,
-            entityId: result.run.id,
-            status: result.run.status,
+            startedFrom: `webhook trigger ${result.receipt.repeatableRunTriggerId}`
+          });
+
+          await app.observability.recordTimelineEvent(timelineEvent(controlPlaneEvents.runCreated, {
+            runId: startedRun.id,
+            entityId: startedRun.id,
+            status: startedRun.status,
             summary: `Run created from webhook trigger ${result.receipt.repeatableRunTriggerId}`,
             metadata: {
               receiptId: result.receipt.id,

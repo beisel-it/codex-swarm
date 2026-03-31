@@ -215,6 +215,7 @@ export async function buildApp(options: BuildAppOptions = {}) {
   await app.register(cleanupJobRoutes, { prefix: "/api/v1" });
   await app.register(eventRoutes, { prefix: "/api/v1" });
   await app.register(metricsRoutes, { prefix: "/api/v1" });
+  await app.register(webhookRoutes);
   await app.register(webhookRoutes, { prefix: "/api/v1" });
 
   return app;
