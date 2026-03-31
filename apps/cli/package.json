@@ -1,6 +1,6 @@
 {
   "name": "@beisel-it/codex-swarm",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Built-JS command line interface for Codex Swarm",
   "type": "module",
   "license": "MIT",
