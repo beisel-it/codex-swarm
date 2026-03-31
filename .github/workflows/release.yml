@@ -63,4 +63,5 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           VERSION="$(node -p 'JSON.parse(require("node:fs").readFileSync("./apps/cli/package.json", "utf8")).version')"
-          gh release upload "codex-swarm@${VERSION}" "dist/release/codex-swarm-single-host-${VERSION}.tar.gz" --clobber
+          PACKAGE_NAME="$(node -p 'JSON.parse(require("node:fs").readFileSync("./apps/cli/package.json", "utf8")).name')"
+          gh release upload "${PACKAGE_NAME}@${VERSION}" "dist/release/codex-swarm-single-host-${VERSION}.tar.gz" --clobber
