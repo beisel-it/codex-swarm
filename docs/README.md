@@ -4,6 +4,7 @@ This directory contains the release-facing documentation set for Codex Swarm.
 
 ## Start Here
 
+- [Release Readiness Exploration](./architecture/release-readiness-exploration.md) for the current gap analysis and recommended release-1 cut
 - [Operator Journey](./operator-journey.md) for the end-to-end operator flow from onboarding through publish handoff
 - External Codex operators should start with [Operator Guide](./operator-guide.md). It is the repo-facing entry doc for the checked-in role pack, skills, and grounded operator workflows.
 - External Codex operators should use [Operator Skill Library](./operator-skill-library.md) and [Operator Skill Workflows](./operator-skill-workflows.md) for the checked-in M8 codex-swarm skill pack.
@@ -23,10 +24,12 @@ This directory contains the release-facing documentation set for Codex Swarm.
 ## Operations References
 
 - [Security](./operations/security.md)
+- [Single-Host Install](./operations/single-host-install.md)
 - [SLO and Support Envelope](./operations/slo-support.md)
 - [CI and Deployment Gate](./operations/cicd.md)
 - [Backup, Restore, and DR](./operations/backup-restore-dr.md)
 - [M9 Readiness Runbook](./operations/m9-readiness.md)
+- [Supported Versions](./operations/supported-versions.md)
 - [Tailnet-Only Hosted Instance](./operations/tailnet-instance.md)
 - [TUI Launch and Capture](./operations/tui-launch-and-capture.md)
 - [Upgrade Path](./operations/upgrade-path.md)

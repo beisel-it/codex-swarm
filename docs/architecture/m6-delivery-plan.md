@@ -127,14 +127,14 @@ This is the final acceptance gate for the full roadmap.
 
 ## Task Matrix
 
-| Task | Track | Roadmap coverage | Must deliver | Must not drift into |
-| --- | --- | --- | --- | --- |
-| `b1a94897` | SLOs/support boundaries | Operational SLOs, support boundaries | measurable SLOs, clear support envelope, aligned observability | vague reliability claims without measurement |
-| `d8f99581` | Backup/restore/DR | backup/restore runbook, disaster recovery testing | exercised runbooks, recorded drills, restore validation | documentation-only DR with no exercise evidence |
-| `c2728407` | Migration/upgrade safety | migration and upgrade path, upgrade-safe schema/config versioning | upgrade path, schema/config evolution guidance, rollback/failure notes | undocumented breaking changes |
-| `ffe88049` | Cost/usage/performance | cost/usage reporting, performance tuning | reported usage/cost signals, concurrency baselines, tuning notes | unsupported performance claims |
-| `36074f2b` | Docs/support/reference deployments | admin/developer/operator docs, support playbooks, reference deployments | fresh-team-usable docs, deployment guidance, support boundaries | aspirational docs detached from actual product behavior |
-| `2f4f7cd3` | GA validation/signoff | GA release candidate and final exit criteria | full RC signoff with residual risks | signoff based only on unit or component checks |
+| Task       | Track                              | Roadmap coverage                                                        | Must deliver                                                           | Must not drift into                                     |
+| ---------- | ---------------------------------- | ----------------------------------------------------------------------- | ---------------------------------------------------------------------- | ------------------------------------------------------- |
+| `b1a94897` | SLOs/support boundaries            | Operational SLOs, support boundaries                                    | measurable SLOs, clear support envelope, aligned observability         | vague reliability claims without measurement            |
+| `d8f99581` | Backup/restore/DR                  | backup/restore runbook, disaster recovery testing                       | exercised runbooks, recorded drills, restore validation                | documentation-only DR with no exercise evidence         |
+| `c2728407` | Migration/upgrade safety           | migration and upgrade path, upgrade-safe schema/config versioning       | upgrade path, schema/config evolution guidance, rollback/failure notes | undocumented breaking changes                           |
+| `ffe88049` | Cost/usage/performance             | cost/usage reporting, performance tuning                                | reported usage/cost signals, concurrency baselines, tuning notes       | unsupported performance claims                          |
+| `36074f2b` | Docs/support/reference deployments | admin/developer/operator docs, support playbooks, reference deployments | fresh-team-usable docs, deployment guidance, support boundaries        | aspirational docs detached from actual product behavior |
+| `2f4f7cd3` | GA validation/signoff              | GA release candidate and final exit criteria                            | full RC signoff with residual risks                                    | signoff based only on unit or component checks          |
 
 ## Acceptance Criteria By Track
 

@@ -1,0 +1,3 @@
+[Unit]
+Description=Codex Swarm Single-Host Stack
+Wants=codex-swarm-postgres.service codex-swarm-redis.service codex-swarm-api.service codex-swarm-worker.service

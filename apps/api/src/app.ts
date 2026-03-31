@@ -1,4 +1,9 @@
+import { existsSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+
 import Fastify from "fastify";
+import fastifyStatic from "@fastify/static";
 import { ZodError } from "zod";
 
 import { getConfig } from "./config.js";
@@ -40,6 +45,15 @@ interface BuildAppOptions {
   config?: Partial<ReturnType<typeof getConfig>>;
   controlPlane?: ControlPlaneService;
   observability?: ObservabilityService;
+}
+
+function resolveFrontendDistRoot(config: ReturnType<typeof getConfig>) {
+  if (config.FRONTEND_DIST_ROOT) {
+    return resolve(config.FRONTEND_DIST_ROOT);
+  }
+
+  const appRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
+  return join(appRoot, "..", "..", "frontend", "dist");
 }
 
 function createNoopObservability(config: ReturnType<typeof getConfig>): Pick<
@@ -149,6 +163,7 @@ export async function buildApp(options: BuildAppOptions = {}) {
   const app = Fastify({
     logger: false
   });
+  const frontendDistRoot = resolveFrontendDistRoot(config);
 
   app.decorate("config", config);
 
@@ -216,6 +231,23 @@ export async function buildApp(options: BuildAppOptions = {}) {
   await app.register(eventRoutes, { prefix: "/api/v1" });
   await app.register(metricsRoutes, { prefix: "/api/v1" });
   await app.register(webhookRoutes, { prefix: "/api/v1" });
+
+  if (existsSync(join(frontendDistRoot, "index.html"))) {
+    await app.register(fastifyStatic, {
+      root: frontendDistRoot,
+      prefix: "/",
+      wildcard: false
+    });
+
+    app.get("/*", async (request, reply) => {
+      if (request.url.startsWith("/api/") || request.url.startsWith("/webhooks/")) {
+        reply.status(404).send({ error: "not_found" });
+        return;
+      }
+
+      return reply.sendFile("index.html");
+    });
+  }
 
   return app;
 }

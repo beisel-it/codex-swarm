@@ -97,14 +97,14 @@ This is the milestone acceptance gate for M5.
 
 ## Task Matrix
 
-| Task | Track | Roadmap coverage | Must deliver | Must not drift into |
-| --- | --- | --- | --- | --- |
-| `d002e3dc` | Identity and workspace isolation | SSO / OIDC login, workspace/team isolation | authenticated actor model, workspace/team ownership on governed entities, access boundary enforcement hooks | full enterprise provisioning suite |
-| `d01ab805` | RBAC and policy packs | RBAC, policy packs by team or repo, approval delegation rules | role-restricted actions, policy profile selection by team/repo, sensitive-repo stricter defaults, approval delegation wiring | bespoke per-screen authorization logic |
-| `a9e7afdf` | Audit, retention, and reporting | audit export, retention controls, admin reporting | actor-attributed audit export, retention policies on persisted governance data, admin-readable reporting primitives | full BI/reporting platform |
-| `18df47d3` | Secrets and integration hardening | secret source integrations | explicit secret-provider integration boundary, governed-repo credential path, operational usage guidance | provider sprawl or one-off credentials per feature |
-| `4ce472b7` | Governance UI and admin surfaces | team and repo policy management, approval/audit trail visibility | policy visibility, approval provenance display, audit/admin views aligned to backend contracts | frontend-owned policy logic |
-| `22d6329b` | Multi-user governance verification | Phase 5 exit criteria validation | role restriction checks, audit proof checks, retention checks, stricter-default repo checks | mock-only signoff without backend evidence |
+| Task       | Track                              | Roadmap coverage                                                 | Must deliver                                                                                                                 | Must not drift into                                |
+| ---------- | ---------------------------------- | ---------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------- |
+| `d002e3dc` | Identity and workspace isolation   | SSO / OIDC login, workspace/team isolation                       | authenticated actor model, workspace/team ownership on governed entities, access boundary enforcement hooks                  | full enterprise provisioning suite                 |
+| `d01ab805` | RBAC and policy packs              | RBAC, policy packs by team or repo, approval delegation rules    | role-restricted actions, policy profile selection by team/repo, sensitive-repo stricter defaults, approval delegation wiring | bespoke per-screen authorization logic             |
+| `a9e7afdf` | Audit, retention, and reporting    | audit export, retention controls, admin reporting                | actor-attributed audit export, retention policies on persisted governance data, admin-readable reporting primitives          | full BI/reporting platform                         |
+| `18df47d3` | Secrets and integration hardening  | secret source integrations                                       | explicit secret-provider integration boundary, governed-repo credential path, operational usage guidance                     | provider sprawl or one-off credentials per feature |
+| `4ce472b7` | Governance UI and admin surfaces   | team and repo policy management, approval/audit trail visibility | policy visibility, approval provenance display, audit/admin views aligned to backend contracts                               | frontend-owned policy logic                        |
+| `22d6329b` | Multi-user governance verification | Phase 5 exit criteria validation                                 | role restriction checks, audit proof checks, retention checks, stricter-default repo checks                                  | mock-only signoff without backend evidence         |
 
 ## Acceptance Criteria By Track
 

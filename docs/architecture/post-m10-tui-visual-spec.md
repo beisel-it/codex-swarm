@@ -377,15 +377,15 @@ spacing.
 
 This mapping is mandatory for future TUI changes.
 
-| Clawteam-style board idea | Codex-swarm implementation rule |
-| --- | --- |
-| Summary cards across the top | `StatCard` row directly under the status strip |
-| Main kanban surface | `BoardView` left column with explicit blocked lane |
-| Operator side rail | `Run Focus`, `Alerts`, `Inbox` stacked in the board right rail |
-| Live dashboard identity | header mode banner plus refresh cadence in `Header` |
-| Drilldown navigation in one session | numbered views preserved in `NavBar` and `KeyboardController` |
-| Team health signal | `FleetView` plus `Fleet alerts` card and fleet-derived alert rows |
-| Review pressure signal | `Approvals`, `Failed checks`, `Review Summary`, `Operator Attention` |
+| Clawteam-style board idea           | Codex-swarm implementation rule                                      |
+| ----------------------------------- | -------------------------------------------------------------------- |
+| Summary cards across the top        | `StatCard` row directly under the status strip                       |
+| Main kanban surface                 | `BoardView` left column with explicit blocked lane                   |
+| Operator side rail                  | `Run Focus`, `Alerts`, `Inbox` stacked in the board right rail       |
+| Live dashboard identity             | header mode banner plus refresh cadence in `Header`                  |
+| Drilldown navigation in one session | numbered views preserved in `NavBar` and `KeyboardController`        |
+| Team health signal                  | `FleetView` plus `Fleet alerts` card and fleet-derived alert rows    |
+| Review pressure signal              | `Approvals`, `Failed checks`, `Review Summary`, `Operator Attention` |
 
 Do not replace codex-swarm's run/review/fleet specialization with a generic team
 board just because the layout inspiration came from clawteam.
