@@ -1,0 +1,14 @@
+<header class="site-header">
+  <div class="container site-header__inner">
+    <a class="brand" href="#top" aria-label="{{ site.name }} home">
+      <img class="brand__mark" src="assets/images/logo/codex-swarm-logo.webp" alt="" width="42" height="42">
+      <span class="brand__wordmark">Codex Swarm</span>
+    </a>
+    <nav class="site-nav" aria-label="Primary">
+      {% for item in navigation %}
+        <a href="{{ item.href }}">{{ item.label }}</a>
+      {% endfor %}
+    </nav>
+    <a class="button button--ghost site-header__cta" href="{{ site.repositoryUrl }}">GitHub</a>
+  </div>
+</header>

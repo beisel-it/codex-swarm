@@ -1,0 +1,23 @@
+<section class="section section--cta">
+  <div class="container">
+    <div class="final-cta panel-frame" data-reveal>
+      <div class="final-cta__copy">
+        <p class="eyebrow">{{ landing.finalCta.eyebrow }}</p>
+        <h2>{{ landing.finalCta.title }}</h2>
+        <p>{{ landing.finalCta.body }}</p>
+        <div class="final-cta__actions">
+          {% for action in landing.finalCta.actions %}
+            <a class="button {% if loop.first %}button--primary{% else %}button--ghost{% endif %}" href="{{ action.href }}">{{ action.label }}</a>
+          {% endfor %}
+        </div>
+      </div>
+      <figure class="final-cta__visual" aria-label="Codex Swarm delivery artwork">
+        <img src="{{ landing.finalCta.art.src }}" alt="{{ landing.finalCta.art.alt }}">
+        <figcaption class="final-cta__badge">
+          <span>Signal Topology</span>
+          <strong>Converge into governed handoff.</strong>
+        </figcaption>
+      </figure>
+    </div>
+  </div>
+</section>

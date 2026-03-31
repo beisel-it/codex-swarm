@@ -1,0 +1,25 @@
+<section id="operator-loop" class="section section--dense section--loop">
+  <div class="container">
+    <div class="section-heading" data-reveal>
+      <p class="eyebrow">{{ landing.operatorLoop.eyebrow }}</p>
+      <h2>{{ landing.operatorLoop.title }}</h2>
+      <p>{{ landing.operatorLoop.intro }}</p>
+    </div>
+    <ol class="operator-loop" aria-label="Codex Swarm operator workflow">
+      {% for step in landing.operatorLoop.steps %}
+        <li class="operator-loop__step" data-reveal style="--step-index: {{ loop.index }}; --reveal-order: {{ loop.index }};">
+          <div class="operator-loop__marker">
+            <span>{{ step.index }}</span>
+          </div>
+          <div class="panel-frame">
+            <h3>{{ step.title }}</h3>
+            <p>{{ step.body }}</p>
+          </div>
+        </li>
+      {% endfor %}
+    </ol>
+    <div class="workflow-action" data-reveal>
+      <a class="inline-link" href="{{ site.operatorJourneyUrl }}">See the Operator Journey</a>
+    </div>
+  </div>
+</section>
