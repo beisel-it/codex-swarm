@@ -1,0 +1,58 @@
+name: Release
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+  id-token: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    outputs:
+      published: ${{ steps.changesets.outputs.published }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Set up workspace
+        uses: ./.github/actions/setup-workspace
+
+      - name: Run release changeset workflow
+        id: changesets
+        uses: changesets/action@v1
+        with:
+          version: corepack pnpm changeset version
+          publish: corepack pnpm ci:build && corepack pnpm release:publish
+          title: "Release: version packages"
+          commit: "Release: version packages"
+          createGithubReleases: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NPM_CONFIG_PROVENANCE: "true"
+
+      - name: Build and verify single-host bundle
+        if: steps.changesets.outputs.published == 'true'
+        run: |
+          VERSION="$(node -p 'JSON.parse(require("node:fs").readFileSync("./apps/cli/package.json", "utf8")).version')"
+          corepack pnpm release:bundle
+          node ./scripts/release/verify-single-host-bundle.mjs "dist/release/codex-swarm-single-host-${VERSION}.tar.gz"
+
+      - name: Upload single-host bundle to GitHub Release
+        if: steps.changesets.outputs.published == 'true'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION="$(node -p 'JSON.parse(require("node:fs").readFileSync("./apps/cli/package.json", "utf8")).version')"
+          gh release upload "codex-swarm@${VERSION}" "dist/release/codex-swarm-single-host-${VERSION}.tar.gz" --clobber

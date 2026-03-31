@@ -168,6 +168,7 @@ the M9 scenario does not depend on hidden prompt lore.
    procedure.
 2. Start or prepare the M9 run without implementing the page directly.
 3. Create two concrete tasks, one for each role:
+
    ```bash
    clawteam task create codex-swarm "M9 landing page design handoff" \
      --description "Designer defines the landing-page concept, structure, visual system, and implementation-ready handoff for the fresh M9 workdir." \
@@ -177,11 +178,14 @@ the M9 scenario does not depend on hidden prompt lore.
      --description "Frontend developer implements the landing page in the fresh M9 workdir from the checked-in design handoff and leaves validation evidence." \
      --owner frontend-dev
    ```
+
 4. Add the dependency edge so implementation cannot start cleanly before design
    handoff:
+
    ```bash
    clawteam task update codex-swarm <developer-task-id> --add-blocked-by <designer-task-id>
    ```
+
 5. Message each agent with role-specific scope instead of one blended brief.
 6. Keep the operator in coordination mode:
    - board inspection

@@ -1,0 +1,18 @@
+[Unit]
+Description=Codex Swarm Local Worker Daemon %i (single-host deployment)
+After=network-online.target codex-swarm-api.service
+Requires=codex-swarm-api.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=__INSTALL_ROOT__
+EnvironmentFile=__ENV_FILE__
+EnvironmentFile=-%h/.config/codex-swarm/workers/%i.env
+Restart=always
+RestartSec=5
+ExecStartPre=/bin/sh -lc 'mkdir -p "$CODEX_SWARM_WORKSPACE_ROOT"'
+ExecStart=/bin/sh -lc 'export CODEX_SWARM_API_TOKEN="${CODEX_SWARM_API_TOKEN:-${CODEX_SWARM_DEV_AUTH_TOKEN:-$DEV_AUTH_TOKEN}}"; node apps/api/dist/src/ops/local-worker-daemon.js'
+
+[Install]
+WantedBy=default.target

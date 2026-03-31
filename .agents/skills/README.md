@@ -83,7 +83,7 @@ inside this repo or a repo managed by Codex Swarm.
    - `docs/operator-skill-library.md`
    - `docs/operator-skill-workflows.md`
    - `docs/agent-skill-authoring.md`
-   when the new skill changes the curated library.
+     when the new skill changes the curated library.
 
 ## What does not belong here
 

@@ -26,6 +26,23 @@ jobs:
         with:
           fail-on-severity: high
 
+  agent-docs:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Set up workspace
+        uses: ./.github/actions/setup-workspace
+
+      - name: Run agent-doc validation
+        run: pnpm ci:agent-docs
+
+      - name: Record local reproduction
+        if: always()
+        run: echo '`corepack pnpm ci:agent-docs`' >> "$GITHUB_STEP_SUMMARY"
+
   lint:
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -99,6 +116,7 @@ jobs:
     runs-on: ubuntu-latest
     needs:
       - dependency-review
+      - agent-docs
       - lint
       - typecheck
       - test
@@ -107,6 +125,7 @@ jobs:
       - name: Summarize CI gate
         env:
           DEPENDENCY_REVIEW_RESULT: ${{ needs.dependency-review.result }}
+          AGENT_DOCS_RESULT: ${{ needs.agent-docs.result }}
           LINT_RESULT: ${{ needs.lint.result }}
           TYPECHECK_RESULT: ${{ needs.typecheck.result }}
           TEST_RESULT: ${{ needs.test.result }}
@@ -118,6 +137,7 @@ jobs:
             echo "| Check | Result | Local reproduction |"
             echo "| --- | --- | --- |"
             echo "| dependency-review | ${DEPENDENCY_REVIEW_RESULT} | PR-only GitHub check |"
+            echo "| agent-docs | ${AGENT_DOCS_RESULT} | \`corepack pnpm ci:agent-docs\` |"
             echo "| lint | ${LINT_RESULT} | \`corepack pnpm ci:lint\` |"
             echo "| typecheck | ${TYPECHECK_RESULT} | \`corepack pnpm ci:typecheck\` |"
             echo "| test | ${TEST_RESULT} | \`corepack pnpm ci:test\` |"
@@ -127,6 +147,7 @@ jobs:
       - name: Fail if any required gate failed
         env:
           DEPENDENCY_REVIEW_RESULT: ${{ needs.dependency-review.result }}
+          AGENT_DOCS_RESULT: ${{ needs.agent-docs.result }}
           LINT_RESULT: ${{ needs.lint.result }}
           TYPECHECK_RESULT: ${{ needs.typecheck.result }}
           TEST_RESULT: ${{ needs.test.result }}
@@ -139,7 +160,7 @@ jobs:
             exit 1
           fi
 
-          for gate in LINT TYPECHECK TEST BUILD; do
+          for gate in AGENT_DOCS LINT TYPECHECK TEST BUILD; do
             result_var="${gate}_RESULT"
             result="${!result_var}"
             if [[ "${result}" != "success" ]]; then

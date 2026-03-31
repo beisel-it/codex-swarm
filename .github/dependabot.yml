@@ -7,13 +7,15 @@ updates:
       day: "monday"
       time: "05:00"
     open-pull-requests-limit: 10
+    target-branch: "main"
+    labels:
+      - "dependencies"
     commit-message:
-      prefix: "deps"
+      prefix: "chore(deps)"
     groups:
       workspace-dependencies:
         patterns:
           - "*"
-
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
@@ -21,8 +23,11 @@ updates:
       day: "monday"
       time: "05:30"
     open-pull-requests-limit: 5
+    target-branch: "main"
+    labels:
+      - "dependencies"
     commit-message:
-      prefix: "ci"
+      prefix: "chore(ci)"
     groups:
       github-actions:
         patterns:

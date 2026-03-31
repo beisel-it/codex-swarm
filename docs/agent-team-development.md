@@ -111,14 +111,14 @@ extra cost is justified by the task value.
 
 Use this decision table before creating or extending a team template.
 
-| Situation | Preferred shape | Why |
-| --- | --- | --- |
-| Narrow vertical slice with one clear owner | Single agent | Lowest coordination cost |
-| Same owner, but repeated domain workflow | Single agent + skills | Reuse workflow without a new role |
-| Shared-contract change across backend and frontend | Multi-agent team | Boundary stabilization and parallel delivery matter |
-| Product slice with UX, API, and acceptance work | Multi-agent team | Different contexts and proof surfaces need separate owners |
-| Deployment, CI/CD, recovery, or topology change | Multi-agent team | Operational risk needs specialist implementation and proof |
-| Mostly coupled work with little real parallelism | Single agent or very small team | Extra agents will create handoff overhead without benefit |
+| Situation                                          | Preferred shape                 | Why                                                        |
+| -------------------------------------------------- | ------------------------------- | ---------------------------------------------------------- |
+| Narrow vertical slice with one clear owner         | Single agent                    | Lowest coordination cost                                   |
+| Same owner, but repeated domain workflow           | Single agent + skills           | Reuse workflow without a new role                          |
+| Shared-contract change across backend and frontend | Multi-agent team                | Boundary stabilization and parallel delivery matter        |
+| Product slice with UX, API, and acceptance work    | Multi-agent team                | Different contexts and proof surfaces need separate owners |
+| Deployment, CI/CD, recovery, or topology change    | Multi-agent team                | Operational risk needs specialist implementation and proof |
+| Mostly coupled work with little real parallelism   | Single agent or very small team | Extra agents will create handoff overhead without benefit  |
 
 ## Team Design Principles
 

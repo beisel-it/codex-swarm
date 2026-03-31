@@ -42,16 +42,16 @@ Use a two-layer state treatment on every task surface.
 
 These are the human-facing labels that should be reused everywhere.
 
-| Combined state | Trigger | Operator label | Tone |
-| --- | --- | --- | --- |
-| Execution active | `in_progress` + `not_requested` | In execution | Neutral |
-| Awaiting verification | `awaiting_review` + `queued` | Awaiting verification | Warning |
-| Verification running | `awaiting_review` + `in_progress` | Verification in progress | Warning |
-| Verified complete | `completed` + `passed` | Verified complete | Success |
-| Verification failed | any open task + `failed` | Verification failed | Danger |
-| Rework requested | any open task + `rework_requested` | Rework requested | Danger |
-| Verification blocked | any open task + `blocked` | Verification blocked | Danger |
-| Legacy task | missing `definitionOfDone` and verification fields | Legacy task | Muted |
+| Combined state        | Trigger                                            | Operator label           | Tone    |
+| --------------------- | -------------------------------------------------- | ------------------------ | ------- |
+| Execution active      | `in_progress` + `not_requested`                    | In execution             | Neutral |
+| Awaiting verification | `awaiting_review` + `queued`                       | Awaiting verification    | Warning |
+| Verification running  | `awaiting_review` + `in_progress`                  | Verification in progress | Warning |
+| Verified complete     | `completed` + `passed`                             | Verified complete        | Success |
+| Verification failed   | any open task + `failed`                           | Verification failed      | Danger  |
+| Rework requested      | any open task + `rework_requested`                 | Rework requested         | Danger  |
+| Verification blocked  | any open task + `blocked`                          | Verification blocked     | Danger  |
+| Legacy task           | missing `definitionOfDone` and verification fields | Legacy task              | Muted   |
 
 ## Surface mapping
 
