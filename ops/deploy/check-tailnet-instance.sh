@@ -15,14 +15,13 @@ set +a
 
 echo "tailnet env: $ENV_FILE"
 echo "api:      http://${CODEX_SWARM_TAILNET_DNS}:${CODEX_SWARM_API_PORT}"
-echo "frontend: http://${CODEX_SWARM_TAILNET_DNS}:${CODEX_SWARM_FRONTEND_PORT}"
+echo "frontend: http://${CODEX_SWARM_TAILNET_DNS}:${CODEX_SWARM_API_PORT}"
 echo
 
 systemctl --user --no-pager --full status \
   codex-swarm-postgres.service \
   codex-swarm-redis.service \
   codex-swarm-api.service \
-  codex-swarm-frontend.service \
   codex-swarm-worker.service || true
 
 echo
@@ -31,7 +30,7 @@ systemctl --user --no-pager --full --plain list-units 'codex-swarm-worker*.servi
 
 echo
 echo "listeners:"
-ss -lnt | grep -E ":((${CODEX_SWARM_API_PORT})|(${CODEX_SWARM_FRONTEND_PORT})|(${CODEX_SWARM_POSTGRES_PORT})|(${CODEX_SWARM_REDIS_PORT}))\\b" || true
+ss -lnt | grep -E ":((${CODEX_SWARM_API_PORT})|(${CODEX_SWARM_POSTGRES_PORT})|(${CODEX_SWARM_REDIS_PORT}))\\b" || true
 
 echo
 echo "health:"

@@ -77,7 +77,7 @@ if (process.argv[1] && import.meta.url.endsWith(process.argv[1])) {
   const nodeName = process.env.CODEX_SWARM_NODE_NAME ?? nodeId ?? "worker-001";
   const workspaceRoot = process.env.CODEX_SWARM_WORKSPACE_ROOT;
   const redisUrl = process.env.CODEX_SWARM_REDIS_URL;
-  const postgresUrl = process.env.CODEX_SWARM_POSTGRES_URL;
+  const postgresUrl = process.env.CODEX_SWARM_DATABASE_URL ?? process.env.CODEX_SWARM_POSTGRES_URL;
 
   if (controlPlaneUrl && nodeId && workspaceRoot && redisUrl && postgresUrl) {
     const runtime = {

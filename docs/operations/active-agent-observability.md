@@ -200,7 +200,7 @@ For each lifecycle path, operators should expect these cross-surface invariants:
    `not_started`.
 3. If session metadata has not fully hydrated into the `sessions` array yet, the
    UI falls back to a reconciliation message such as `Awaiting session
-   reconciliation` instead of showing a thread id immediately.
+reconciliation` instead of showing a thread id immediately.
 4. Archived sessions are intentionally excluded from "latest reachable session"
    fallback. If the only remaining lineage is archived, the agent can fall back
    to `unavailable`.

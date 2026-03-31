@@ -48,6 +48,7 @@ const configSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   PORT: z.coerce.number().int().positive().default(3000),
   HOST: z.string().min(1).default("0.0.0.0"),
+  FRONTEND_DIST_ROOT: z.string().min(1).optional(),
   DATABASE_URL: z.string().min(1).default("postgres://postgres:postgres@localhost:5432/codex_swarm"),
   ARTIFACT_STORAGE_ROOT: z.string().min(1).default(".swarm/artifacts"),
   ARTIFACT_BASE_URL: z.string().url().default("http://localhost:3000"),

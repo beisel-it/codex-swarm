@@ -107,12 +107,14 @@ The helper writes `m9.env` with placeholders. Before the real M9 run, fill in:
 Before `15dc096b` is dispatched:
 
 1. Confirm the shared branch is clean enough for M9:
+
    ```bash
    git status --short
    corepack pnpm ci:typecheck
    corepack pnpm ci:test
    corepack pnpm ci:build
    ```
+
 2. Prepare the M9 directory tree with `ops:m9:prepare`.
 3. Record the generated `manifest.json` path in the readiness review.
 4. Keep the future scenario work inside the generated `workspace/` path.

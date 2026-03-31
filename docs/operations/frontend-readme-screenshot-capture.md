@@ -18,15 +18,15 @@ The staging frontend already exposes the runtime config needed to talk to the pa
 
 Capture these desktop-only surfaces and save them under `docs/assets/screenshots/`:
 
-| Surface | URL | Output file |
-| --- | --- | --- |
-| Projects | `/projects` | `readme-projects-desktop.png` |
-| Project runs | `/projects/cf58874d-118e-47f5-9e24-d680973935a8/runs` | `readme-project-runs-desktop.png` |
+| Surface            | URL                                                         | Output file                             |
+| ------------------ | ----------------------------------------------------------- | --------------------------------------- |
+| Projects           | `/projects`                                                 | `readme-projects-desktop.png`           |
+| Project runs       | `/projects/cf58874d-118e-47f5-9e24-d680973935a8/runs`       | `readme-project-runs-desktop.png`       |
 | Project automation | `/projects/cf58874d-118e-47f5-9e24-d680973935a8/automation` | `readme-project-automation-desktop.png` |
-| Ad-hoc runs | `/adhoc-runs` | `readme-adhoc-runs-desktop.png` |
-| Run board | `/runs/2a9cfaf8-b550-4f10-b3a5-40dc91f3ab1f/board` | `readme-run-board-desktop.png` |
-| Run lifecycle | `/runs/2a9cfaf8-b550-4f10-b3a5-40dc91f3ab1f/lifecycle` | `readme-run-lifecycle-desktop.png` |
-| Settings | `/settings` | `readme-settings-desktop.png` |
+| Ad-hoc runs        | `/adhoc-runs`                                               | `readme-adhoc-runs-desktop.png`         |
+| Run board          | `/runs/2a9cfaf8-b550-4f10-b3a5-40dc91f3ab1f/board`          | `readme-run-board-desktop.png`          |
+| Run lifecycle      | `/runs/2a9cfaf8-b550-4f10-b3a5-40dc91f3ab1f/lifecycle`      | `readme-run-lifecycle-desktop.png`      |
+| Settings           | `/settings`                                                 | `readme-settings-desktop.png`           |
 
 The README does not currently include:
 

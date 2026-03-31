@@ -63,14 +63,14 @@ Use these assets together:
 
 ## Skill-to-problem map
 
-| Problem | First asset |
-| --- | --- |
-| Create or inspect runs | `codex-swarm-run-operations` |
-| Configure projects, repositories, or webhooks | `codex-swarm-project-automation` |
-| Review approvals, validations, artifacts, or governance state | `codex-swarm-review-governance` |
-| Inspect node health, placement, or dispatch | `codex-swarm-worker-lifecycle` |
-| Diagnose health, metrics, events, or transcript visibility | `codex-swarm-observability-diagnostics` |
-| Execute cleanup, restore, DR, or upgrade-safe remediation | `codex-swarm-recovery-restore` |
+| Problem                                                       | First asset                             |
+| ------------------------------------------------------------- | --------------------------------------- |
+| Create or inspect runs                                        | `codex-swarm-run-operations`            |
+| Configure projects, repositories, or webhooks                 | `codex-swarm-project-automation`        |
+| Review approvals, validations, artifacts, or governance state | `codex-swarm-review-governance`         |
+| Inspect node health, placement, or dispatch                   | `codex-swarm-worker-lifecycle`          |
+| Diagnose health, metrics, events, or transcript visibility    | `codex-swarm-observability-diagnostics` |
+| Execute cleanup, restore, DR, or upgrade-safe remediation     | `codex-swarm-recovery-restore`          |
 
 ## Core operator walkthrough
 

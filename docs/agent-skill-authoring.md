@@ -82,6 +82,6 @@ Do not:
    - `.agents/skills/README.md`
    - `docs/operator-skill-library.md`
    - `docs/operator-skill-workflows.md`
-   when the curated skill set changes.
+     when the curated skill set changes.
 5. If the change affects operator expectations, update `docs/operator-guide.md`
    and any acceptance docs that describe the skill library.

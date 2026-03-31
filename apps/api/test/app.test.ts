@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -8388,6 +8388,59 @@ describe("buildApp", () => {
       });
     } finally {
       await app.close();
+    }
+  });
+
+  it("serves the built frontend shell from the API without auth", async () => {
+    const frontendRoot = await mkdtemp(join(tmpdir(), "codex-swarm-frontend-dist-"));
+    await mkdir(join(frontendRoot, "assets"), { recursive: true });
+    await writeFile(join(frontendRoot, "index.html"), "<!doctype html><html><body>swarm-ui</body></html>");
+    await writeFile(join(frontendRoot, "runtime-config.js"), "window.__CODEX_SWARM_CONFIG__ = {\"apiBaseUrl\":\"http://127.0.0.1:3000\",\"apiToken\":\"test-token\"};\n");
+    await writeFile(join(frontendRoot, "runtime-config.json"), "{\"apiBaseUrl\":\"http://127.0.0.1:3000\",\"apiToken\":\"test-token\"}\n");
+    await writeFile(join(frontendRoot, "favicon.svg"), "<svg xmlns=\"http://www.w3.org/2000/svg\"></svg>");
+    await writeFile(join(frontendRoot, "icons.svg"), "<svg xmlns=\"http://www.w3.org/2000/svg\"></svg>");
+    await writeFile(join(frontendRoot, "assets", "index.js"), "console.log('asset');\n");
+
+    const app = await buildApp({
+      config: getConfig({
+        NODE_ENV: "test",
+        PORT: 3000,
+        HOST: "127.0.0.1",
+        DATABASE_URL: "postgres://unused/test",
+        DEV_AUTH_TOKEN: "test-token",
+        FRONTEND_DIST_ROOT: frontendRoot,
+        OPENAI_TRACING_DISABLED: true
+      }),
+      controlPlane: controlPlane as unknown as ControlPlaneService,
+      observability: observability as any
+    });
+
+    try {
+      const shellResponse = await app.inject({
+        method: "GET",
+        url: "/settings"
+      });
+
+      expect(shellResponse.statusCode).toBe(200);
+      expect(shellResponse.body).toContain("swarm-ui");
+
+      const configResponse = await app.inject({
+        method: "GET",
+        url: "/runtime-config.json"
+      });
+
+      expect(configResponse.statusCode).toBe(200);
+      expect(configResponse.body).toContain("apiBaseUrl");
+
+      const apiResponse = await app.inject({
+        method: "GET",
+        url: "/api/v1/identity"
+      });
+
+      expect(apiResponse.statusCode).toBe(401);
+    } finally {
+      await app.close();
+      await rm(frontendRoot, { recursive: true, force: true });
     }
   });
 });

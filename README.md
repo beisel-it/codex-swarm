@@ -34,6 +34,59 @@ Codex Swarm is built for a concrete operator loop:
 - review evidence, resolve approvals, and track branch publish or PR handoff state
 - prove governance posture, retention policy, secret boundary, and audit export evidence without dropping to raw storage
 
+## Quick Install
+
+The intended release-1 deployment target is:
+
+- private self-hosted
+- single-host managed deployment
+- installable `codex-swarm` CLI plus GitHub Releases
+
+Install the CLI:
+
+```bash
+npm install -g codex-swarm
+```
+
+Preview the install without mutating the host:
+
+```bash
+codex-swarm install --version latest --dry-run
+```
+
+Install the current release bundle and write the local env + systemd user units:
+
+```bash
+codex-swarm install --version latest
+```
+
+After reviewing and editing `~/.config/codex-swarm/single-host.env`, start the stack:
+
+```bash
+codex-swarm install --install-root ~/.local/share/codex-swarm/install --start --yes
+```
+
+Then validate the install:
+
+```bash
+codex-swarm doctor --install-root ~/.local/share/codex-swarm/install
+curl http://127.0.0.1:4300/health
+```
+
+If you want a copy-paste-safe shell entrypoint, inspect the wrapper first:
+
+```bash
+./ops/deploy/install-single-host.sh
+```
+
+After review, rerun it with `--run`, or call the CLI directly.
+
+More detail:
+
+- [docs/operations/single-host-install.md](./docs/operations/single-host-install.md)
+- [docs/operations/tailnet-instance.md](./docs/operations/tailnet-instance.md)
+- [docs/architecture/release-readiness-exploration.md](./docs/architecture/release-readiness-exploration.md)
+
 ## What Ships In This Repo
 
 Codex Swarm ships a working product and the operator materials needed to run it:
@@ -159,7 +212,23 @@ This repo also ships the assets needed to operate codex-swarm from Codex:
 
 The end-to-end visual version of this flow is documented in [docs/operator-journey.md](./docs/operator-journey.md).
 
-## Quick Start
+## Release Readiness
+
+The current release-readiness cut is documented in
+[docs/architecture/release-readiness-exploration.md](./docs/architecture/release-readiness-exploration.md).
+
+The recommended release-1 target is:
+
+- private self-hosted
+- single-host managed deployment
+- installable `codex-swarm` CLI plus GitHub Releases as the primary distribution story
+
+At the time of writing, the repo still contains a mix of evaluation-oriented and
+operator-internal paths. The release-readiness exploration document is the
+source of truth for what must change before the project should be presented as a
+credible installable release.
+
+## Local Evaluation
 
 Install dependencies, configure local environment, and start the main services:
 
@@ -170,6 +239,9 @@ corepack pnpm dev:api
 corepack pnpm dev:worker
 corepack pnpm dev:frontend
 ```
+
+This path is for local evaluation and repo development. It is not the intended
+release-1 managed deployment path.
 
 Important local environment values include:
 
@@ -193,6 +265,48 @@ Authorization: Bearer <DEV_AUTH_TOKEN>
 ```
 
 The current README screenshots are captured from the shared staging environment so the docs reflect real data and the shipped IA. The staging capture flow and approved surface list are documented in [docs/operations/frontend-readme-screenshot-capture.md](./docs/operations/frontend-readme-screenshot-capture.md).
+
+## Deployment Direction
+
+If you are evaluating deployment rather than local development, start with:
+
+- [docs/architecture/release-readiness-exploration.md](./docs/architecture/release-readiness-exploration.md) for the current release cut and blocker inventory
+- [docs/operations/single-host-install.md](./docs/operations/single-host-install.md) for the new single-host install path
+- [docs/reference-deployments.md](./docs/reference-deployments.md) for the supported topology shapes
+- [docs/operations/tailnet-instance.md](./docs/operations/tailnet-instance.md) for the current managed single-host operator path
+
+The intended release-1 deployment target is a managed single-host private
+self-hosted installation. Public-browser hosting and generalized remote-worker
+onboarding are not yet part of the recommended release story.
+
+## CLI Direction
+
+The repository now includes an initial installable CLI package at `apps/cli`,
+intended to become the public `codex-swarm` command.
+
+The intended command surface is:
+
+```bash
+codex-swarm doctor
+codex-swarm install --version latest --dry-run
+codex-swarm api start
+codex-swarm worker start
+codex-swarm db migrate
+codex-swarm tui
+```
+
+This is now centered on a release-bundle install path. The intended deployment
+flow is:
+
+```bash
+npm install -g codex-swarm
+codex-swarm install --version latest --dry-run
+codex-swarm install --version latest
+codex-swarm install --install-root ~/.local/share/codex-swarm/install --start --yes
+```
+
+The local repo scripts remain for evaluation and development. The Quick Install
+section near the top of this README is the intended release install story.
 
 ## Verification
 
@@ -230,19 +344,19 @@ corepack pnpm ops:tailnet:status
 
 ## Repository Layout
 
-| Path | Responsibility |
-| --- | --- |
-| `apps/api` | Control-plane API, persistence, governance, audit, scheduling, cleanup |
-| `apps/worker` | Worker runtime, worktree provisioning, Codex supervision, validation runner |
-| `apps/tui` | Terminal UI, run summaries, and capture-oriented operator views |
-| `frontend` | Browser projects, ad-hoc runs, board/lifecycle/review workspaces, automation, and settings UI |
-| `packages/contracts` | Shared schemas and API contract types |
-| `packages/orchestration` | DAG and orchestration helpers |
-| `packages/database` | Shared database package and schema assets |
-| `.codex/agents` | Checked-in role pack |
-| `.agents/skills` | Checked-in codex-swarm workflow skills |
-| `templates/repo-profiles` | Starter repository profiles by stack |
-| `docs` | Product, operator, architecture, operations, and support docs |
+| Path                      | Responsibility                                                                                |
+| ------------------------- | --------------------------------------------------------------------------------------------- |
+| `apps/api`                | Control-plane API, persistence, governance, audit, scheduling, cleanup                        |
+| `apps/worker`             | Worker runtime, worktree provisioning, Codex supervision, validation runner                   |
+| `apps/tui`                | Terminal UI, run summaries, and capture-oriented operator views                               |
+| `frontend`                | Browser projects, ad-hoc runs, board/lifecycle/review workspaces, automation, and settings UI |
+| `packages/contracts`      | Shared schemas and API contract types                                                         |
+| `packages/orchestration`  | DAG and orchestration helpers                                                                 |
+| `packages/database`       | Shared database package and schema assets                                                     |
+| `.codex/agents`           | Checked-in role pack                                                                          |
+| `.agents/skills`          | Checked-in codex-swarm workflow skills                                                        |
+| `templates/repo-profiles` | Starter repository profiles by stack                                                          |
+| `docs`                    | Product, operator, architecture, operations, and support docs                                 |
 
 ## Read Next
 
@@ -252,4 +366,5 @@ corepack pnpm ops:tailnet:status
 - [docs/admin-guide.md](./docs/admin-guide.md) for governance and admin workflows
 - [docs/operator-guide.md](./docs/operator-guide.md) for external Codex operation of this repo
 - [docs/reference-deployments.md](./docs/reference-deployments.md) for deployment shapes and multi-node guidance
+- [docs/operations/single-host-install.md](./docs/operations/single-host-install.md) for the single-host install path under the current release cut
 - [docs/operations/frontend-readme-screenshot-capture.md](./docs/operations/frontend-readme-screenshot-capture.md) for the deterministic screenshot setup used by this README

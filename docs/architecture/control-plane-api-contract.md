@@ -80,18 +80,18 @@ board, lifecycle, review, audit, and operator troubleshooting flows.
 
 ## Supersession Mapping
 
-| Planned MCP tool | Delivered HTTP replacement | Live evidence |
-| --- | --- | --- |
-| `run_context.get` | `GET /api/v1/runs/:id` for run detail, plus `GET /api/v1/runs/:id/audit-export` for expanded audit context | `apps/api/src/routes/runs.ts`, `apps/api/test/app.test.ts` |
-| `task.list` | `GET /api/v1/tasks?runId=<id>` | `apps/api/src/routes/tasks.ts`, `apps/api/test/app.test.ts` |
-| `task.create` | `POST /api/v1/tasks` | `apps/api/src/routes/tasks.ts`, `apps/api/test/app.test.ts` |
-| `task.update` | `PATCH /api/v1/tasks/:id/status` | `apps/api/src/routes/tasks.ts`, `apps/api/test/app.test.ts` |
-| `message.send` | `POST /api/v1/messages` | `apps/api/src/routes/messages.ts`, `apps/api/test/app.test.ts` |
-| `message.list` | `GET /api/v1/messages?runId=<id>` | `apps/api/src/routes/messages.ts`, `apps/api/test/app.test.ts` |
-| `artifact.publish` | `POST /api/v1/artifacts` | `apps/api/src/routes/artifacts.ts`, `apps/api/test/app.test.ts` |
-| `agent.spawn` | `POST /api/v1/agents` | `apps/api/src/routes/agents.ts`, `apps/api/test/app.test.ts` |
-| `agent.status` | `GET /api/v1/agents?runId=<id>` and `GET /api/v1/runs/:id` | `apps/api/src/routes/agents.ts`, `apps/api/src/routes/runs.ts`, `apps/api/test/app.test.ts` |
-| `agent.stop` | No one-to-one route. Current lifecycle control is expressed through run status changes, cleanup/recovery operations, and worker-node reconciliation. | `apps/api/src/routes/runs.ts`, `apps/api/src/routes/cleanup-jobs.ts`, `apps/api/src/routes/worker-nodes.ts`, `apps/api/test/control-plane-service.cleanup.test.ts`, `apps/api/test/app.test.ts` |
+| Planned MCP tool   | Delivered HTTP replacement                                                                                                                           | Live evidence                                                                                                                                                                                   |
+| ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `run_context.get`  | `GET /api/v1/runs/:id` for run detail, plus `GET /api/v1/runs/:id/audit-export` for expanded audit context                                           | `apps/api/src/routes/runs.ts`, `apps/api/test/app.test.ts`                                                                                                                                      |
+| `task.list`        | `GET /api/v1/tasks?runId=<id>`                                                                                                                       | `apps/api/src/routes/tasks.ts`, `apps/api/test/app.test.ts`                                                                                                                                     |
+| `task.create`      | `POST /api/v1/tasks`                                                                                                                                 | `apps/api/src/routes/tasks.ts`, `apps/api/test/app.test.ts`                                                                                                                                     |
+| `task.update`      | `PATCH /api/v1/tasks/:id/status`                                                                                                                     | `apps/api/src/routes/tasks.ts`, `apps/api/test/app.test.ts`                                                                                                                                     |
+| `message.send`     | `POST /api/v1/messages`                                                                                                                              | `apps/api/src/routes/messages.ts`, `apps/api/test/app.test.ts`                                                                                                                                  |
+| `message.list`     | `GET /api/v1/messages?runId=<id>`                                                                                                                    | `apps/api/src/routes/messages.ts`, `apps/api/test/app.test.ts`                                                                                                                                  |
+| `artifact.publish` | `POST /api/v1/artifacts`                                                                                                                             | `apps/api/src/routes/artifacts.ts`, `apps/api/test/app.test.ts`                                                                                                                                 |
+| `agent.spawn`      | `POST /api/v1/agents`                                                                                                                                | `apps/api/src/routes/agents.ts`, `apps/api/test/app.test.ts`                                                                                                                                    |
+| `agent.status`     | `GET /api/v1/agents?runId=<id>` and `GET /api/v1/runs/:id`                                                                                           | `apps/api/src/routes/agents.ts`, `apps/api/src/routes/runs.ts`, `apps/api/test/app.test.ts`                                                                                                     |
+| `agent.stop`       | No one-to-one route. Current lifecycle control is expressed through run status changes, cleanup/recovery operations, and worker-node reconciliation. | `apps/api/src/routes/runs.ts`, `apps/api/src/routes/cleanup-jobs.ts`, `apps/api/src/routes/worker-nodes.ts`, `apps/api/test/control-plane-service.cleanup.test.ts`, `apps/api/test/app.test.ts` |
 
 ## CRUD Supersession for Phase 1
 

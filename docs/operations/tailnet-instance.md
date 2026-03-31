@@ -3,10 +3,19 @@
 This deployment shape is for running codex-swarm on a host while keeping every
 runtime surface off the public internet.
 
+If you are setting up a fresh single-host instance, start with
+[Single-Host Install](./single-host-install.md) first. That guide covers the
+checked-in installer, prereqs, env file placement, and service installation
+before this document takes over as the steady-state operations reference.
+
+For release-1 worker onboarding, the canonical worker runtime is the built
+`local-worker-daemon` started by the installed systemd units. The `apps/worker`
+entrypoint remains a development/internal surface and is not part of the public
+single-host install contract.
+
 ## Exposure model
 
 - API binds only to the machine's Tailscale IPv4 address
-- frontend binds only to the machine's Tailscale IPv4 address
 - Postgres binds only to `127.0.0.1`
 - Redis binds only to `127.0.0.1`
 
@@ -20,7 +29,6 @@ This means:
 - `codex-swarm-postgres.service`
 - `codex-swarm-redis.service`
 - `codex-swarm-api.service`
-- `codex-swarm-frontend.service`
 - `codex-swarm-worker.service`
 - `codex-swarm.target`
 
@@ -32,7 +40,7 @@ Install `%h/.config/codex-swarm/tailnet.env` from
 `ops/deploy/tailnet-instance.env.example` and set:
 
 - tailnet IP and DNS name
-- API and frontend ports
+- API port
 - loopback-only Postgres and Redis ports
 - DB password
 - auth token
@@ -43,8 +51,7 @@ Install `%h/.config/codex-swarm/tailnet.env` from
 
 Example:
 
-- frontend: `http://<tailnet-dns>:4310`
-- API: `http://<tailnet-dns>:4300`
+- frontend and API: `http://<tailnet-dns>:4300`
 - TUI against the hosted API: `corepack pnpm ops:tailnet:tui`
 
 For the current host-local installation, the env file lives at:
@@ -85,10 +92,10 @@ The helper reads `~/.config/codex-swarm/tailnet.env`, exports
 `CODEX_SWARM_API_BASE_URL` and `CODEX_SWARM_API_TOKEN`, then launches the
 repo-level TUI entrypoint in live mode.
 
-The hosted frontend reads its API base URL and auth token from a generated
-`/runtime-config.js` file written during the `codex-swarm-frontend.service`
-startup path. Do not rely on build-time-only Vite env injection for the hosted
-instance.
+The hosted browser UI is served by the API process from `frontend/dist`. The
+generated `/runtime-config.js` file is still written during the
+`codex-swarm-api.service` startup path. Do not rely on build-time-only Vite env
+injection for the hosted instance.
 
 ## Autostart model
 
@@ -97,7 +104,6 @@ The hosted instance runs as enabled `systemd --user` services:
 - `codex-swarm-postgres.service`
 - `codex-swarm-redis.service`
 - `codex-swarm-api.service`
-- `codex-swarm-frontend.service`
 - `codex-swarm-worker.service`
 - optional `codex-swarm-worker@.service` instances for local multi-worker execution on the same host
 
