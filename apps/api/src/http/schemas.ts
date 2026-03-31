@@ -9,6 +9,9 @@ import {
   eventsListQuerySchema,
   idParamSchema,
   projectCreateSchema,
+  projectTeamCreateSchema,
+  projectTeamImportSchema,
+  projectTeamUpdateSchema,
   projectUpdateSchema,
   repeatableRunDefinitionCreateSchema,
   repeatableRunStatuses,
@@ -125,6 +128,7 @@ export const sessionTranscriptEntrySchema = contractSessionTranscriptEntrySchema
 export const sessionTranscriptAppendSchema = contractSessionTranscriptAppendSchema;
 export const repeatableRunDefinitionUpdateSchema = z.object({
   repositoryId: z.uuid().optional(),
+  projectTeamId: z.uuid().optional(),
   name: z.string().min(1).optional(),
   description: z.string().min(1).nullable().optional(),
   status: z.enum(repeatableRunStatuses).optional(),
@@ -144,6 +148,9 @@ export const repeatableRunTriggerUpdateSchema = z.object({
 export const repeatableRunListQuerySchema = z.object({
   repositoryId: z.uuid().optional()
 });
+export const projectTeamListQuerySchema = z.object({
+  projectId: z.uuid().optional()
+});
 export const repeatableRunTriggerListQuerySchema = z.object({
   repositoryId: z.uuid().optional(),
   repeatableRunId: z.uuid().optional()
@@ -160,6 +167,9 @@ export {
   eventsListQuerySchema,
   idParamSchema,
   projectCreateSchema,
+  projectTeamCreateSchema,
+  projectTeamImportSchema,
+  projectTeamUpdateSchema,
   projectUpdateSchema,
   repeatableRunDefinitionCreateSchema,
   repeatableRunTriggerCreateSchema,

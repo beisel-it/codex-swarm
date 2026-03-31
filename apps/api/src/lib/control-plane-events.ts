@@ -72,6 +72,22 @@ export const controlPlaneEvents = {
     eventType: "task.status_updated",
     entityType: "task"
   },
+  taskVerificationRequested: {
+    eventType: "task.verification_requested",
+    entityType: "task"
+  },
+  taskVerificationPassed: {
+    eventType: "task.verification_passed",
+    entityType: "task"
+  },
+  taskVerificationFailed: {
+    eventType: "task.verification_failed",
+    entityType: "task"
+  },
+  taskVerificationBlocked: {
+    eventType: "task.verification_blocked",
+    entityType: "task"
+  },
   taskUnblocked: {
     eventType: "task.unblocked",
     entityType: "task"

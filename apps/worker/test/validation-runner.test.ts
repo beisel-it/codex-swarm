@@ -12,6 +12,8 @@ const runDetail: RunDetail = {
   repositoryId: "11111111-1111-4111-8111-111111111111",
   workspaceId: "default-workspace",
   teamId: "codex-swarm",
+  projectTeamId: null,
+  projectTeamName: null,
   goal: "Validate the worker runner",
   status: "in_progress",
   branchName: null,
@@ -70,7 +72,14 @@ const runDetail: RunDetail = {
       status: "in_progress",
       priority: 1,
       ownerAgentId: null,
+      verificationStatus: "not_required",
+      verifierAgentId: null,
+      latestVerificationSummary: null,
+      latestVerificationFindings: [],
+      latestVerificationChangeRequests: [],
+      latestVerificationEvidence: [],
       dependencyIds: [],
+      definitionOfDone: [],
       acceptanceCriteria: [],
       validationTemplates: [
         {

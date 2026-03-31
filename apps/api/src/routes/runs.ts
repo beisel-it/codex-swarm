@@ -38,6 +38,10 @@ function getOptionalEnv(name: string) {
   return value && value.length > 0 ? value : null;
 }
 
+function resolveCodexExecutionProfile(envName: string) {
+  return getOptionalEnv(envName) ?? "default";
+}
+
 function parseCodexCommand(value: string | null) {
   if (!value) {
     return ["codex"];
@@ -64,6 +68,10 @@ function createLeaderPlanningRequest(app: Parameters<FastifyPluginAsync>[0], aut
 
     if (method === "GET" && path.startsWith("/api/v1/runs/")) {
       return app.controlPlane.getRun(path.split("/").at(-1) ?? "", authContext) as Promise<T>;
+    }
+
+    if (method === "GET" && path.startsWith("/api/v1/project-teams/")) {
+      return app.controlPlane.getProjectTeam(path.split("/").at(-1) ?? "", authContext) as Promise<T>;
     }
 
     if (method === "POST" && path === "/api/v1/artifacts") {
@@ -173,6 +181,12 @@ export const runRoutes: FastifyPluginAsync = async (app) => {
       const { id } = idParamSchema.parse(request.params);
       requireAuthorizedAction(request.authContext, "run.create");
       const run = await app.controlPlane.getRun(id, request.authContext);
+      const projectTeam = run.projectTeamId
+        ? await app.controlPlane.getProjectTeam(run.projectTeamId, request.authContext)
+        : null;
+      const leaderMember = projectTeam?.members.find((member) => member.role === "tech-lead")
+        ?? projectTeam?.members.find((member) => member.profile === "leader")
+        ?? null;
 
       if (run.status === "completed" || run.status === "failed" || run.status === "cancelled") {
         throw new Error(`run ${id} cannot be started from status ${run.status}`);
@@ -213,13 +227,15 @@ export const runRoutes: FastifyPluginAsync = async (app) => {
           actorId: request.authContext.principal,
           runtimeConfig: {
             cwd: leaderWorkspace,
-            profile: getOptionalEnv("CODEX_SWARM_LEADER_PROFILE") ?? "default",
+            profile: resolveCodexExecutionProfile("CODEX_SWARM_LEADER_PROFILE"),
             sandbox: getOptionalEnv("CODEX_SWARM_LEADER_SANDBOX") ?? "workspace-write",
             approvalPolicy: getOptionalEnv("CODEX_SWARM_LEADER_APPROVAL_POLICY") ?? "on-request",
             includePlanTool: true,
             ...(getOptionalEnv("CODEX_SWARM_NODE_ID") ? { workerNodeId: getOptionalEnv("CODEX_SWARM_NODE_ID")! } : {}),
             placementConstraintLabels: ["workspace-write"]
           },
+          agentName: leaderMember?.name ?? "leader",
+          agentRole: leaderMember?.role ?? "tech-lead",
           executeTool: createLocalCodexCliExecutor({
             command: parseCodexCommand(getOptionalEnv("CODEX_SWARM_CODEX_COMMAND"))
           })

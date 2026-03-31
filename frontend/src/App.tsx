@@ -2,6 +2,10 @@ import { useEffect, useMemo, useState, type FormEvent, type PointerEvent as Reac
 import type {
   ExternalEventReceipt,
   ProjectSummary as ContractProjectSummary,
+  ProjectTeamCreateInput,
+  ProjectTeamDetail,
+  ProjectTeamImportInput,
+  ProjectTeamUpdateInput,
   RepositoryUpdateInput,
   RepeatableRunDefinition,
   RepeatableRunDefinitionCreateInput,
@@ -65,19 +69,28 @@ type Repository = {
   updatedAt?: string
 }
 
-type TeamTemplate = {
+type TeamBlueprint = {
   id: string
   name: string
   summary: string
-  focus: 'delivery' | 'platform'
+  focus: 'delivery' | 'platform' | 'studio'
   suggestedGoal: string
   suggestedConcurrencyCap: number
+}
+
+type ProjectTeamMemberDraft = {
+  name: string
+  role: string
+  profile: string
+  responsibility: string
 }
 
 type Run = {
   id: string
   repositoryId: string
   projectId?: string | null
+  projectTeamId?: string | null
+  projectTeamName?: string | null
   goal: string
   status: RunStatus
   branchName: string | null
@@ -105,19 +118,39 @@ type Run = {
 type Task = {
   id: string
   runId: string
+  parentTaskId: string | null
   title: string
   description: string
   role: string
   status: TaskStatus
   priority: number
+  ownerAgentId: string | null
+  verificationStatus: 'not_required' | 'pending' | 'requested' | 'in_progress' | 'passed' | 'failed' | 'blocked'
+  verifierAgentId: string | null
+  latestVerificationSummary: string | null
+  latestVerificationFindings: string[]
+  latestVerificationChangeRequests: string[]
+  latestVerificationEvidence: string[]
   dependencyIds: string[]
+  definitionOfDone: string[]
+  acceptanceCriteria: string[]
+  validationTemplates: Array<{
+    name: string
+    command: string
+    summary?: string
+    artifactPath?: string
+  }>
+  createdAt: string
+  updatedAt: string
 }
 
 type Agent = {
   id: string
   runId: string
   taskId: string | null
+  projectTeamMemberId?: string | null
   name: string
+  profile?: string
   status: string
 }
 
@@ -272,6 +305,7 @@ type RunDetail = Run & {
 
 type SwarmData = {
   projectSummaries: ContractProjectSummary[]
+  projectTeams: ProjectTeamDetail[]
   repositories: Repository[]
   runs: Run[]
   tasks: Task[]
@@ -293,10 +327,37 @@ type SwarmData = {
 type Route =
   | { kind: 'projects' }
   | { kind: 'project-new' }
-  | { kind: 'project'; projectId: string; section: 'overview' | 'repositories' | 'runs' | 'automation' | 'settings'; mode?: 'new-repository' | 'new-run' | 'new-repeatable-run' | 'new-webhook' }
+  | { kind: 'project'; projectId: string; section: 'overview' | 'teams' | 'repositories' | 'runs' | 'automation' | 'settings'; mode?: 'new-repository' | 'new-run' | 'new-repeatable-run' | 'new-webhook' | 'new-team' | 'import-team' }
   | { kind: 'adhoc-runs'; mode?: 'new' }
   | { kind: 'settings' }
   | { kind: 'run'; runId: string; section: 'overview' | 'board' | 'lifecycle' | 'review' }
+
+type VerificationViewState =
+  | 'legacy'
+  | 'not_requested'
+  | 'awaiting_verification'
+  | 'verification_running'
+  | 'verified_complete'
+  | 'verification_failed'
+  | 'rework_requested'
+  | 'verification_blocked'
+
+type ReviewQueueFilter = 'awaiting' | 'running' | 'failed' | 'verified' | 'all'
+
+type TaskPresentation = {
+  verificationState: VerificationViewState
+  primaryStatusTone: string
+  verificationTone: string
+  verificationLabel: string
+  verificationSummary: string
+  verificationSubtitle: string
+  ownerLabel: string
+  verifierLabel: string
+  latestSummary: string
+  hasDefinitionOfDone: boolean
+  isLegacy: boolean
+  reworkTasks: Task[]
+}
 
 const SIDEBAR_WIDTH_STORAGE_KEY = 'codex-swarm-sidebar-width-v1'
 const APPROVAL_RESOLVER = 'Codex reviewer'
@@ -317,6 +378,7 @@ let API_TOKEN = (
 function createEmptySwarmData(): SwarmData {
   return {
     projectSummaries: [],
+    projectTeams: [],
     repositories: [],
     runs: [],
     tasks: [],
@@ -368,6 +430,15 @@ function parseRoute(pathname: string): Route {
     const section = segments[2] ?? 'overview'
     if (section === 'repositories') {
       return { kind: 'project', projectId, section, mode: segments[3] === 'new' ? 'new-repository' : undefined }
+    }
+    if (section === 'teams') {
+      const mode =
+        segments[3] === 'new'
+          ? 'new-team'
+          : segments[3] === 'import'
+            ? 'import-team'
+            : undefined
+      return { kind: 'project', projectId, section, mode }
     }
     if (section === 'automation') {
       const mode =
@@ -510,8 +581,8 @@ async function requestJson<T>(path: string, init?: RequestInit, allowRetry = tru
   return (await response.json()) as T
 }
 
-async function loadTeamTemplates(): Promise<TeamTemplate[]> {
-  return requestJson<TeamTemplate[]>('/api/v1/team-templates')
+async function loadTeamBlueprints(): Promise<TeamBlueprint[]> {
+  return requestJson<TeamBlueprint[]>('/api/v1/team-blueprints')
 }
 
 async function loadProjectSummaries() {
@@ -538,6 +609,38 @@ async function createRepository(input: {
   })
 }
 
+async function loadProjectTeams(projectId?: string) {
+  const suffix = projectId ? `?projectId=${encodeURIComponent(projectId)}` : ''
+  return requestJson<ProjectTeamDetail[]>(`/api/v1/project-teams${suffix}`).catch(() => [])
+}
+
+async function createProjectTeam(input: ProjectTeamCreateInput) {
+  return requestJson<ProjectTeamDetail>('/api/v1/project-teams', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  })
+}
+
+async function importProjectTeam(input: ProjectTeamImportInput) {
+  return requestJson<ProjectTeamDetail>('/api/v1/project-teams/import', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  })
+}
+
+async function updateProjectTeam(projectTeamId: string, input: ProjectTeamUpdateInput) {
+  return requestJson<ProjectTeamDetail>(`/api/v1/project-teams/${encodeURIComponent(projectTeamId)}`, {
+    method: 'PATCH',
+    body: JSON.stringify(input),
+  })
+}
+
+async function deleteProjectTeam(projectTeamId: string) {
+  return requestJson<void>(`/api/v1/project-teams/${encodeURIComponent(projectTeamId)}`, {
+    method: 'DELETE',
+  })
+}
+
 async function updateRepository(repositoryId: string, input: RepositoryUpdateInput): Promise<Repository> {
   return requestJson<Repository>(`/api/v1/repositories/${encodeURIComponent(repositoryId)}`, {
     method: 'PATCH',
@@ -548,10 +651,10 @@ async function updateRepository(repositoryId: string, input: RepositoryUpdateInp
 async function createRun(input: {
   repositoryId: string
   projectId?: string | null
+  projectTeamId?: string | null
   goal: string
   branchName?: string | null
   concurrencyCap?: number
-  metadata?: Record<string, unknown>
   handoff: Run['handoff']
 }): Promise<Run> {
   return requestJson<Run>('/api/v1/runs', {
@@ -576,6 +679,7 @@ async function createTask(input: {
     method: 'POST',
     body: JSON.stringify({
       ...input,
+      definitionOfDone: [],
       acceptanceCriteria: [],
       dependencyIds: [],
       validationTemplates: [],
@@ -684,6 +788,7 @@ async function loadGovernanceReport() {
 async function loadSwarmData(): Promise<SwarmData> {
   try {
     const projectSummaries = await loadProjectSummaries()
+    const projectTeams = await loadProjectTeams()
     const repositories = await requestJson<Repository[]>('/api/v1/repositories').catch(() => [])
     const runs = await requestJson<Run[]>('/api/v1/runs').catch(() => [])
     const workerNodes = await requestJson<WorkerNode[]>('/api/v1/worker-nodes').catch(() => [])
@@ -697,6 +802,7 @@ async function loadSwarmData(): Promise<SwarmData> {
       return {
         ...createEmptySwarmData(),
         projectSummaries,
+        projectTeams,
         repositories,
         runs,
         workerNodes,
@@ -732,6 +838,7 @@ async function loadSwarmData(): Promise<SwarmData> {
 
     return {
       projectSummaries,
+      projectTeams,
       repositories,
       runs,
       tasks: details.flatMap((detail) => detail.tasks),
@@ -767,6 +874,146 @@ function toneForStatus(status: string) {
   return 'active'
 }
 
+function compareTasks(left: Task, right: Task) {
+  if (left.priority !== right.priority) {
+    return left.priority - right.priority
+  }
+
+  return new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime()
+}
+
+function agentLabel(agentId: string | null, agentsById: Map<string, Agent>) {
+  if (!agentId) {
+    return 'Unassigned'
+  }
+
+  const agent = agentsById.get(agentId)
+  if (!agent) {
+    return `Agent ${agentId.slice(0, 8)}`
+  }
+
+  return agent.profile ? `${agent.name} (${agent.profile})` : agent.name
+}
+
+function buildTaskPresentation(task: Task, allTasks: Task[], agentsById: Map<string, Agent>): TaskPresentation {
+  const reworkTasks = allTasks.filter((candidate) =>
+    candidate.parentTaskId === task.id
+    && candidate.status !== 'completed'
+    && candidate.status !== 'cancelled',
+  )
+  const hasDefinitionOfDone = task.definitionOfDone.length > 0
+  const isLegacy = !hasDefinitionOfDone && task.verificationStatus === 'not_required'
+
+  let verificationState: VerificationViewState
+  if (isLegacy) {
+    verificationState = 'legacy'
+  } else if (task.latestVerificationChangeRequests.length > 0 && reworkTasks.length > 0) {
+    verificationState = 'rework_requested'
+  } else if (task.verificationStatus === 'requested' || (task.status === 'awaiting_review' && task.verificationStatus === 'pending')) {
+    verificationState = 'awaiting_verification'
+  } else if (task.verificationStatus === 'in_progress') {
+    verificationState = 'verification_running'
+  } else if (task.verificationStatus === 'passed') {
+    verificationState = 'verified_complete'
+  } else if (task.verificationStatus === 'failed') {
+    verificationState = 'verification_failed'
+  } else if (task.verificationStatus === 'blocked') {
+    verificationState = 'verification_blocked'
+  } else {
+    verificationState = 'not_requested'
+  }
+
+  const verificationLabelMap: Record<VerificationViewState, string> = {
+    legacy: 'Legacy task',
+    not_requested: 'Verification not requested',
+    awaiting_verification: 'Awaiting verification',
+    verification_running: 'Verification in progress',
+    verified_complete: 'Verified complete',
+    verification_failed: 'Verification failed',
+    rework_requested: 'Rework requested',
+    verification_blocked: 'Verification blocked',
+  }
+  const verificationToneMap: Record<VerificationViewState, string> = {
+    legacy: 'muted',
+    not_requested: 'muted',
+    awaiting_verification: 'warning',
+    verification_running: 'warning',
+    verified_complete: 'success',
+    verification_failed: 'danger',
+    rework_requested: 'danger',
+    verification_blocked: 'danger',
+  }
+  const verificationCopyMap: Record<VerificationViewState, string> = {
+    legacy: 'This task was created before mandatory verification metadata was stored.',
+    not_requested: 'Verification has not been requested yet.',
+    awaiting_verification: 'Worker finished. Waiting for verifier assignment.',
+    verification_running: 'Verifier is checking delivered work against the definition of done.',
+    verified_complete: 'Passed verification against the definition of done.',
+    verification_failed: 'Verifier found unmet definition-of-done items.',
+    rework_requested: 'Leader opened follow-up work from verifier change requests.',
+    verification_blocked: 'Verifier escalated a blocker to the leader.',
+  }
+  const verificationSubtitleMap: Record<VerificationViewState, string> = {
+    legacy: 'Legacy task metadata remains readable, but automatic verification does not apply.',
+    not_requested: 'Execution has not reached the verification step yet.',
+    awaiting_verification: 'Execution is finished. Verification has not started yet.',
+    verification_running: 'Verifier is reviewing delivered work against the stored definition of done.',
+    verified_complete: 'All required definition-of-done checks passed.',
+    verification_failed: 'Verification failed. Review findings are listed below.',
+    rework_requested: 'Rework was requested from verifier findings. The original task stays open until follow-up work lands.',
+    verification_blocked: 'Verification could not complete and was escalated to the leader.',
+  }
+
+  return {
+    verificationState,
+    primaryStatusTone: toneForStatus(task.status),
+    verificationTone: verificationToneMap[verificationState],
+    verificationLabel: verificationLabelMap[verificationState],
+    verificationSummary: verificationCopyMap[verificationState],
+    verificationSubtitle: verificationSubtitleMap[verificationState],
+    ownerLabel: agentLabel(task.ownerAgentId, agentsById),
+    verifierLabel: task.verifierAgentId
+      ? agentLabel(task.verifierAgentId, agentsById)
+      : (verificationState === 'awaiting_verification'
+        || verificationState === 'verification_running'
+        || verificationState === 'verification_failed'
+        || verificationState === 'verification_blocked'
+        || verificationState === 'rework_requested')
+        ? 'Assignment pending'
+        : 'Not assigned',
+    latestSummary: task.latestVerificationSummary?.trim() || (
+      verificationState === 'legacy'
+        ? 'This task predates stored definition of done.'
+        : verificationState === 'not_requested'
+          ? 'No verification summary published yet.'
+          : verificationCopyMap[verificationState]
+    ),
+    hasDefinitionOfDone,
+    isLegacy,
+    reworkTasks,
+  }
+}
+
+function matchesReviewFilter(presentation: TaskPresentation, filter: ReviewQueueFilter) {
+  if (filter === 'all') {
+    return true
+  }
+
+  if (filter === 'awaiting') {
+    return presentation.verificationState === 'awaiting_verification'
+  }
+
+  if (filter === 'running') {
+    return presentation.verificationState === 'verification_running'
+  }
+
+  if (filter === 'failed') {
+    return presentation.verificationState === 'verification_failed' || presentation.verificationState === 'rework_requested'
+  }
+
+  return presentation.verificationState === 'verified_complete'
+}
+
 function runKindLabel(projectId: string | null) {
   return projectId ? 'Project run' : 'Ad-hoc run'
 }
@@ -784,7 +1031,7 @@ function App() {
   const [route, setRoute] = useState<Route>(() => parseRoute(window.location.pathname))
   const [data, setData] = useState<SwarmData>(createEmptySwarmData())
   const [projects, setProjects] = useState<ProjectRecord[]>([])
-  const [templates, setTemplates] = useState<TeamTemplate[]>([])
+  const [teamBlueprints, setTeamBlueprints] = useState<TeamBlueprint[]>([])
   const [loading, setLoading] = useState(true)
   const [refreshError, setRefreshError] = useState('')
   const [busy, setBusy] = useState(false)
@@ -794,12 +1041,25 @@ function App() {
   const [projectView, setProjectView] = useState<'all' | 'recent' | 'needs-setup'>('all')
   const [settingsScope, setSettingsScope] = useState<'workspace' | 'policy' | 'provider'>('workspace')
   const [projectForm, setProjectForm] = useState({ name: '', summary: '', repositoryIds: [] as string[] })
+  const [projectTeamForm, setProjectTeamForm] = useState({
+    name: '',
+    description: '',
+    concurrencyCap: '1',
+    members: [
+      { name: 'Leader', role: 'tech-lead', profile: 'leader', responsibility: 'Own sequencing, planning, and run closure.' },
+      { name: 'Implementer', role: 'implementer', profile: 'implementer', responsibility: 'Implement the assigned slice.' },
+    ] as ProjectTeamMemberDraft[],
+  })
+  const [projectTeamImportForm, setProjectTeamImportForm] = useState({ blueprintId: '', name: '', description: '' })
+  const [editingProjectTeamId, setEditingProjectTeamId] = useState('')
   const [repoForm, setRepoForm] = useState({ name: '', url: '', provider: 'github' as RepositoryProvider, localPath: '' })
-  const [runForm, setRunForm] = useState({ repositoryId: '', goal: '', branchName: 'main', concurrencyCap: '1', templateId: '' })
+  const [runForm, setRunForm] = useState({ repositoryId: '', projectTeamId: '', goal: '', branchName: 'main', concurrencyCap: '1' })
   const [boardDraft, setBoardDraft] = useState({ title: '', description: '', role: 'implementer' })
   const [reviewNotes, setReviewNotes] = useState('')
+  const [reviewFilter, setReviewFilter] = useState<ReviewQueueFilter>('awaiting')
   const [selectedApprovalId, setSelectedApprovalId] = useState('')
   const [selectedArtifactId, setSelectedArtifactId] = useState('')
+  const [selectedTaskId, setSelectedTaskId] = useState('')
   const [approvalDetail, setApprovalDetail] = useState<Approval | null>(null)
   const [artifactDetail, setArtifactDetail] = useState<ArtifactDetail | null>(null)
   const [runEvents, setRunEvents] = useState<ControlPlaneEvent[]>([])
@@ -827,9 +1087,9 @@ function App() {
     let active = true
     async function hydrate() {
       setLoading(true)
-      const [swarmData, nextTemplates] = await Promise.all([
+      const [swarmData, nextTeamBlueprints] = await Promise.all([
         loadSwarmData(),
-        loadTeamTemplates().catch(() => []),
+        loadTeamBlueprints().catch(() => []),
       ])
 
       if (!active) {
@@ -837,7 +1097,7 @@ function App() {
       }
 
       setData(swarmData)
-      setTemplates(nextTemplates)
+      setTeamBlueprints(nextTeamBlueprints)
       setProjects(normalizeProjects(
         swarmData.projectSummaries.map((project) => ({
           id: project.id,
@@ -868,16 +1128,17 @@ function App() {
   }, [])
 
   useEffect(() => {
-    const template = templates.find((item) => item.id === runForm.templateId)
-    if (!template) {
+    const projectTeam = data.projectTeams.find((item) => item.id === runForm.projectTeamId)
+    if (!projectTeam) {
       return
     }
     setRunForm((current) => ({
       ...current,
-      goal: current.goal || template.suggestedGoal,
-      concurrencyCap: String(template.suggestedConcurrencyCap),
+      concurrencyCap: current.concurrencyCap === String(projectTeam.concurrencyCap)
+        ? current.concurrencyCap
+        : String(projectTeam.concurrencyCap),
     }))
-  }, [runForm.templateId, templates])
+  }, [data.projectTeams, runForm.projectTeamId])
 
   const projectSummaries = useMemo(
     () => deriveProjectSummaries(projects, data.repositories, data.runs),
@@ -891,9 +1152,18 @@ function App() {
   const selectedProject = route.kind === 'project'
     ? projectSummaries.find((item) => item.project.id === route.projectId) ?? null
     : null
-  const selectedProjectRepositories = selectedProject
-    ? data.repositories.filter((repository) => selectedProject.project.repositoryIds.includes(repository.id))
-    : []
+  const selectedProjectTeams = useMemo(
+    () => (selectedProject
+      ? data.projectTeams.filter((projectTeam) => projectTeam.projectId === selectedProject.project.id)
+      : []),
+    [data.projectTeams, selectedProject],
+  )
+  const selectedProjectRepositories = useMemo(
+    () => (selectedProject
+      ? data.repositories.filter((repository) => selectedProject.project.repositoryIds.includes(repository.id))
+      : []),
+    [data.repositories, selectedProject],
+  )
   const selectedRun = route.kind === 'run'
     ? data.runs.find((run) => run.id === route.runId) ?? null
     : null
@@ -901,11 +1171,14 @@ function App() {
     ? data.repositories.find((repository) => repository.id === selectedRun.repositoryId) ?? null
     : null
   const selectedRunProject = selectedRun
-    ? projectSummaries.find((summary) => summary.project.repositoryIds.includes(selectedRun.repositoryId)) ?? null
+    ? projectSummaries.find((summary) => summary.project.id === (selectedRun.projectId ?? null)) ?? null
     : null
-  const selectedProjectRunsFull = selectedProject
-    ? data.runs.filter((run) => selectedProject.project.repositoryIds.includes(run.repositoryId))
-    : []
+  const selectedProjectRunsFull = useMemo(
+    () => (selectedProject
+      ? data.runs.filter((run) => run.projectId === selectedProject.project.id)
+      : []),
+    [data.runs, selectedProject],
+  )
   const isProjectRunCreate = route.kind === 'project' && route.section === 'runs' && route.mode === 'new-run'
   const newRunRepositories = isProjectRunCreate ? selectedProjectRepositories : adHocWorkspace.repositories
   const shouldShowRunRepositoryPicker = isProjectRunCreate ? newRunRepositories.length > 1 : true
@@ -932,6 +1205,14 @@ function App() {
   const runAgents = useMemo(
     () => (selectedRun ? data.agents.filter((agent) => agent.runId === selectedRun.id) : []),
     [data.agents, selectedRun],
+  )
+  const runAgentsById = useMemo(
+    () => new Map(runAgents.map((agent) => [agent.id, agent] as const)),
+    [runAgents],
+  )
+  const runTaskPresentations = useMemo(
+    () => new Map(runTasks.map((task) => [task.id, buildTaskPresentation(task, runTasks, runAgentsById)] as const)),
+    [runAgentsById, runTasks],
   )
   useEffect(() => {
     if (!selectedRun) {
@@ -970,6 +1251,24 @@ function App() {
   }, [newRunRepositories])
 
   useEffect(() => {
+    if (!isProjectRunCreate) {
+      return
+    }
+    if (selectedProjectTeams.length === 1) {
+      const onlyTeam = selectedProjectTeams[0]
+      setRunForm((current) => current.projectTeamId === onlyTeam.id ? current : { ...current, projectTeamId: onlyTeam.id })
+      return
+    }
+    setRunForm((current) => {
+      if (!current.projectTeamId) {
+        return current
+      }
+      const stillVisible = selectedProjectTeams.some((projectTeam) => projectTeam.id === current.projectTeamId)
+      return stillVisible ? current : { ...current, projectTeamId: '' }
+    })
+  }, [isProjectRunCreate, selectedProjectTeams])
+
+  useEffect(() => {
     if (!selectedApprovalId) {
       setApprovalDetail(null)
       return
@@ -989,6 +1288,12 @@ function App() {
     const nextSession = runSessions[0]?.id ?? ''
     setSelectedSessionId(nextSession)
   }, [selectedRun?.id, runSessions])
+
+  useEffect(() => {
+    if (!runTasks.some((task) => task.id === selectedTaskId)) {
+      setSelectedTaskId(runTasks[0]?.id ?? '')
+    }
+  }, [runTasks, selectedTaskId])
 
   useEffect(() => {
     if (!selectedSessionId) {
@@ -1079,6 +1384,112 @@ function App() {
     }
   }
 
+  function resetProjectTeamForm() {
+    setEditingProjectTeamId('')
+    setProjectTeamForm({
+      name: '',
+      description: '',
+      concurrencyCap: '1',
+      members: [
+        { name: 'Leader', role: 'tech-lead', profile: 'leader', responsibility: 'Own sequencing, planning, and run closure.' },
+        { name: 'Implementer', role: 'implementer', profile: 'implementer', responsibility: 'Implement the assigned slice.' },
+      ],
+    })
+  }
+
+  function patchProjectTeamMember(index: number, patch: Partial<ProjectTeamMemberDraft>) {
+    setProjectTeamForm((current) => ({
+      ...current,
+      members: current.members.map((member, memberIndex) => memberIndex === index ? { ...member, ...patch } : member),
+    }))
+  }
+
+  async function handleSubmitProjectTeam(event: FormEvent) {
+    event.preventDefault()
+    if (!selectedProject || !projectTeamForm.name.trim()) {
+      return
+    }
+
+    const members = projectTeamForm.members
+      .map((member) => ({
+        name: member.name.trim(),
+        role: member.role.trim(),
+        profile: member.profile.trim(),
+        responsibility: member.responsibility.trim() || null,
+      }))
+      .filter((member) => member.name && member.role && member.profile)
+
+    if (members.length === 0) {
+      return
+    }
+
+    setBusy(true)
+    try {
+      if (editingProjectTeamId) {
+        await updateProjectTeam(editingProjectTeamId, {
+          name: projectTeamForm.name.trim(),
+          description: projectTeamForm.description.trim() || null,
+          concurrencyCap: Math.max(1, Number.parseInt(projectTeamForm.concurrencyCap, 10) || 1),
+          members,
+        })
+        flash('Project team updated')
+      } else {
+        await createProjectTeam({
+          projectId: selectedProject.project.id,
+          name: projectTeamForm.name.trim(),
+          description: projectTeamForm.description.trim() || null,
+          concurrencyCap: Math.max(1, Number.parseInt(projectTeamForm.concurrencyCap, 10) || 1),
+          members,
+        })
+        flash('Project team created')
+      }
+      resetProjectTeamForm()
+      await refresh()
+      navigate(`/projects/${selectedProject.project.id}/teams`)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function handleImportProjectTeam(event: FormEvent) {
+    event.preventDefault()
+    if (!selectedProject || !projectTeamImportForm.blueprintId) {
+      return
+    }
+    setBusy(true)
+    try {
+      await importProjectTeam({
+        projectId: selectedProject.project.id,
+        blueprintId: projectTeamImportForm.blueprintId,
+        name: projectTeamImportForm.name.trim() || null,
+        description: projectTeamImportForm.description.trim() || null,
+      })
+      setProjectTeamImportForm({ blueprintId: '', name: '', description: '' })
+      await refresh()
+      flash('Project team imported')
+      navigate(`/projects/${selectedProject.project.id}/teams`)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function handleDeleteProjectTeam(projectTeamId: string) {
+    if (!selectedProject) {
+      return
+    }
+    setBusy(true)
+    try {
+      await deleteProjectTeam(projectTeamId)
+      if (runForm.projectTeamId === projectTeamId) {
+        setRunForm((current) => ({ ...current, projectTeamId: '' }))
+      }
+      await refresh()
+      flash('Project team deleted')
+    } finally {
+      setBusy(false)
+    }
+  }
+
   async function handleCreateRepository(event: FormEvent) {
     event.preventDefault()
     if (!repoForm.name.trim() || !repoForm.url.trim()) {
@@ -1121,10 +1532,10 @@ function App() {
       const run = await createRun({
         repositoryId: runForm.repositoryId,
         projectId: isProjectRunCreate ? selectedProject?.project.id ?? null : null,
+        projectTeamId: isProjectRunCreate ? runForm.projectTeamId || null : null,
         goal: runForm.goal.trim(),
         branchName: runForm.branchName.trim() || null,
         concurrencyCap: Math.max(1, Number.parseInt(runForm.concurrencyCap, 10) || 1),
-        metadata: runForm.templateId ? { teamTemplateId: runForm.templateId } : {},
         handoff: {
           mode: 'manual',
           provider: null,
@@ -1136,7 +1547,7 @@ function App() {
         },
       })
       await refresh()
-      setRunForm({ repositoryId: '', goal: '', branchName: 'main', concurrencyCap: '1', templateId: '' })
+      setRunForm({ repositoryId: '', projectTeamId: '', goal: '', branchName: 'main', concurrencyCap: '1' })
       flash('Run created')
       navigate(`/runs/${run.id}/overview`)
     } finally {
@@ -1297,10 +1708,46 @@ function App() {
   })
 
   const activeTasks = runTasks.filter((task) => task.status !== 'completed')
-  const completedTasks = runTasks.filter((task) => task.status === 'completed')
-  const waitingTasks = activeTasks.filter((task) => task.status === 'pending')
-  const blockedTasks = activeTasks.filter((task) => task.status === 'blocked')
-  const inFlightTasks = activeTasks.filter((task) => task.status === 'in_progress' || task.status === 'awaiting_review')
+  const completedTasks = runTasks.filter((task) => {
+    const presentation = runTaskPresentations.get(task.id)
+    return presentation?.verificationState === 'verified_complete' || (task.status === 'completed' && presentation?.isLegacy)
+  })
+  const waitingTasks = activeTasks.filter((task) => {
+    const presentation = runTaskPresentations.get(task.id)
+    return presentation?.verificationState === 'awaiting_verification' || presentation?.verificationState === 'verification_running'
+  })
+  const blockedTasks = activeTasks.filter((task) => {
+    const presentation = runTaskPresentations.get(task.id)
+    return task.status === 'blocked'
+      || presentation?.verificationState === 'verification_failed'
+      || presentation?.verificationState === 'rework_requested'
+      || presentation?.verificationState === 'verification_blocked'
+  })
+  const inFlightTasks = activeTasks.filter((task) => {
+    const presentation = runTaskPresentations.get(task.id)
+    return task.status === 'pending' || task.status === 'in_progress' || presentation?.verificationState === 'not_requested'
+  })
+  const verificationTasks = runTasks
+    .filter((task) => {
+      const presentation = runTaskPresentations.get(task.id)
+      return Boolean(
+        presentation
+        && (
+          presentation.hasDefinitionOfDone
+          || task.verificationStatus !== 'not_required'
+          || task.latestVerificationSummary
+          || task.latestVerificationChangeRequests.length > 0
+          || task.latestVerificationFindings.length > 0
+        ),
+      )
+    })
+    .sort(compareTasks)
+  const filteredVerificationTasks = verificationTasks.filter((task) => {
+    const presentation = runTaskPresentations.get(task.id)
+    return presentation ? matchesReviewFilter(presentation, reviewFilter) : false
+  })
+  const selectedTask = runTasks.find((task) => task.id === selectedTaskId) ?? runTasks[0] ?? null
+  const selectedVerificationTask = filteredVerificationTasks.find((task) => task.id === selectedTaskId) ?? filteredVerificationTasks[0] ?? null
 
   return (
     <div className="app-shell">
@@ -1344,11 +1791,12 @@ function App() {
           <div>
             <p className="eyebrow">Projects / {selectedProject.project.name}</p>
             <h1>{selectedProject.project.name}</h1>
-            <p>{selectedProject.project.summary || 'Project context for repositories, runs, automation, and policy defaults.'}</p>
+            <p>{selectedProject.project.summary || 'Project context for teams, repositories, runs, automation, and policy defaults.'}</p>
           </div>
           <nav className="context-tabs" aria-label="Project sections">
             {[
               ['Overview', `/projects/${selectedProject.project.id}`],
+              ['Teams', `/projects/${selectedProject.project.id}/teams`],
               ['Repositories', `/projects/${selectedProject.project.id}/repositories`],
               ['Runs', `/projects/${selectedProject.project.id}/runs`],
               ['Automation', `/projects/${selectedProject.project.id}/automation`],
@@ -1429,6 +1877,18 @@ function App() {
               </div>
               <div className="sidebar-section">
                 <button type="button" className="action-button" onClick={() => navigate(`/projects/${selectedProject.project.id}/repositories/new`)}>New Repo</button>
+              </div>
+            </>
+          )}
+
+          {route.kind === 'project' && selectedProject && route.section === 'teams' && (
+            <>
+              <div className="sidebar-section">
+                <h2>Team shortcuts</h2>
+                <div className="sidebar-button-stack">
+                  <button type="button" className={sidebarPillClassName(route.mode === 'new-team')} onClick={() => navigate(`/projects/${selectedProject.project.id}/teams/new`)}>New team</button>
+                  <button type="button" className={sidebarPillClassName(route.mode === 'import-team')} onClick={() => navigate(`/projects/${selectedProject.project.id}/teams/import`)}>Import blueprint</button>
+                </div>
               </div>
             </>
           )}
@@ -1649,23 +2109,205 @@ function App() {
             <>
               <section className="panel">
                 <div className="stats-row">
+                  <article className="stat-card"><span>Teams</span><strong>{selectedProjectTeams.length}</strong></article>
                   <article className="stat-card"><span>Repositories</span><strong>{selectedProject.repositories.length}</strong></article>
                   <article className="stat-card"><span>Runs</span><strong>{selectedProject.runs.length}</strong></article>
                   <article className="stat-card"><span>Active runs</span><strong>{selectedProject.activeRuns.length}</strong></article>
-                  <article className="stat-card"><span>Last activity</span><strong>{formatDate(selectedProject.lastRun?.updatedAt ?? selectedProject.project.updatedAt)}</strong></article>
                 </div>
               </section>
               <section className="panel split-panel">
                 <article className="surface-card">
                   <p className="eyebrow">Summary</p>
                   <h3>{selectedProject.project.name}</h3>
-                  <p>{selectedProject.project.summary || 'This project groups repositories, run history, and automation rules.'}</p>
+                  <p>{selectedProject.project.summary || 'This project groups teams, repositories, run history, and automation rules.'}</p>
                 </article>
                 <article className="surface-card">
-                  <p className="eyebrow">Recent run</p>
-                  <h3>{selectedProject.lastRun?.goal ?? 'No runs yet'}</h3>
-                  <p>{selectedProject.lastRun ? `${formatLabel(selectedProject.lastRun.status)} on ${formatDate(selectedProject.lastRun.updatedAt)}` : 'Create a run to establish recent activity.'}</p>
+                  <p className="eyebrow">Team ownership</p>
+                  <h3>{selectedProjectTeams[0]?.name ?? 'No teams yet'}</h3>
+                  <p>{selectedProjectTeams.length > 0 ? `${selectedProjectTeams.length} project team${selectedProjectTeams.length === 1 ? '' : 's'} are available for runs and automation.` : 'Create or import a project team before planning project runs.'}</p>
                 </article>
+              </section>
+            </>
+          )}
+
+          {!loading && route.kind === 'project' && selectedProject && route.section === 'teams' && (
+            <>
+              {(route.mode === 'new-team' || editingProjectTeamId) ? (
+                <section className="panel form-panel">
+                  <div className="section-header">
+                    <div>
+                      <p className="eyebrow">Project teams</p>
+                      <h2>{editingProjectTeamId ? 'Edit team' : 'New team'}</h2>
+                    </div>
+                  </div>
+                  <form className="stack-form" onSubmit={(event) => void handleSubmitProjectTeam(event)}>
+                    <label className="field">
+                      <span>Name</span>
+                      <input value={projectTeamForm.name} onChange={(event) => setProjectTeamForm((current) => ({ ...current, name: event.target.value }))} />
+                    </label>
+                    <label className="field">
+                      <span>Description</span>
+                      <textarea rows={3} value={projectTeamForm.description} onChange={(event) => setProjectTeamForm((current) => ({ ...current, description: event.target.value }))} />
+                    </label>
+                    <label className="field">
+                      <span>Concurrency cap</span>
+                      <input type="number" min={1} value={projectTeamForm.concurrencyCap} onChange={(event) => setProjectTeamForm((current) => ({ ...current, concurrencyCap: event.target.value }))} />
+                    </label>
+                    <fieldset className="repo-picker">
+                      <legend>Members</legend>
+                      {projectTeamForm.members.map((member, index) => (
+                        <div key={`${member.role}-${index}`} className="stack-form">
+                          <div className="two-column">
+                            <label className="field">
+                              <span>Name</span>
+                              <input value={member.name} onChange={(event) => patchProjectTeamMember(index, { name: event.target.value })} />
+                            </label>
+                            <label className="field">
+                              <span>Role</span>
+                              <input value={member.role} onChange={(event) => patchProjectTeamMember(index, { role: event.target.value })} />
+                            </label>
+                          </div>
+                          <div className="two-column">
+                            <label className="field">
+                              <span>Profile</span>
+                              <input value={member.profile} onChange={(event) => patchProjectTeamMember(index, { profile: event.target.value })} />
+                            </label>
+                            <label className="field">
+                              <span>Responsibility</span>
+                              <input value={member.responsibility} onChange={(event) => patchProjectTeamMember(index, { responsibility: event.target.value })} />
+                            </label>
+                          </div>
+                          <div className="action-row">
+                            <button
+                              type="button"
+                              className="table-action table-action-danger"
+                              onClick={() => setProjectTeamForm((current) => ({
+                                ...current,
+                                members: current.members.filter((_, memberIndex) => memberIndex !== index),
+                              }))}
+                              disabled={projectTeamForm.members.length <= 1}
+                            >
+                              Remove member
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                      <div className="action-row">
+                        <button
+                          type="button"
+                          className="table-action"
+                          onClick={() => setProjectTeamForm((current) => ({
+                            ...current,
+                            members: [...current.members, { name: '', role: 'implementer', profile: 'implementer', responsibility: '' }],
+                          }))}
+                        >
+                          Add member
+                        </button>
+                      </div>
+                    </fieldset>
+                    <div className="action-row">
+                      <button type="submit" className="action-button" disabled={busy}>{editingProjectTeamId ? 'Save team' : 'Create team'}</button>
+                      {editingProjectTeamId ? <button type="button" className="table-action" onClick={resetProjectTeamForm}>Cancel</button> : null}
+                    </div>
+                  </form>
+                </section>
+              ) : null}
+
+              {route.mode === 'import-team' ? (
+                <section className="panel form-panel">
+                  <div className="section-header">
+                    <div>
+                      <p className="eyebrow">Project teams</p>
+                      <h2>Import team blueprint</h2>
+                    </div>
+                  </div>
+                  <form className="stack-form" onSubmit={(event) => void handleImportProjectTeam(event)}>
+                    <label className="field">
+                      <span>Blueprint</span>
+                      <select value={projectTeamImportForm.blueprintId} onChange={(event) => setProjectTeamImportForm((current) => ({ ...current, blueprintId: event.target.value }))}>
+                        <option value="">Select blueprint</option>
+                        {teamBlueprints.map((blueprint) => (
+                          <option key={blueprint.id} value={blueprint.id}>{blueprint.name}</option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="field">
+                      <span>Name override</span>
+                      <input value={projectTeamImportForm.name} onChange={(event) => setProjectTeamImportForm((current) => ({ ...current, name: event.target.value }))} />
+                    </label>
+                    <label className="field">
+                      <span>Description override</span>
+                      <textarea rows={3} value={projectTeamImportForm.description} onChange={(event) => setProjectTeamImportForm((current) => ({ ...current, description: event.target.value }))} />
+                    </label>
+                    <div className="action-row">
+                      <button type="submit" className="action-button" disabled={busy || !projectTeamImportForm.blueprintId}>Import team</button>
+                    </div>
+                  </form>
+                </section>
+              ) : null}
+
+              <section className="panel">
+                <div className="section-header">
+                  <div>
+                    <p className="eyebrow">Team inventory</p>
+                    <h2>Project teams</h2>
+                  </div>
+                </div>
+                <table className="data-table">
+                  <thead>
+                    <tr>
+                      <th>Name</th>
+                      <th>Members</th>
+                      <th>Concurrency</th>
+                      <th>Blueprint source</th>
+                      <th />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {selectedProjectTeams.map((projectTeam) => (
+                      <tr key={projectTeam.id}>
+                        <td>
+                          <strong>{projectTeam.name}</strong>
+                          <div className="cell-subtitle">{projectTeam.description ?? 'No description provided.'}</div>
+                        </td>
+                        <td>{projectTeam.members.map((member) => member.name).join(', ') || 'No members'}</td>
+                        <td>{projectTeam.concurrencyCap}</td>
+                        <td>{projectTeam.sourceBlueprintId ?? projectTeam.sourceTemplateId ?? 'Manual'}</td>
+                        <td>
+                          <div className="action-row">
+                            <button
+                              type="button"
+                              className="table-action"
+                              onClick={() => {
+                                setEditingProjectTeamId(projectTeam.id)
+                                setProjectTeamForm({
+                                  name: projectTeam.name,
+                                  description: projectTeam.description ?? '',
+                                  concurrencyCap: String(projectTeam.concurrencyCap),
+                                  members: projectTeam.members.map((member) => ({
+                                    name: member.name,
+                                    role: member.role,
+                                    profile: member.profile,
+                                    responsibility: member.responsibility ?? '',
+                                  })),
+                                })
+                                navigate(`/projects/${selectedProject.project.id}/teams/new`)
+                              }}
+                            >
+                              Edit
+                            </button>
+                            <button type="button" className="table-action table-action-danger" onClick={() => void handleDeleteProjectTeam(projectTeam.id)} disabled={busy}>
+                              Delete
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                    {selectedProjectTeams.length === 0 ? (
+                      <tr><td colSpan={5}><div className="compact-empty">No project teams configured yet.</div></td></tr>
+                    ) : null}
+                  </tbody>
+                </table>
               </section>
             </>
           )}
@@ -1755,6 +2397,22 @@ function App() {
                       </button>
                     </div>
                   </section>
+                ) : selectedProjectTeams.length === 0 ? (
+                  <section className="panel form-panel">
+                    <div className="section-header">
+                      <div>
+                        <p className="eyebrow">Project Runs</p>
+                        <h2>New project run</h2>
+                      </div>
+                    </div>
+                    <div className="compact-empty">
+                      Create or import a project team before planning a project run.
+                      {' '}
+                      <button type="button" className="table-action" onClick={() => navigate(`/projects/${selectedProject.project.id}/teams/import`)}>
+                        Import team
+                      </button>
+                    </div>
+                  </section>
                 ) : (
                   <section className="panel form-panel">
                     <div className="section-header">
@@ -1789,11 +2447,11 @@ function App() {
                         <label className="field"><span>Concurrency</span><input type="number" min={1} value={runForm.concurrencyCap} onChange={(event) => setRunForm((current) => ({ ...current, concurrencyCap: event.target.value }))} /></label>
                       </div>
                       <label className="field">
-                        <span>Team template</span>
-                        <select value={runForm.templateId} onChange={(event) => setRunForm((current) => ({ ...current, templateId: event.target.value }))}>
-                          <option value="">None</option>
-                          {templates.map((template) => (
-                            <option key={template.id} value={template.id}>{template.name}</option>
+                        <span>Project team</span>
+                        <select value={runForm.projectTeamId} onChange={(event) => setRunForm((current) => ({ ...current, projectTeamId: event.target.value }))}>
+                          <option value="">Select team</option>
+                          {selectedProjectTeams.map((projectTeam) => (
+                            <option key={projectTeam.id} value={projectTeam.id}>{projectTeam.name}</option>
                           ))}
                         </select>
                       </label>
@@ -1858,6 +2516,7 @@ function App() {
               </div>
               <RepeatableRunsPanel
                 repositories={selectedProjectRepositories.map((repository) => ({ id: repository.id, name: repository.name, provider: repository.provider }))}
+                projectTeams={selectedProjectTeams}
                 selectedRepositoryId={automationRepositoryId}
                 onSelectedRepositoryIdChange={setAutomationRepositoryId}
                 definitions={data.repeatableRunDefinitions.filter((definition) => selectedProject.project.repositoryIds.includes(definition.repositoryId))}
@@ -1941,15 +2600,6 @@ function App() {
                         <label className="field"><span>Branch</span><input value={runForm.branchName} onChange={(event) => setRunForm((current) => ({ ...current, branchName: event.target.value }))} /></label>
                         <label className="field"><span>Concurrency</span><input type="number" min={1} value={runForm.concurrencyCap} onChange={(event) => setRunForm((current) => ({ ...current, concurrencyCap: event.target.value }))} /></label>
                       </div>
-                      <label className="field">
-                        <span>Team template</span>
-                        <select value={runForm.templateId} onChange={(event) => setRunForm((current) => ({ ...current, templateId: event.target.value }))}>
-                          <option value="">None</option>
-                          {templates.map((template) => (
-                            <option key={template.id} value={template.id}>{template.name}</option>
-                          ))}
-                        </select>
-                      </label>
                       <div className="action-row"><button type="submit" className="action-button" disabled={busy}>Create Run</button></div>
                     </form>
                   </section>
@@ -2120,27 +2770,44 @@ function App() {
                   <button type="submit" className="action-button" disabled={busy}>Add</button>
                 </form>
                 <div className="board-grid">
-                  <BoardColumn title="In flight" tasks={inFlightTasks} />
-                  <BoardColumn title="Blocked" tasks={blockedTasks} />
-                  <BoardColumn title="Waiting" tasks={waitingTasks} />
+                  <BoardColumn title="In flight" tasks={inFlightTasks} selectedTaskId={selectedTaskId} onSelectTask={setSelectedTaskId} presentations={runTaskPresentations} />
+                  <BoardColumn title="Blocked" tasks={blockedTasks} selectedTaskId={selectedTaskId} onSelectTask={setSelectedTaskId} presentations={runTaskPresentations} />
+                  <BoardColumn title="Waiting" tasks={waitingTasks} selectedTaskId={selectedTaskId} onSelectTask={setSelectedTaskId} presentations={runTaskPresentations} />
                 </div>
                 <details className="secondary-panel" open={showCompletedTasks} onToggle={(event) => setShowCompletedTasks((event.currentTarget as HTMLDetailsElement).open)}>
                   <summary>Completed ({completedTasks.length})</summary>
-                  <BoardTaskList tasks={completedTasks} />
+                  <BoardTaskList tasks={completedTasks} selectedTaskId={selectedTaskId} onSelectTask={setSelectedTaskId} presentations={runTaskPresentations} />
                 </details>
               </section>
               <section className="panel split-panel">
+                <TaskDetailPanel
+                  task={selectedTask}
+                  presentations={runTaskPresentations}
+                  validations={runValidations}
+                  artifacts={runArtifacts}
+                  events={runEvents}
+                />
                 <article className="surface-card">
                   <p className="eyebrow">Board signals</p>
-                  <h3>Blockers and approvals</h3>
+                  <h3>Queue health</h3>
                   <div className="compact-list">
-                    {runApprovals.slice(0, 4).map((approval) => (
+                    {[
+                      ['In execution', inFlightTasks.length],
+                      ['Awaiting verification', waitingTasks.length],
+                      ['Failed / rework', blockedTasks.length],
+                      ['Verified', completedTasks.length],
+                    ].map(([label, count]) => (
+                      <div key={label} className="compact-list-row">
+                        <span>{label}</span>
+                        <strong>{count}</strong>
+                      </div>
+                    ))}
+                    {runApprovals.slice(0, 2).map((approval) => (
                       <div key={approval.id} className="compact-list-row">
                         <span>{approval.kind}</span>
                         <strong>{approval.status === 'pending' ? String(approval.requestedPayload?.summary ?? 'Awaiting decision') : String(approval.resolutionPayload?.feedback ?? 'Resolved')}</strong>
                       </div>
                     ))}
-                    {runApprovals.length === 0 ? <div className="compact-empty">No pending approvals on this run.</div> : null}
                   </div>
                 </article>
                 <article className="surface-card">
@@ -2164,6 +2831,7 @@ function App() {
                           <strong>{validation.name}</strong>
                         </div>
                       ))}
+                      {runValidations.length === 0 ? <div className="compact-empty">No validation evidence published yet.</div> : null}
                     </div>
                   </details>
                 </article>
@@ -2177,44 +2845,61 @@ function App() {
                 <div className="section-header">
                   <div>
                     <p className="eyebrow">Lifecycle</p>
-                    <h2>Placement, recovery, and events</h2>
+                    <h2>Task verification history</h2>
                   </div>
                 </div>
                 <table className="data-table">
                   <thead>
                     <tr>
-                      <th>Session</th>
-                      <th>Agent</th>
-                      <th>Worker node</th>
-                      <th>Status</th>
+                      <th>Task</th>
+                      <th>Owner</th>
+                      <th>Verifier</th>
+                      <th>Task status</th>
+                      <th>Verification</th>
+                      <th>Change requests</th>
                       <th>Updated</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {runSessions.map((session) => {
-                      const agent = runAgents.find((item) => item.id === session.agentId)
-                      const node = data.workerNodes.find((item) => item.id === session.workerNodeId)
+                    {runTasks.slice().sort(compareTasks).map((task) => {
+                      const presentation = runTaskPresentations.get(task.id)
+                      if (!presentation) {
+                        return null
+                      }
+
                       return (
-                        <tr key={session.id}>
-                          <td>{session.id.slice(0, 8)}</td>
-                          <td>{agent?.name ?? 'Unknown agent'}</td>
-                          <td>{node?.name ?? 'Unplaced'}</td>
-                          <td>{session.status}</td>
-                          <td>{formatDate(session.updatedAt)}</td>
+                        <tr key={task.id} className={task.id === selectedTask?.id ? 'task-row is-selected' : 'task-row'} onClick={() => setSelectedTaskId(task.id)}>
+                          <td>
+                            <strong>{task.title}</strong>
+                            <div className="cell-subtitle">{task.role}</div>
+                          </td>
+                          <td>{presentation.ownerLabel}</td>
+                          <td>{presentation.verifierLabel}</td>
+                          <td><span className={`tone-chip tone-${presentation.primaryStatusTone}`}>{formatLabel(task.status)}</span></td>
+                          <td><span className={`tone-chip tone-${presentation.verificationTone}`}>{presentation.verificationLabel}</span></td>
+                          <td>{task.latestVerificationChangeRequests.length}</td>
+                          <td>{formatDate(task.updatedAt)}</td>
                         </tr>
                       )
                     })}
-                    {runSessions.length === 0 ? <tr><td colSpan={5}><div className="compact-empty">No sessions recorded yet.</div></td></tr> : null}
+                    {runTasks.length === 0 ? <tr><td colSpan={7}><div className="compact-empty">No tasks recorded for this run yet.</div></td></tr> : null}
                   </tbody>
                 </table>
               </section>
               <section className="panel split-panel">
+                <TaskDetailPanel
+                  task={selectedTask}
+                  presentations={runTaskPresentations}
+                  validations={runValidations}
+                  artifacts={runArtifacts}
+                  events={runEvents}
+                />
                 <article className="surface-card">
                   <p className="eyebrow">Recent events</p>
                   <div className="compact-list">
                     {runEvents.slice(0, 8).map((event) => (
                       <div key={event.id} className="compact-list-row">
-                        <span>{formatLabel(event.status)}</span>
+                        <span>{formatLabel(event.eventType)}</span>
                         <strong>{event.summary}</strong>
                       </div>
                     ))}
@@ -2252,39 +2937,93 @@ function App() {
                 <div className="section-header">
                   <div>
                     <p className="eyebrow">Review</p>
-                    <h2>Approvals and evidence</h2>
+                    <h2>Verification queue and approvals</h2>
                   </div>
                 </div>
-                {runApprovals.length === 0 ? (
-                  <div className="compact-empty">No approvals returned for this run.</div>
+                <div className="filter-row">
+                  {([
+                    ['awaiting', 'Awaiting verification'],
+                    ['running', 'Verification running'],
+                    ['failed', 'Failed / rework'],
+                    ['verified', 'Verified'],
+                    ['all', 'All tasks'],
+                  ] as const).map(([value, label]) => (
+                    <button key={value} type="button" className={sidebarPillClassName(reviewFilter === value)} onClick={() => setReviewFilter(value)}>
+                      {label}
+                    </button>
+                  ))}
+                </div>
+                {filteredVerificationTasks.length === 0 ? (
+                  <div className="compact-empty">No tasks currently match this verification filter.</div>
                 ) : (
                   <div className="review-layout">
                     <div className="review-list">
-                      {runApprovals.map((approval) => (
-                        <button key={approval.id} type="button" className={`review-item ${approval.id === selectedApprovalId ? 'is-selected' : ''}`} onClick={() => setSelectedApprovalId(approval.id)}>
-                          <strong>{approval.kind}</strong>
-                          <span className={`tone-chip tone-${toneForStatus(approval.status)}`}>{formatLabel(approval.status)}</span>
-                          <p>{approval.status === 'pending' ? String(approval.requestedPayload?.summary ?? 'Awaiting decision') : String(approval.resolutionPayload?.feedback ?? 'Resolved')}</p>
-                        </button>
-                      ))}
+                      {filteredVerificationTasks.map((task) => {
+                        const presentation = runTaskPresentations.get(task.id)
+                        if (!presentation) {
+                          return null
+                        }
+
+                        return (
+                          <button key={task.id} type="button" className={`review-item ${task.id === selectedVerificationTask?.id ? 'is-selected' : ''}`} onClick={() => setSelectedTaskId(task.id)}>
+                            <strong>{task.title}</strong>
+                            <span className={`tone-chip tone-${presentation.verificationTone}`}>{presentation.verificationLabel}</span>
+                            <p>{presentation.latestSummary}</p>
+                            <div className="review-item-meta">
+                              <span>{presentation.verifierLabel}</span>
+                              <span>{task.latestVerificationChangeRequests.length} change requests</span>
+                            </div>
+                          </button>
+                        )
+                      })}
                     </div>
                     <div className="review-detail">
-                      <div className="surface-card">
-                        <p className="eyebrow">Decision</p>
-                        <h3>{approvalDetail?.kind ?? 'Approval detail'}</h3>
-                        <p>{String(approvalDetail?.requestedPayload?.summary ?? 'No structured request summary attached.')}</p>
-                        <label className="field">
-                          <span>Notes</span>
-                          <textarea rows={6} value={reviewNotes} onChange={(event) => setReviewNotes(event.target.value)} />
-                        </label>
-                        <div className="action-row">
-                          <button type="button" className="action-button" onClick={() => void handleApproval('approved')} disabled={busy}>Approve</button>
-                          <button type="button" className="action-button secondary" onClick={() => void handleApproval('rejected')} disabled={busy}>Reject</button>
-                        </div>
-                      </div>
+                      <TaskDetailPanel
+                        task={selectedVerificationTask}
+                        presentations={runTaskPresentations}
+                        validations={runValidations}
+                        artifacts={runArtifacts}
+                        events={runEvents}
+                      />
                     </div>
                   </div>
                 )}
+              </section>
+              <section className="panel split-panel">
+                <article className="surface-card">
+                  <p className="eyebrow">Approvals</p>
+                  <h3>Pending decisions</h3>
+                  {runApprovals.length === 0 ? (
+                    <div className="compact-empty">No approvals returned for this run.</div>
+                  ) : (
+                    <div className="review-layout">
+                      <div className="review-list">
+                        {runApprovals.map((approval) => (
+                          <button key={approval.id} type="button" className={`review-item ${approval.id === selectedApprovalId ? 'is-selected' : ''}`} onClick={() => setSelectedApprovalId(approval.id)}>
+                            <strong>{approval.kind}</strong>
+                            <span className={`tone-chip tone-${toneForStatus(approval.status)}`}>{formatLabel(approval.status)}</span>
+                            <p>{approval.status === 'pending' ? String(approval.requestedPayload?.summary ?? 'Awaiting decision') : String(approval.resolutionPayload?.feedback ?? 'Resolved')}</p>
+                          </button>
+                        ))}
+                      </div>
+                      <div className="review-detail">
+                        <div className="surface-card">
+                          <p className="eyebrow">Decision</p>
+                          <h3>{approvalDetail?.kind ?? 'Approval detail'}</h3>
+                          <p>{String(approvalDetail?.requestedPayload?.summary ?? 'No structured request summary attached.')}</p>
+                          <label className="field">
+                            <span>Notes</span>
+                            <textarea rows={6} value={reviewNotes} onChange={(event) => setReviewNotes(event.target.value)} />
+                          </label>
+                          <div className="action-row">
+                            <button type="button" className="action-button" onClick={() => void handleApproval('approved')} disabled={busy}>Approve</button>
+                            <button type="button" className="action-button secondary" onClick={() => void handleApproval('rejected')} disabled={busy}>Reject</button>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </article>
               </section>
               <section className="panel split-panel">
                 <article className="surface-card">
@@ -2336,19 +3075,41 @@ function App() {
   )
 }
 
-function BoardColumn({ title, tasks }: { title: string; tasks: Task[] }) {
+function BoardColumn({
+  title,
+  tasks,
+  selectedTaskId,
+  onSelectTask,
+  presentations,
+}: {
+  title: string
+  tasks: Task[]
+  selectedTaskId: string
+  onSelectTask: (taskId: string) => void
+  presentations: Map<string, TaskPresentation>
+}) {
   return (
     <section className="board-column">
       <header className="board-column-header">
         <h3>{title}</h3>
         <span>{tasks.length}</span>
       </header>
-      <BoardTaskList tasks={tasks} />
+      <BoardTaskList tasks={tasks} selectedTaskId={selectedTaskId} onSelectTask={onSelectTask} presentations={presentations} />
     </section>
   )
 }
 
-function BoardTaskList({ tasks }: { tasks: Task[] }) {
+function BoardTaskList({
+  tasks,
+  selectedTaskId,
+  onSelectTask,
+  presentations,
+}: {
+  tasks: Task[]
+  selectedTaskId: string
+  onSelectTask: (taskId: string) => void
+  presentations: Map<string, TaskPresentation>
+}) {
   if (tasks.length === 0) {
     return <div className="compact-empty">No tasks in this lane.</div>
   }
@@ -2357,22 +3118,196 @@ function BoardTaskList({ tasks }: { tasks: Task[] }) {
     <div className="task-list">
       {tasks
         .slice()
-        .sort((left, right) => left.priority - right.priority)
-        .map((task) => (
-          <article key={task.id} className="task-card">
+        .sort(compareTasks)
+        .map((task) => {
+          const presentation = presentations.get(task.id)
+          if (!presentation) {
+            return null
+          }
+
+          return (
+            <button key={task.id} type="button" className={`task-card ${task.id === selectedTaskId ? 'is-selected' : ''}`} onClick={() => onSelectTask(task.id)}>
             <div className="task-card-topline">
-              <span className={`tone-chip tone-${toneForStatus(task.status)}`}>{formatLabel(task.status)}</span>
+              <span className={`tone-chip tone-${presentation.primaryStatusTone}`}>{formatLabel(task.status)}</span>
+              <span className={`tone-chip tone-${presentation.verificationTone}`}>{presentation.verificationLabel}</span>
               <span>P{task.priority}</span>
             </div>
             <strong>{task.title}</strong>
             <p>{task.description}</p>
+            <div className="task-card-checklist">
+              {presentation.hasDefinitionOfDone ? (
+                <>
+                  {task.definitionOfDone.slice(0, 2).map((criterion) => (
+                    <span key={criterion}>{criterion}</span>
+                  ))}
+                  {task.definitionOfDone.length > 2 ? <span>+{task.definitionOfDone.length - 2} more DoD items</span> : null}
+                </>
+              ) : (
+                <span>No stored definition of done</span>
+              )}
+            </div>
+            <div className="task-card-summary">{presentation.latestSummary}</div>
             <div className="inline-facts">
               <span>{task.role}</span>
+              <span>Owner: {presentation.ownerLabel}</span>
+              <span>Verifier: {presentation.verifierLabel}</span>
               <span>{task.dependencyIds.length} deps</span>
+              {task.latestVerificationChangeRequests.length > 0 ? <span>{task.latestVerificationChangeRequests.length} change requests</span> : null}
             </div>
-          </article>
-        ))}
+          </button>
+          )
+        })}
     </div>
+  )
+}
+
+function TaskDetailPanel({
+  task,
+  presentations,
+  validations,
+  artifacts,
+  events,
+}: {
+  task: Task | null
+  presentations: Map<string, TaskPresentation>
+  validations: Validation[]
+  artifacts: Artifact[]
+  events: ControlPlaneEvent[]
+}) {
+  if (!task) {
+    return (
+      <article className="surface-card task-detail-card">
+        <p className="eyebrow">Task detail</p>
+        <div className="compact-empty">Select a task to inspect its definition of done and verification state.</div>
+      </article>
+    )
+  }
+
+  const presentation = presentations.get(task.id)
+  if (!presentation) {
+    return null
+  }
+
+  const relatedArtifacts = artifacts.filter((artifact) => artifact.runId === task.runId).slice(0, 5)
+  const relatedEvents = events.filter((event) =>
+    event.eventType.startsWith('task.')
+    || event.summary.toLowerCase().includes(task.title.toLowerCase()),
+  ).slice(0, 5)
+  const openChangeRequests = task.latestVerificationChangeRequests
+  const findings = task.latestVerificationFindings
+
+  return (
+    <article className="surface-card task-detail-card">
+      <p className="eyebrow">Task detail</p>
+      <div className="task-detail-header">
+        <div>
+          <h3>{task.title}</h3>
+          <p className="task-detail-copy">{task.description}</p>
+        </div>
+        <div className="task-detail-chips">
+          <span className={`tone-chip tone-${presentation.primaryStatusTone}`}>{formatLabel(task.status)}</span>
+          <span className={`tone-chip tone-${presentation.verificationTone}`}>{presentation.verificationLabel}</span>
+        </div>
+      </div>
+      <div className="inline-facts">
+        <span>{task.role}</span>
+        <span>P{task.priority}</span>
+        <span>{task.dependencyIds.length} deps</span>
+        <span>Owner: {presentation.ownerLabel}</span>
+      </div>
+      <div className="detail-stack">
+        <section className="detail-block">
+          <p className="eyebrow">Verification</p>
+          <p className="detail-copy">{presentation.verificationSubtitle}</p>
+          <ul className="plain-list">
+            <li>Verifier: {presentation.verifierLabel}</li>
+            <li>Latest summary: {presentation.latestSummary}</li>
+            <li>Updated: {formatDate(task.updatedAt)}</li>
+          </ul>
+        </section>
+        <section className="detail-block">
+          <p className="eyebrow">Definition of done</p>
+          {presentation.hasDefinitionOfDone ? (
+            <ol className="detail-list">
+              {task.definitionOfDone.map((criterion) => (
+                <li key={criterion}>{criterion}</li>
+              ))}
+            </ol>
+          ) : (
+            <div className="compact-empty">No definition of done was stored for this task.</div>
+          )}
+        </section>
+        <details className="secondary-panel" open={!presentation.hasDefinitionOfDone}>
+          <summary>Acceptance criteria (summary / compatibility)</summary>
+          {task.acceptanceCriteria.length > 0 ? (
+            <ol className="detail-list">
+              {task.acceptanceCriteria.map((criterion) => (
+                <li key={criterion}>{criterion}</li>
+              ))}
+            </ol>
+          ) : (
+            <div className="compact-empty">No acceptance criteria were published for this task.</div>
+          )}
+        </details>
+        {(findings.length > 0 || openChangeRequests.length > 0 || presentation.reworkTasks.length > 0) ? (
+          <section className="detail-block">
+            <p className="eyebrow">Change requests</p>
+            {findings.length > 0 ? (
+              <>
+                <strong>Findings</strong>
+                <ol className="detail-list">
+                  {findings.map((finding) => (
+                    <li key={finding}>{finding}</li>
+                  ))}
+                </ol>
+              </>
+            ) : null}
+            {openChangeRequests.length > 0 ? (
+              <>
+                <strong>Open change requests</strong>
+                <ol className="detail-list">
+                  {openChangeRequests.map((request) => (
+                    <li key={request}>{request}</li>
+                  ))}
+                </ol>
+              </>
+            ) : null}
+            {presentation.reworkTasks.length > 0 ? (
+              <>
+                <strong>Rework follow-ups</strong>
+                <ul className="plain-list">
+                  {presentation.reworkTasks.map((reworkTask) => (
+                    <li key={reworkTask.id}>{reworkTask.title} ({formatLabel(reworkTask.status)})</li>
+                  ))}
+                </ul>
+              </>
+            ) : null}
+          </section>
+        ) : null}
+        <section className="detail-block">
+          <p className="eyebrow">Evidence</p>
+          <ul className="plain-list">
+            <li>{presentation.verificationSummary}</li>
+            {task.validationTemplates.length > 0 ? <li>{task.validationTemplates.length} validation templates attached.</li> : null}
+            {task.latestVerificationEvidence.length > 0 ? <li>{task.latestVerificationEvidence.length} verification evidence references attached.</li> : null}
+            {validations.length > 0 ? <li>{validations.length} run validations available.</li> : null}
+            {relatedArtifacts.length > 0 ? <li>{relatedArtifacts.length} recent artifacts available.</li> : null}
+          </ul>
+        </section>
+        <section className="detail-block">
+          <p className="eyebrow">Lifecycle</p>
+          <div className="compact-list">
+            {relatedEvents.map((event) => (
+              <div key={event.id} className="compact-list-row">
+                <span>{formatLabel(event.eventType)}</span>
+                <strong>{event.summary}</strong>
+              </div>
+            ))}
+            {relatedEvents.length === 0 ? <div className="compact-empty">No verification events have been published for this task yet.</div> : null}
+          </div>
+        </section>
+      </div>
+    </article>
   )
 }
 

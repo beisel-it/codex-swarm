@@ -1,0 +1,803 @@
+import { describe, expect, it, vi } from "vitest";
+
+import { agents, runs, sessions, tasks, workerDispatchAssignments } from "../src/db/schema.js";
+import { ControlPlaneService } from "../src/services/control-plane-service.js";
+
+function extractTargetId(condition: { queryChunks: Array<{ value?: string[] } | { value?: string }> }) {
+  const chunk = condition.queryChunks[3] as { value?: string };
+
+  if (!chunk || typeof chunk.value !== "string") {
+    throw new Error("unable to extract update target");
+  }
+
+  return chunk.value;
+}
+
+class FakeVerificationDb {
+  constructor(
+    readonly assignmentStore: any[],
+    readonly agentStore: any[],
+    readonly taskStore: any[],
+    readonly sessionStore: any[]
+  ) {}
+
+  update(table: unknown) {
+    return {
+      set: (values: Record<string, unknown>) => ({
+        where: (condition: { queryChunks: Array<{ value?: string[] } | { value?: string }> }) => {
+          const id = extractTargetId(condition);
+
+          if (table === workerDispatchAssignments) {
+            const record = this.assignmentStore.find((candidate) => candidate.id === id);
+            Object.assign(record, values);
+            return {
+              returning: async () => [record]
+            };
+          }
+
+          if (table === agents) {
+            const record = this.agentStore.find((candidate) => candidate.id === id);
+            Object.assign(record, values);
+            return Promise.resolve([record]);
+          }
+
+          if (table === tasks) {
+            const record = this.taskStore.find((candidate) => candidate.id === id);
+            Object.assign(record, values);
+            return Promise.resolve([record]);
+          }
+
+          if (table === sessions) {
+            const record = this.sessionStore.find((candidate) => candidate.id === id);
+            Object.assign(record, values);
+            return Promise.resolve([record]);
+          }
+
+          throw new Error("unexpected table update");
+        }
+      })
+    };
+  }
+}
+
+class FakeVerificationSchedulingDb {
+  constructor(
+    readonly runStore: any[],
+    readonly assignmentStore: any[],
+    readonly agentStore: any[]
+  ) {}
+
+  select() {
+    return {
+      from: (table: unknown) => ({
+        where: () => ({
+          orderBy: async () => {
+            if (table === workerDispatchAssignments) {
+              return this.assignmentStore;
+            }
+
+            throw new Error("unexpected ordered select table");
+          }
+        })
+      })
+    };
+  }
+
+  update(table: unknown) {
+    return {
+      set: (values: Record<string, unknown>) => ({
+        where: (condition: { queryChunks: Array<{ value?: string[] } | { value?: string }> }) => {
+          const id = extractTargetId(condition);
+
+          if (table === runs) {
+            const record = this.runStore.find((candidate) => candidate.id === id);
+            Object.assign(record, values);
+            return {
+              returning: async () => [record]
+            };
+          }
+
+          if (table === agents) {
+            const record = this.agentStore.find((candidate) => candidate.id === id);
+            Object.assign(record, values);
+            return {
+              returning: async () => [record]
+            };
+          }
+
+          throw new Error("unexpected update table");
+        }
+      })
+    };
+  }
+}
+
+function createWorkerAssignment(overrides: Partial<Record<string, unknown>> = {}) {
+  return {
+    id: "dispatch-worker-1",
+    runId: "run-1",
+    taskId: "task-1",
+    agentId: "worker-agent-1",
+    sessionId: "session-worker-1",
+    repositoryId: "repo-1",
+    repositoryName: "codex-swarm",
+    queue: "worker-dispatch",
+    state: "claimed",
+    stickyNodeId: "node-1",
+    preferredNodeId: "node-1",
+    claimedByNodeId: "node-1",
+    requiredCapabilities: ["workspace-write"],
+    worktreePath: "/tmp/codex-swarm/run-1/shared",
+    branchName: "main",
+    prompt: "Implement the task",
+    profile: "backend-developer",
+    sandbox: "workspace-write",
+    approvalPolicy: "on-request",
+    includePlanTool: false,
+    metadata: {
+      assignmentKind: "worker"
+    },
+    attempt: 0,
+    maxAttempts: 3,
+    leaseTtlSeconds: 300,
+    createdAt: new Date("2026-03-31T09:00:00.000Z"),
+    updatedAt: new Date("2026-03-31T09:00:00.000Z"),
+    ...overrides
+  };
+}
+
+function createTaskRecord(overrides: Partial<Record<string, unknown>> = {}) {
+  return {
+    id: "task-1",
+    runId: "run-1",
+    parentTaskId: null,
+    title: "Implement verifier pairing",
+    description: "Worker completion should trigger verification.",
+    role: "backend-developer",
+    status: "in_progress",
+    priority: 1,
+    ownerAgentId: "worker-agent-1",
+    verificationStatus: "pending",
+    verifierAgentId: null,
+    latestVerificationSummary: null,
+    latestVerificationFindings: [],
+    latestVerificationChangeRequests: [],
+    latestVerificationEvidence: [],
+    dependencyIds: [],
+    definitionOfDone: ["worker completion advances to awaiting_review"],
+    acceptanceCriteria: ["review gating is explicit"],
+    validationTemplates: [],
+    createdAt: new Date("2026-03-31T09:00:00.000Z"),
+    updatedAt: new Date("2026-03-31T09:00:00.000Z"),
+    ...overrides
+  };
+}
+
+describe("ControlPlaneService verification lifecycle", () => {
+  it("routes worker completion into awaiting_review and queues a verifier assignment", async () => {
+    const workerAssignment = createWorkerAssignment();
+    const taskRecord = createTaskRecord();
+    const db = new FakeVerificationDb(
+      [workerAssignment],
+      [
+        {
+          id: "worker-agent-1",
+          status: "busy",
+          currentTaskId: "task-1"
+        }
+      ],
+      [taskRecord],
+      [
+        {
+          id: "session-worker-1",
+          state: "active",
+          workerNodeId: "node-1",
+          stickyNodeId: "node-1",
+          staleReason: null
+        }
+      ]
+    );
+    const service = new ControlPlaneService(db as never, {
+      now: () => new Date("2026-03-31T09:10:00.000Z")
+    });
+    const createAgent = vi.fn(async (input: Record<string, unknown>) => ({
+      id: "verifier-agent-1",
+      runId: "run-1",
+      name: input.name,
+      role: input.role,
+      profile: input.profile,
+      status: "idle",
+      projectTeamMemberId: input.projectTeamMemberId ?? null,
+      worktreePath: input.worktreePath ?? null,
+      branchName: input.branchName ?? null,
+      currentTaskId: input.currentTaskId ?? null,
+      lastHeartbeatAt: null,
+      observability: {
+        mode: "unavailable",
+        currentSessionId: null,
+        currentSessionState: null,
+        visibleTranscriptSessionId: null,
+        visibleTranscriptSessionState: null,
+        visibleTranscriptUpdatedAt: null,
+        lineageSource: "not_started"
+      },
+      createdAt: new Date("2026-03-31T09:10:00.000Z"),
+      updatedAt: new Date("2026-03-31T09:10:00.000Z")
+    }));
+    const createWorkerDispatchAssignment = vi.fn(async (input: Record<string, unknown>) => ({
+      id: "dispatch-verifier-1",
+      ...input,
+      sessionId: undefined,
+      state: "queued",
+      claimedByNodeId: null,
+      stickyNodeId: null,
+      preferredNodeId: null,
+      attempt: 0,
+      createdAt: new Date("2026-03-31T09:10:00.000Z")
+    }));
+    const recordControlPlaneEvent = vi.fn(async () => undefined);
+
+    (service as any).assertTaskExists = async () => taskRecord;
+    (service as any).getRun = async () => ({
+      id: "run-1",
+      repositoryId: "repo-1",
+      projectTeamId: "team-1",
+      branchName: "main",
+      goal: "Ship verifier pairing",
+      context: {
+        externalInput: null,
+        values: {}
+      },
+      agents: [
+        {
+          id: "worker-agent-1",
+          role: "backend-developer",
+          profile: "backend-developer",
+          projectTeamMemberId: "member-backend-1"
+        }
+      ]
+    });
+    (service as any).assertRepositoryExists = async () => ({
+      id: "repo-1",
+      name: "codex-swarm",
+      defaultBranch: "main"
+    });
+    (service as any).loadRunProjectTeam = async () => ({
+      id: "team-1",
+      members: [
+        {
+          id: "member-reviewer-1",
+          name: "Verifier",
+          role: "reviewer",
+          profile: "reviewer",
+          position: 0
+        },
+        {
+          id: "member-backend-1",
+          name: "Builder",
+          role: "backend-developer",
+          profile: "backend-developer",
+          position: 1
+        }
+      ]
+    });
+    (service as any).createAgent = createAgent;
+    (service as any).createWorkerDispatchAssignment = createWorkerDispatchAssignment;
+    (service as any).recordControlPlaneEvent = recordControlPlaneEvent;
+    (service as any).enqueueRunnableWorkerDispatches = vi.fn(async () => []);
+    (service as any).reconcileRunExecutionState = vi.fn(async () => undefined);
+    (service as any).maybeUnblockDependentTasks = vi.fn(async () => undefined);
+
+    await (service as any).transitionWorkerDispatchFailureOrCompletion(workerAssignment, {
+      nodeId: "node-1",
+      status: "completed",
+      outcome: {
+        kind: "worker",
+        summary: "Implementation is ready for verification.",
+        outcomeStatus: "completed",
+        blockingIssues: []
+      }
+    });
+
+    expect(taskRecord.status).toBe("awaiting_review");
+    expect(taskRecord.verificationStatus).toBe("requested");
+    expect(taskRecord.verifierAgentId).toBe("verifier-agent-1");
+    expect(taskRecord.latestVerificationSummary).toContain("Verification requested");
+    expect(createAgent).toHaveBeenCalledWith(expect.objectContaining({
+      role: "reviewer",
+      projectTeamMemberId: "member-reviewer-1",
+      currentTaskId: "task-1"
+    }), undefined);
+    expect(createWorkerDispatchAssignment).toHaveBeenCalledWith(expect.objectContaining({
+      taskId: "task-1",
+      agentId: "verifier-agent-1",
+      metadata: expect.objectContaining({
+        assignmentKind: "verification",
+        workerAgentId: "worker-agent-1",
+        workerSummary: "Implementation is ready for verification."
+      })
+    }));
+    expect(recordControlPlaneEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ eventType: "task.verification_requested" }),
+      expect.objectContaining({ entityId: "task-1", status: "requested" })
+    );
+  });
+
+  it("falls back to a second same-role verifier when no review role is available", async () => {
+    const workerAssignment = createWorkerAssignment();
+    const taskRecord = createTaskRecord();
+    const db = new FakeVerificationDb(
+      [workerAssignment],
+      [
+        {
+          id: "worker-agent-1",
+          status: "busy",
+          currentTaskId: "task-1"
+        }
+      ],
+      [taskRecord],
+      [
+        {
+          id: "session-worker-1",
+          state: "active",
+          workerNodeId: "node-1",
+          stickyNodeId: "node-1",
+          staleReason: null
+        }
+      ]
+    );
+    const service = new ControlPlaneService(db as never, {
+      now: () => new Date("2026-03-31T09:12:00.000Z")
+    });
+    const createAgent = vi.fn(async (input: Record<string, unknown>) => ({
+      id: "verifier-agent-2",
+      runId: "run-1",
+      name: input.name,
+      role: input.role,
+      profile: input.profile,
+      status: "idle",
+      projectTeamMemberId: input.projectTeamMemberId ?? null,
+      worktreePath: input.worktreePath ?? null,
+      branchName: input.branchName ?? null,
+      currentTaskId: input.currentTaskId ?? null,
+      lastHeartbeatAt: null,
+      observability: {
+        mode: "unavailable",
+        currentSessionId: null,
+        currentSessionState: null,
+        visibleTranscriptSessionId: null,
+        visibleTranscriptSessionState: null,
+        visibleTranscriptUpdatedAt: null,
+        lineageSource: "not_started"
+      },
+      createdAt: new Date("2026-03-31T09:12:00.000Z"),
+      updatedAt: new Date("2026-03-31T09:12:00.000Z")
+    }));
+    const createWorkerDispatchAssignment = vi.fn(async (input: Record<string, unknown>) => ({
+      id: "dispatch-verifier-2",
+      ...input,
+      sessionId: undefined,
+      state: "queued",
+      claimedByNodeId: null,
+      stickyNodeId: null,
+      preferredNodeId: null,
+      attempt: 0,
+      createdAt: new Date("2026-03-31T09:12:00.000Z")
+    }));
+
+    (service as any).assertTaskExists = async () => taskRecord;
+    (service as any).getRun = async () => ({
+      id: "run-1",
+      repositoryId: "repo-1",
+      projectTeamId: "team-1",
+      branchName: "main",
+      goal: "Ship verifier pairing",
+      context: {
+        externalInput: null,
+        values: {}
+      },
+      agents: [
+        {
+          id: "worker-agent-1",
+          role: "backend-developer",
+          profile: "backend-developer",
+          projectTeamMemberId: "member-backend-1"
+        }
+      ]
+    });
+    (service as any).assertRepositoryExists = async () => ({
+      id: "repo-1",
+      name: "codex-swarm",
+      defaultBranch: "main"
+    });
+    (service as any).loadRunProjectTeam = async () => ({
+      id: "team-1",
+      members: [
+        {
+          id: "member-backend-1",
+          name: "Builder One",
+          role: "backend-developer",
+          profile: "backend-developer",
+          position: 0
+        },
+        {
+          id: "member-backend-2",
+          name: "Builder Two",
+          role: "backend-developer",
+          profile: "backend-developer",
+          position: 1
+        }
+      ]
+    });
+    (service as any).createAgent = createAgent;
+    (service as any).createWorkerDispatchAssignment = createWorkerDispatchAssignment;
+    (service as any).recordControlPlaneEvent = vi.fn(async () => undefined);
+    (service as any).enqueueRunnableWorkerDispatches = vi.fn(async () => []);
+    (service as any).reconcileRunExecutionState = vi.fn(async () => undefined);
+    (service as any).maybeUnblockDependentTasks = vi.fn(async () => undefined);
+
+    await (service as any).transitionWorkerDispatchFailureOrCompletion(workerAssignment, {
+      nodeId: "node-1",
+      status: "completed",
+      outcome: {
+        kind: "worker",
+        summary: "Implementation is ready for verification.",
+        outcomeStatus: "completed",
+        blockingIssues: []
+      }
+    });
+
+    expect(createAgent).toHaveBeenCalledWith(expect.objectContaining({
+      role: "backend-developer",
+      profile: "backend-developer",
+      projectTeamMemberId: "member-backend-2",
+      currentTaskId: "task-1"
+    }), undefined);
+    expect(createWorkerDispatchAssignment).toHaveBeenCalledWith(expect.objectContaining({
+      agentId: "verifier-agent-2",
+      metadata: expect.objectContaining({
+        assignmentKind: "verification",
+        workerAgentId: "worker-agent-1"
+      })
+    }));
+    expect(taskRecord.verifierAgentId).toBe("verifier-agent-2");
+  });
+
+  it("marks verifier failures on the task without creating follow-up work directly", async () => {
+    const verifierAssignment = createWorkerAssignment({
+      id: "dispatch-verifier-1",
+      agentId: "verifier-agent-1",
+      sessionId: "session-verifier-1",
+      metadata: {
+        assignmentKind: "verification",
+        workerAgentId: "worker-agent-1",
+        workerSummary: "Implementation is ready for verification."
+      }
+    });
+    const taskRecord = createTaskRecord({
+      status: "awaiting_review",
+      ownerAgentId: "verifier-agent-1",
+      verificationStatus: "in_progress",
+      verifierAgentId: "verifier-agent-1"
+    });
+    const db = new FakeVerificationDb(
+      [verifierAssignment],
+      [
+        {
+          id: "verifier-agent-1",
+          status: "busy",
+          currentTaskId: "task-1"
+        }
+      ],
+      [taskRecord],
+      [
+        {
+          id: "session-verifier-1",
+          state: "active",
+          workerNodeId: "node-1",
+          stickyNodeId: "node-1",
+          staleReason: null
+        }
+      ]
+    );
+    const service = new ControlPlaneService(db as never, {
+      now: () => new Date("2026-03-31T09:20:00.000Z")
+    });
+    const maybeUnblockDependentTasks = vi.fn(async () => undefined);
+    const recordControlPlaneEvent = vi.fn(async () => undefined);
+
+    (service as any).assertTaskExists = async () => taskRecord;
+    (service as any).recordControlPlaneEvent = recordControlPlaneEvent;
+    (service as any).maybeUnblockDependentTasks = maybeUnblockDependentTasks;
+    (service as any).enqueueRunnableWorkerDispatches = vi.fn(async () => []);
+    (service as any).reconcileRunExecutionState = vi.fn(async () => undefined);
+    (service as any).createTask = vi.fn(async () => {
+      throw new Error("verifier must not create tasks directly");
+    });
+
+    await (service as any).transitionWorkerDispatchFailureOrCompletion(verifierAssignment, {
+      nodeId: "node-1",
+      status: "completed",
+      outcome: {
+        kind: "verification",
+        summary: "Definition of done is not satisfied.",
+        outcomeStatus: "failed",
+        findings: ["Worker completion still closes the task immediately."],
+        changeRequests: ["Route worker completion into awaiting_review and queue a verifier assignment."],
+        evidence: ["artifact:.swarm/reports/verification.md"]
+      }
+    });
+
+    expect(taskRecord.status).toBe("awaiting_review");
+    expect(taskRecord.verificationStatus).toBe("failed");
+    expect(taskRecord.latestVerificationSummary).toBe("Definition of done is not satisfied.");
+    expect(taskRecord.latestVerificationFindings).toEqual([
+      "Worker completion still closes the task immediately."
+    ]);
+    expect(taskRecord.latestVerificationChangeRequests).toEqual([
+      "Route worker completion into awaiting_review and queue a verifier assignment."
+    ]);
+    expect(maybeUnblockDependentTasks).not.toHaveBeenCalled();
+    expect(recordControlPlaneEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ eventType: "task.verification_failed" }),
+      expect.objectContaining({
+        entityId: "task-1",
+        status: "failed",
+        metadata: expect.objectContaining({
+          changeRequests: ["Route worker completion into awaiting_review and queue a verifier assignment."]
+        })
+      })
+    );
+  });
+
+  it("marks verifier passes as completed and unblocks downstream work", async () => {
+    const verifierAssignment = createWorkerAssignment({
+      id: "dispatch-verifier-1",
+      agentId: "verifier-agent-1",
+      sessionId: "session-verifier-1",
+      metadata: {
+        assignmentKind: "verification",
+        workerAgentId: "worker-agent-1",
+        workerSummary: "Implementation is ready for verification."
+      }
+    });
+    const taskRecord = createTaskRecord({
+      status: "awaiting_review",
+      ownerAgentId: "verifier-agent-1",
+      verificationStatus: "in_progress",
+      verifierAgentId: "verifier-agent-1"
+    });
+    const db = new FakeVerificationDb(
+      [verifierAssignment],
+      [
+        {
+          id: "verifier-agent-1",
+          status: "busy",
+          currentTaskId: "task-1"
+        }
+      ],
+      [taskRecord],
+      [
+        {
+          id: "session-verifier-1",
+          state: "active",
+          workerNodeId: "node-1",
+          stickyNodeId: "node-1",
+          staleReason: null
+        }
+      ]
+    );
+    const service = new ControlPlaneService(db as never, {
+      now: () => new Date("2026-03-31T09:30:00.000Z")
+    });
+    const maybeUnblockDependentTasks = vi.fn(async () => undefined);
+    const recordControlPlaneEvent = vi.fn(async () => undefined);
+
+    (service as any).assertTaskExists = async () => taskRecord;
+    (service as any).recordControlPlaneEvent = recordControlPlaneEvent;
+    (service as any).maybeUnblockDependentTasks = maybeUnblockDependentTasks;
+    (service as any).enqueueRunnableWorkerDispatches = vi.fn(async () => []);
+    (service as any).reconcileRunExecutionState = vi.fn(async () => undefined);
+
+    await (service as any).transitionWorkerDispatchFailureOrCompletion(verifierAssignment, {
+      nodeId: "node-1",
+      status: "completed",
+      outcome: {
+        kind: "verification",
+        summary: "Definition of done is satisfied.",
+        outcomeStatus: "passed",
+        findings: [],
+        changeRequests: [],
+        evidence: ["validation:typecheck=passed"]
+      }
+    });
+
+    expect(taskRecord.status).toBe("completed");
+    expect(taskRecord.verificationStatus).toBe("passed");
+    expect(taskRecord.latestVerificationSummary).toBe("Definition of done is satisfied.");
+    expect(maybeUnblockDependentTasks).toHaveBeenCalledWith("run-1", "task-1", "completed");
+    expect(recordControlPlaneEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ eventType: "task.verification_passed" }),
+      expect.objectContaining({ entityId: "task-1", status: "passed" })
+    );
+  });
+
+  it("keeps runs in progress while work awaits review and avoids duplicate queueing for the review-gated task", async () => {
+    const runDetail = {
+      id: "run-1",
+      repositoryId: "repo-1",
+      workspaceId: "workspace-1",
+      teamId: "team-1",
+      projectId: null,
+      projectTeamId: null,
+      projectTeamName: null,
+      goal: "Ship verifier pairing",
+      status: "in_progress",
+      branchName: "main",
+      planArtifactPath: null,
+      budgetTokens: null,
+      budgetCostUsd: null,
+      concurrencyCap: 2,
+      policyProfile: "standard",
+      publishedBranch: null,
+      branchPublishedAt: null,
+      branchPublishApprovalId: null,
+      pullRequestUrl: null,
+      pullRequestNumber: null,
+      pullRequestStatus: null,
+      pullRequestApprovalId: null,
+      handoffStatus: "pending",
+      handoff: {
+        mode: "manual",
+        provider: null,
+        baseBranch: null,
+        autoPublishBranch: false,
+        autoCreatePullRequest: false,
+        titleTemplate: null,
+        bodyTemplate: null
+      },
+      handoffExecution: {
+        state: "idle",
+        failureReason: null,
+        attemptedAt: null,
+        completedAt: null
+      },
+      metadata: {},
+      context: {
+        kind: "ad_hoc",
+        projectId: null,
+        projectSlug: null,
+        projectName: null,
+        projectDescription: null,
+        jobId: null,
+        jobName: null,
+        externalInput: null,
+        values: {}
+      },
+      completedAt: null,
+      createdBy: "leader",
+      createdAt: new Date("2026-03-31T09:00:00.000Z"),
+      updatedAt: new Date("2026-03-31T09:00:00.000Z"),
+      tasks: [
+        {
+          ...createTaskRecord({
+            id: "task-review",
+            status: "awaiting_review",
+            verificationStatus: "requested",
+            verifierAgentId: "verifier-agent-1"
+          })
+        },
+        {
+          ...createTaskRecord({
+            id: "task-next",
+            title: "Ship the next pending slice",
+            status: "pending",
+            verificationStatus: "pending",
+            verifierAgentId: null,
+            ownerAgentId: null
+          })
+        }
+      ],
+      agents: [],
+      sessions: [],
+      taskDag: {
+        nodes: [],
+        edges: [],
+        rootTaskIds: [],
+        blockedTaskIds: [],
+        unblockPaths: []
+      }
+    };
+    const agentStore: Array<Record<string, unknown>> = [];
+    const db = new FakeVerificationSchedulingDb(
+      [runDetail],
+      [
+        createWorkerAssignment({
+          id: "dispatch-verifier-1",
+          taskId: "task-review",
+          agentId: "verifier-agent-1",
+          state: "queued",
+          metadata: {
+            assignmentKind: "verification",
+            workerAgentId: "worker-agent-1",
+            workerSummary: "Implementation is ready for verification."
+          }
+        })
+      ],
+      agentStore
+    );
+    const service = new ControlPlaneService(db as never, {
+      now: () => new Date("2026-03-31T09:40:00.000Z")
+    });
+    const createWorkerDispatchAssignment = vi.fn(async (input: Record<string, unknown>) => ({
+      id: "dispatch-worker-2",
+      ...input,
+      state: "queued",
+      claimedByNodeId: null,
+      stickyNodeId: null,
+      preferredNodeId: null,
+      attempt: 0,
+      createdAt: new Date("2026-03-31T09:40:00.000Z"),
+      updatedAt: new Date("2026-03-31T09:40:00.000Z")
+    }));
+
+    (service as any).getRun = async () => runDetail;
+    (service as any).assertRepositoryExists = async () => ({
+      id: "repo-1",
+      name: "codex-swarm",
+      defaultBranch: "main",
+      projectId: null
+    });
+    (service as any).loadRunProjectTeam = async () => null;
+    (service as any).createAgent = vi.fn(async (input: Record<string, unknown>) => {
+      const agent = {
+        id: "worker-agent-2",
+        runId: "run-1",
+        name: input.name,
+        role: input.role,
+        profile: input.profile,
+        status: "idle",
+        projectTeamMemberId: input.projectTeamMemberId ?? null,
+        worktreePath: null,
+        branchName: input.branchName ?? null,
+        currentTaskId: input.currentTaskId ?? null,
+        createdAt: new Date("2026-03-31T09:40:00.000Z"),
+        updatedAt: new Date("2026-03-31T09:40:00.000Z")
+      };
+
+      agentStore.push(agent);
+      return agent;
+    });
+    (service as any).createWorkerDispatchAssignment = createWorkerDispatchAssignment;
+    (service as any).createMessage = vi.fn(async () => undefined);
+    (service as any).maybeExecuteAutoHandoff = vi.fn(async () => undefined);
+
+    await (service as any).enqueueRunnableWorkerDispatches("run-1");
+
+    expect(createWorkerDispatchAssignment).toHaveBeenCalledTimes(1);
+    expect(createWorkerDispatchAssignment).toHaveBeenCalledWith(expect.objectContaining({
+      taskId: "task-next",
+      metadata: expect.objectContaining({
+        assignmentKind: "worker"
+      })
+    }));
+    expect(createWorkerDispatchAssignment).not.toHaveBeenCalledWith(expect.objectContaining({
+      taskId: "task-review"
+    }));
+
+    await service.reconcileRunExecutionState("run-1");
+    expect(runDetail.status).toBe("in_progress");
+    expect(runDetail.completedAt).toBeNull();
+
+    runDetail.tasks[0]!.status = "completed";
+    runDetail.tasks[0]!.verificationStatus = "passed";
+    runDetail.tasks[1]!.status = "completed";
+    runDetail.tasks[1]!.verificationStatus = "not_required";
+    db.assignmentStore[0]!.state = "completed";
+
+    await service.reconcileRunExecutionState("run-1");
+
+    expect(runDetail.status).toBe("completed");
+    expect(runDetail.completedAt).toEqual(new Date("2026-03-31T09:40:00.000Z"));
+  });
+});

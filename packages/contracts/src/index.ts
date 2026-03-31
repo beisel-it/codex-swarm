@@ -2,6 +2,7 @@ import { z } from "zod";
 
 export const runStatuses = ["pending", "planning", "in_progress", "awaiting_approval", "completed", "failed", "cancelled"] as const;
 export const taskStatuses = ["pending", "blocked", "in_progress", "awaiting_review", "completed", "failed", "cancelled"] as const;
+export const taskVerificationStatuses = ["not_required", "pending", "requested", "in_progress", "passed", "failed", "blocked"] as const;
 export const agentStatuses = ["provisioning", "idle", "busy", "paused", "stopped", "failed"] as const;
 export const approvalStatuses = ["pending", "approved", "rejected"] as const;
 export const approvalKinds = ["plan", "patch", "merge", "network", "policy_exception"] as const;
@@ -50,6 +51,10 @@ export const controlPlaneEventTypes = [
   "run.status_updated",
   "task.created",
   "task.status_updated",
+  "task.verification_requested",
+  "task.verification_passed",
+  "task.verification_failed",
+  "task.verification_blocked",
   "task.unblocked",
   "validation.created",
   "worker_dispatch_assignment.claimed",
@@ -83,21 +88,101 @@ export const validationTemplateSchema = z.object({
   artifactPath: z.string().min(1).optional()
 });
 
-export const agentTeamTemplateMemberSchema = z.object({
+export const agentTeamBlueprintMemberSchema = z.object({
   key: z.string().min(1),
   displayName: z.string().min(1),
   roleProfile: z.string().min(1),
   responsibility: z.string().min(1)
 });
 
-export const agentTeamTemplateSchema = z.object({
+export const agentTeamTemplateMemberSchema = agentTeamBlueprintMemberSchema;
+
+export const agentTeamBlueprintSchema = z.object({
   id: z.string().min(1),
   name: z.string().min(1),
   summary: z.string().min(1),
-  focus: z.enum(["delivery", "platform"]),
+  focus: z.enum(["delivery", "platform", "studio"]),
   suggestedGoal: z.string().min(1),
   suggestedConcurrencyCap: z.number().int().positive(),
-  members: z.array(agentTeamTemplateMemberSchema).min(1)
+  members: z.array(agentTeamBlueprintMemberSchema).min(1)
+});
+
+export const agentTeamTemplateSchema = agentTeamBlueprintSchema;
+
+export const projectTeamMemberCreateSchema = z.object({
+  name: z.string().min(1),
+  role: z.string().min(1),
+  profile: z.string().min(1),
+  responsibility: z.string().min(1).nullable().default(null)
+});
+
+export const projectTeamCreateSchema = z.object({
+  projectId: z.uuid(),
+  name: z.string().min(1),
+  description: z.string().min(1).nullable().default(null),
+  concurrencyCap: z.number().int().positive().default(1),
+  members: z.array(projectTeamMemberCreateSchema).min(1)
+});
+
+export const projectTeamImportSchema = z.object({
+  projectId: z.uuid(),
+  blueprintId: z.string().min(1).optional(),
+  templateId: z.string().min(1).optional(),
+  name: z.string().min(1).nullable().default(null),
+  description: z.string().min(1).nullable().default(null)
+}).superRefine((value, ctx) => {
+  if (!value.blueprintId && !value.templateId) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["blueprintId"],
+      message: "blueprintId is required"
+    });
+  }
+
+  if (value.blueprintId && value.templateId && value.blueprintId !== value.templateId) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["templateId"],
+      message: "templateId must match blueprintId when both are provided"
+    });
+  }
+});
+
+export const projectTeamUpdateSchema = z.object({
+  name: z.string().min(1).optional(),
+  description: z.string().min(1).nullable().optional(),
+  concurrencyCap: z.number().int().positive().optional(),
+  members: z.array(projectTeamMemberCreateSchema).min(1).optional()
+}).refine((value) => Object.keys(value).length > 0, {
+  message: "at least one project team field must be updated"
+});
+
+export const projectTeamMemberSchema = projectTeamMemberCreateSchema.extend({
+  id: z.uuid(),
+  projectTeamId: z.uuid(),
+  key: z.string().min(1),
+  position: z.number().int().nonnegative(),
+  createdAt: z.date(),
+  updatedAt: z.date()
+});
+
+export const projectTeamSchema = z.object({
+  id: z.uuid(),
+  workspaceId: z.string().min(1),
+  teamId: z.string().min(1),
+  projectId: z.uuid(),
+  name: z.string().min(1),
+  description: z.string().min(1).nullable().default(null),
+  concurrencyCap: z.number().int().positive(),
+  sourceBlueprintId: z.string().min(1).nullable().default(null),
+  sourceTemplateId: z.string().min(1).nullable().default(null),
+  createdAt: z.date(),
+  updatedAt: z.date()
+});
+
+export const projectTeamDetailSchema = projectTeamSchema.extend({
+  members: z.array(projectTeamMemberSchema),
+  memberCount: z.number().int().nonnegative().default(0)
 });
 
 export const repositoryCreateSchema = z.object({
@@ -412,6 +497,7 @@ export const repeatableRunExecutionSchema = z.object({
 
 export const repeatableRunDefinitionCreateSchema = z.object({
   repositoryId: z.uuid(),
+  projectTeamId: z.uuid(),
   name: z.string().min(1),
   description: z.string().min(1).nullable().default(null),
   status: z.enum(repeatableRunStatuses).default("active"),
@@ -419,9 +505,11 @@ export const repeatableRunDefinitionCreateSchema = z.object({
 });
 
 export const repeatableRunDefinitionSchema = repeatableRunDefinitionCreateSchema.extend({
+  projectTeamId: z.uuid().nullable().default(null),
   id: z.uuid(),
   workspaceId: z.string().min(1),
   teamId: z.string().min(1),
+  projectTeamName: z.string().min(1).nullable().default(null),
   createdAt: z.date(),
   updatedAt: z.date()
 });
@@ -429,6 +517,7 @@ export const repeatableRunDefinitionSchema = repeatableRunDefinitionCreateSchema
 export const runCreateSchema = z.object({
   repositoryId: z.uuid(),
   projectId: z.uuid().nullable().optional(),
+  projectTeamId: z.uuid().nullable().optional(),
   goal: z.string().min(1),
   branchName: z.string().min(1).optional(),
   planArtifactPath: z.string().min(1).optional(),
@@ -457,10 +546,30 @@ export const runCreateSchema = z.object({
     values: {}
   }),
   metadata: z.record(z.string(), z.unknown()).default({})
+}).superRefine((value, ctx) => {
+  const projectId = value.projectId ?? null;
+  const projectTeamId = value.projectTeamId ?? null;
+
+  if (projectId && !projectTeamId) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["projectTeamId"],
+      message: "project runs require projectTeamId"
+    });
+  }
+
+  if (!projectId && projectTeamId) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["projectTeamId"],
+      message: "ad-hoc runs cannot set projectTeamId"
+    });
+  }
 });
 
 export const runUpdateSchema = z.object({
   projectId: z.uuid().nullable().optional(),
+  projectTeamId: z.uuid().nullable().optional(),
   goal: z.string().min(1).optional(),
   branchName: z.string().min(1).nullable().optional(),
   budgetTokens: z.number().int().positive().nullable().optional(),
@@ -506,19 +615,40 @@ export const taskCreateSchema = z.object({
   priority: z.number().int().min(1).max(5).default(3),
   ownerAgentId: z.uuid().optional(),
   dependencyIds: z.array(z.uuid()).default([]),
+  definitionOfDone: z.array(z.string().min(1)).default([]),
   acceptanceCriteria: z.array(z.string().min(1)).default([]),
   validationTemplates: z.array(validationTemplateSchema).default([])
 });
 
+export const workerDispatchCompletionOutcomeSchema = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("worker"),
+    summary: z.string().min(1),
+    outcomeStatus: z.enum(["completed", "needs_slicing", "blocked"]),
+    blockingIssues: z.array(z.string().min(1)).default([])
+  }),
+  z.object({
+    kind: z.literal("verification"),
+    summary: z.string().min(1),
+    outcomeStatus: z.enum(["passed", "failed", "blocked"]),
+    findings: z.array(z.string().min(1)).default([]),
+    changeRequests: z.array(z.string().min(1)).default([]),
+    evidence: z.array(z.string().min(1)).default([])
+  })
+]);
+
 export const taskStatusUpdateSchema = z.object({
   status: z.enum(taskStatuses),
-  ownerAgentId: z.uuid().optional()
+  ownerAgentId: z.uuid().optional(),
+  dependencyIds: z.array(z.uuid()).optional()
 });
 
 export const agentCreateSchema = z.object({
   runId: z.uuid(),
   name: z.string().min(1),
   role: z.string().min(1),
+  profile: z.string().min(1).optional(),
+  projectTeamMemberId: z.uuid().optional(),
   status: z.enum(agentStatuses).default("provisioning"),
   worktreePath: z.string().min(1).optional(),
   branchName: z.string().min(1).optional(),
@@ -588,11 +718,14 @@ export const runJobScopeSchema = z.object({
   ])
 });
 
-export const runSchema = runCreateSchema.extend({
+export const runSchema = z.object({
+  ...runCreateSchema.shape,
   id: z.uuid(),
   workspaceId: z.string().min(1),
   teamId: z.string().min(1),
   projectId: z.uuid().nullable().optional(),
+  projectTeamId: z.uuid().nullable().default(null),
+  projectTeamName: z.string().min(1).nullable().default(null),
   status: z.enum(runStatuses),
   branchName: z.string().min(1).nullable(),
   planArtifactPath: z.string().min(1).nullable(),
@@ -626,6 +759,12 @@ export const runsByJobScopeSchema = z.object({
 export const taskSchema = taskCreateSchema.extend({
   id: z.uuid(),
   status: z.enum(taskStatuses),
+  verificationStatus: z.enum(taskVerificationStatuses).default("not_required"),
+  verifierAgentId: z.uuid().nullable().default(null),
+  latestVerificationSummary: z.string().min(1).nullable().default(null),
+  latestVerificationFindings: z.array(z.string().min(1)).default([]),
+  latestVerificationChangeRequests: z.array(z.string().min(1)).default([]),
+  latestVerificationEvidence: z.array(z.string().min(1)).default([]),
   parentTaskId: z.uuid().nullable(),
   ownerAgentId: z.uuid().nullable(),
   createdAt: z.date(),
@@ -705,6 +844,8 @@ export const agentObservabilitySchema = z.object({
 
 export const agentSchema = agentCreateSchema.omit({ session: true }).extend({
   id: z.uuid(),
+  profile: z.string().min(1).default("default"),
+  projectTeamMemberId: z.uuid().nullable().default(null),
   worktreePath: z.string().min(1).nullable(),
   branchName: z.string().min(1).nullable(),
   currentTaskId: z.uuid().nullable(),
@@ -1155,43 +1296,47 @@ export const projectRepositoryAssignmentSchema = z.object({
 export const projectRunAssignmentSchema = z.object({
   projectId: z.uuid(),
   runId: z.uuid(),
-  run: runSchema.pick({
-    id: true,
-    repositoryId: true,
-    workspaceId: true,
-    teamId: true,
-    projectId: true,
-    goal: true,
-    status: true,
-    branchName: true,
-    planArtifactPath: true,
-    budgetTokens: true,
-    budgetCostUsd: true,
-    concurrencyCap: true,
-    policyProfile: true,
-    publishedBranch: true,
-    branchPublishedAt: true,
-    branchPublishApprovalId: true,
-    pullRequestUrl: true,
-    pullRequestNumber: true,
-    pullRequestStatus: true,
-    pullRequestApprovalId: true,
-    handoffStatus: true,
-    completedAt: true,
-    metadata: true,
-    createdBy: true,
-    createdAt: true,
-    updatedAt: true
+  run: z.object({
+    id: z.uuid(),
+    repositoryId: z.uuid(),
+    workspaceId: z.string().min(1),
+    teamId: z.string().min(1),
+    projectId: z.uuid().nullable().default(null),
+    projectTeamId: z.uuid().nullable().default(null),
+    projectTeamName: z.string().min(1).nullable().default(null),
+    goal: z.string().min(1),
+    status: z.enum(runStatuses),
+    branchName: z.string().min(1).nullable().default(null),
+    planArtifactPath: z.string().min(1).nullable().default(null),
+    budgetTokens: z.number().int().positive().nullable().default(null),
+    budgetCostUsd: z.number().nonnegative().nullable().default(null),
+    concurrencyCap: z.number().int().positive(),
+    policyProfile: z.string().min(1).nullable().default(null),
+    publishedBranch: z.string().min(1).nullable().default(null),
+    branchPublishedAt: z.date().nullable().default(null),
+    branchPublishApprovalId: z.uuid().nullable().default(null),
+    pullRequestUrl: z.string().url().nullable().default(null),
+    pullRequestNumber: z.number().int().positive().nullable().default(null),
+    pullRequestStatus: z.enum(pullRequestStatuses).nullable().default(null),
+    pullRequestApprovalId: z.uuid().nullable().default(null),
+    handoffStatus: z.enum(handoffStatuses),
+    completedAt: z.date().nullable().default(null),
+    metadata: z.record(z.string(), z.unknown()).default({}),
+    createdBy: z.string().min(1),
+    createdAt: z.date(),
+    updatedAt: z.date()
   })
 });
 
 export const projectSummarySchema = projectSchema.extend({
+  teamCount: z.number().int().nonnegative().default(0),
   repositoryCount: z.number().int().nonnegative(),
   runCount: z.number().int().nonnegative(),
   latestRunAt: z.date().nullable().default(null)
 });
 
 export const projectDetailSchema = projectSummarySchema.extend({
+  projectTeams: z.array(projectTeamDetailSchema).default([]),
   repositoryAssignments: z.array(projectRepositoryAssignmentSchema),
   runAssignments: z.array(projectRunAssignmentSchema)
 });
@@ -1256,7 +1401,8 @@ export const workerDispatchListQuerySchema = z.object({
 export const workerDispatchCompleteSchema = z.object({
   nodeId: z.uuid(),
   status: z.enum(["completed", "failed"]),
-  reason: z.string().min(1).optional()
+  reason: z.string().min(1).optional(),
+  outcome: workerDispatchCompletionOutcomeSchema.optional()
 });
 
 export const workerNodeReconcileSchema = z.object({
@@ -1432,7 +1578,7 @@ export const secretAccessPlanSchema = z.object({
 
 export const identityEntrypointSchema = identityContextSchema;
 
-export const runDetailSchema = runSchema.extend({
+export const runDetailSchema = runSchema.safeExtend({
   tasks: z.array(taskSchema),
   agents: z.array(agentSchema),
   sessions: z.array(sessionSchema),
@@ -1565,6 +1711,13 @@ export type RepositoryCreateInput = z.infer<typeof repositoryCreateSchema>;
 export type RepositoryUpdateInput = z.infer<typeof repositoryUpdateSchema>;
 export type ProjectCreateInput = z.infer<typeof projectCreateSchema>;
 export type ProjectUpdateInput = z.infer<typeof projectUpdateSchema>;
+export type ProjectTeamCreateInput = z.infer<typeof projectTeamCreateSchema>;
+export type ProjectTeamImportInput = z.infer<typeof projectTeamImportSchema>;
+export type ProjectTeamUpdateInput = z.infer<typeof projectTeamUpdateSchema>;
+export type ProjectTeamMemberCreateInput = z.infer<typeof projectTeamMemberCreateSchema>;
+export type ProjectTeamMember = z.infer<typeof projectTeamMemberSchema>;
+export type ProjectTeam = z.infer<typeof projectTeamSchema>;
+export type ProjectTeamDetail = z.infer<typeof projectTeamDetailSchema>;
 export type RepeatableRunDefinitionCreateInput = z.infer<typeof repeatableRunDefinitionCreateSchema>;
 export type RepeatableRunDefinition = z.infer<typeof repeatableRunDefinitionSchema>;
 export type RepeatableRunTriggerCreateInput = z.infer<typeof repeatableRunTriggerCreateSchema>;
@@ -1584,8 +1737,10 @@ export type RunCreateInput = z.input<typeof runCreateSchema>;
 export type RunUpdateInput = z.input<typeof runUpdateSchema>;
 export type RunStatusUpdateInput = z.infer<typeof runStatusUpdateSchema>;
 export type RunBudgetCheckpointInput = z.infer<typeof runBudgetCheckpointSchema>;
-export type AgentTeamTemplateMember = z.infer<typeof agentTeamTemplateMemberSchema>;
-export type AgentTeamTemplate = z.infer<typeof agentTeamTemplateSchema>;
+export type AgentTeamBlueprintMember = z.infer<typeof agentTeamBlueprintMemberSchema>;
+export type AgentTeamBlueprint = z.infer<typeof agentTeamBlueprintSchema>;
+export type AgentTeamTemplateMember = AgentTeamBlueprintMember;
+export type AgentTeamTemplate = AgentTeamBlueprint;
 export type TaskCreateInput = z.infer<typeof taskCreateSchema>;
 export type TaskStatusUpdateInput = z.infer<typeof taskStatusUpdateSchema>;
 export type AgentCreateInput = z.infer<typeof agentCreateSchema>;
@@ -1603,6 +1758,7 @@ export type Workspace = z.infer<typeof workspaceSchema>;
 export type Team = z.infer<typeof teamSchema>;
 export type IdentityContext = z.infer<typeof identityContextSchema>;
 export type Task = z.infer<typeof taskSchema>;
+export type TaskVerificationStatus = typeof taskVerificationStatuses[number];
 export type TaskDagNode = z.infer<typeof taskDagNodeSchema>;
 export type TaskDagEdge = z.infer<typeof taskDagEdgeSchema>;
 export type TaskDagUnblockPath = z.infer<typeof taskDagUnblockPathSchema>;
@@ -1654,6 +1810,7 @@ export type WorkerDispatchAssignment = z.infer<typeof workerDispatchAssignmentSc
 export type WorkerDispatchCreateInput = z.infer<typeof workerDispatchCreateSchema>;
 export type WorkerDispatchListQuery = z.infer<typeof workerDispatchListQuerySchema>;
 export type WorkerDispatchCompleteInput = z.infer<typeof workerDispatchCompleteSchema>;
+export type WorkerDispatchCompletionOutcome = z.infer<typeof workerDispatchCompletionOutcomeSchema>;
 export type CodexMcpTransport = z.infer<typeof codexMcpTransportSchema>;
 export type WorkerNodeRuntime = z.infer<typeof workerNodeRuntimeSchema>;
 export type WorkerRuntimeDependencyCheck = z.infer<typeof workerRuntimeDependencyCheckSchema>;

@@ -19,6 +19,13 @@ import {
   type ProjectRepositoryAssignment,
   type ProjectRunAssignment,
   type ProjectSummary,
+  type ProjectTeam,
+  type ProjectTeamCreateInput,
+  type ProjectTeamDetail,
+  type ProjectTeamImportInput,
+  type ProjectTeamMember,
+  type ProjectTeamMemberCreateInput,
+  type ProjectTeamUpdateInput,
   type ProjectUpdateInput,
   type Run,
   type RunAuditExport,
@@ -53,6 +60,7 @@ import {
   type SecretAccessPlan,
   type WorkerDispatchAssignment,
   type WorkerDispatchCompleteInput,
+  type WorkerDispatchCompletionOutcome,
   type WorkerDispatchCreateInput,
   type WorkerDispatchListQuery,
   type WorkerNodeReconcileInput,
@@ -66,6 +74,7 @@ import {
   type TaskDagGraph,
   type TaskCreateInput,
   type TaskStatusUpdateInput,
+  type TaskVerificationStatus,
   type ValidationCreateInput,
   type ValidationHistoryEntry,
   type WorkerNode,
@@ -77,7 +86,8 @@ import {
   repeatableRunTriggerSchema,
   runContextSchema,
   runHandoffConfigSchema,
-  runHandoffExecutionSchema
+  runHandoffExecutionSchema,
+  projectTeamDetailSchema
 } from "@codex-swarm/contracts";
 import { formatRunExecutionContext, resolveInitialTaskStatus } from "@codex-swarm/orchestration";
 import {
@@ -95,6 +105,8 @@ import {
   controlPlaneEvents,
   externalEventReceipts,
   messages,
+  projectTeamMembers,
+  projectTeams,
   repeatableRunDefinitions,
   repeatableRunTriggers,
   projects,
@@ -109,6 +121,7 @@ import {
   workspaces
 } from "../db/schema.js";
 import type { Clock } from "../lib/clock.js";
+import { agentTeamBlueprints } from "../lib/team-templates.js";
 import { HttpError } from "../lib/http-error.js";
 import type { ProviderHandoffAdapter } from "../lib/provider-handoff.js";
 import { inspectRepositoryProvider } from "../lib/repository-provider.js";
@@ -124,6 +137,7 @@ import type {
   validationsListQuerySchema
 } from "../http/schemas.js";
 import { z } from "zod";
+import { controlPlaneEvents as controlPlaneEventDefinitions } from "../lib/control-plane-events.js";
 
 type RepositoryCreate = RepositoryCreateInput;
 type RepositoryUpdate = RepositoryUpdateInput;
@@ -133,6 +147,9 @@ type RepeatableRunTriggerCreate = RepeatableRunTriggerCreateInput;
 type RepeatableRunTriggerUpdate = z.infer<typeof repeatableRunTriggerUpdateSchema>;
 type ProjectCreate = ProjectCreateInput;
 type ProjectUpdate = ProjectUpdateInput;
+type ProjectTeamCreate = ProjectTeamCreateInput;
+type ProjectTeamImport = ProjectTeamImportInput;
+type ProjectTeamUpdate = ProjectTeamUpdateInput;
 type RunCreate = RunCreateInput;
 type RunUpdate = RunUpdateInput;
 type RunStatusUpdate = RunStatusUpdateInput;
@@ -170,6 +187,8 @@ type OwnershipBoundary = {
 };
 type TeamRecord = typeof teams.$inferSelect;
 type ProjectRecord = typeof projects.$inferSelect;
+type ProjectTeamRecord = typeof projectTeams.$inferSelect;
+type ProjectTeamMemberRecord = typeof projectTeamMembers.$inferSelect;
 type AgentRecord = typeof agents.$inferSelect;
 type SessionRecord = typeof sessions.$inferSelect;
 type RepeatableRunDefinitionRecord = typeof repeatableRunDefinitions.$inferSelect;
@@ -210,6 +229,20 @@ export interface IngestWebhookResult {
 }
 
 const activeAgentStatuses = new Set<Agent["status"]>(["provisioning", "idle", "busy", "paused"]);
+const preferredReviewerRoles = ["reviewer"];
+
+function normalizeAssignmentKind(metadata: Record<string, unknown> | null | undefined) {
+  const kind = metadata?.assignmentKind;
+  return kind === "verification" ? "verification" : "worker";
+}
+
+function normalizeReviewLikeRole(role: string) {
+  return role.trim().toLowerCase().includes("review");
+}
+
+function taskRequiresVerification(task: Pick<Task, "definitionOfDone">) {
+  return task.definitionOfDone.length > 0;
+}
 
 function readSessionTranscript(metadata: Record<string, unknown> | null | undefined) {
   const transcript = metadata?.transcript;
@@ -264,6 +297,23 @@ function normalizeLegacyEventActor<T>(value: T): T {
       roles
     }
   } as T;
+}
+
+function slugifyProjectTeamMemberKey(value: string) {
+  const normalized = value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+
+  return normalized || "member";
+}
+
+function resolveRuntimeRole(profile: string, explicitRole?: string | null) {
+  if (explicitRole && explicitRole.trim().length > 0) {
+    return explicitRole.trim();
+  }
+
+  return profile === "leader" ? "tech-lead" : profile;
 }
 
 function assertAccessBoundary(access: AccessBoundary | undefined): asserts access is AccessBoundary & {
@@ -944,7 +994,7 @@ export class ControlPlaneService {
 
   async listProjects(access?: AccessBoundary): Promise<ProjectSummary[]> {
     const boundary = requireAccessBoundary(access);
-    const [projectRows, repositoryRows, runRows] = await Promise.all([
+    const [projectRows, repositoryRows, runRows, projectTeamRows] = await Promise.all([
       this.db
         .select()
         .from(projects)
@@ -968,15 +1018,23 @@ export class ControlPlaneService {
           eq(runs.workspaceId, boundary.workspaceId),
           eq(runs.teamId, boundary.teamId)
         ))
-        .orderBy(asc(runs.createdAt))
+        .orderBy(asc(runs.createdAt)),
+      this.db
+        .select()
+        .from(projectTeams)
+        .where(and(
+          eq(projectTeams.workspaceId, boundary.workspaceId),
+          eq(projectTeams.teamId, boundary.teamId)
+        ))
+        .orderBy(asc(projectTeams.createdAt))
     ]);
 
-    return projectRows.map((project) => this.mapProjectSummary(project, repositoryRows, runRows));
+    return projectRows.map((project) => this.mapProjectSummary(project, repositoryRows, runRows, projectTeamRows));
   }
 
   async getProject(projectId: string, access?: AccessBoundary): Promise<ProjectDetail> {
     const project = await this.assertProjectExists(projectId, access);
-    const [repositoryRows, runRows] = await Promise.all([
+    const [repositoryRows, runRows, projectTeamRows] = await Promise.all([
       this.db
         .select()
         .from(repositories)
@@ -992,10 +1050,22 @@ export class ControlPlaneService {
           eq(runs.workspaceId, project.workspaceId),
           eq(runs.teamId, project.teamId)
         ))
-        .orderBy(asc(runs.createdAt))
+        .orderBy(asc(runs.createdAt)),
+      this.db
+        .select()
+        .from(projectTeams)
+        .where(eq(projectTeams.projectId, project.id))
+        .orderBy(asc(projectTeams.createdAt))
     ]);
+    const projectTeamMemberRows = projectTeamRows.length === 0
+      ? []
+      : await this.db
+        .select()
+        .from(projectTeamMembers)
+        .where(inArray(projectTeamMembers.projectTeamId, projectTeamRows.map((team) => team.id)))
+        .orderBy(asc(projectTeamMembers.position), asc(projectTeamMembers.createdAt));
 
-    return this.mapProjectDetail(project, repositoryRows, runRows);
+    return this.mapProjectDetail(project, repositoryRows, runRows, projectTeamRows, projectTeamMemberRows);
   }
 
   async createProject(input: ProjectCreate, access?: AccessBoundary): Promise<Project> {
@@ -1032,15 +1102,174 @@ export class ControlPlaneService {
 
     await this.db.transaction(async (tx) => {
       const now = this.clock.now();
+      const teamRows = await tx.select().from(projectTeams).where(eq(projectTeams.projectId, projectId));
+      const teamIds = teamRows.map((team) => team.id);
+      if (teamIds.length > 0) {
+        const definitionRows = await tx.select({ id: repeatableRunDefinitions.id }).from(repeatableRunDefinitions)
+          .where(inArray(repeatableRunDefinitions.projectTeamId, teamIds));
+        const definitionIds = definitionRows.map((row) => row.id);
+        if (definitionIds.length > 0) {
+          await tx.delete(repeatableRunTriggers).where(inArray(repeatableRunTriggers.repeatableRunId, definitionIds));
+          await tx.delete(repeatableRunDefinitions).where(inArray(repeatableRunDefinitions.id, definitionIds));
+        }
+        await tx.delete(projectTeamMembers).where(inArray(projectTeamMembers.projectTeamId, teamIds));
+        await tx.delete(projectTeams).where(inArray(projectTeams.id, teamIds));
+      }
       await tx.update(repositories).set({
         projectId: null,
         updatedAt: now
       }).where(eq(repositories.projectId, projectId));
       await tx.update(runs).set({
         projectId: null,
+        projectTeamId: null,
+        projectTeamName: null,
         updatedAt: now
       }).where(eq(runs.projectId, projectId));
       await tx.delete(projects).where(eq(projects.id, projectId));
+    });
+  }
+
+  async listProjectTeams(projectId?: string, access?: AccessBoundary): Promise<ProjectTeamDetail[]> {
+    const boundary = requireAccessBoundary(access);
+    const conditions = [
+      eq(projectTeams.workspaceId, boundary.workspaceId),
+      eq(projectTeams.teamId, boundary.teamId)
+    ];
+    if (projectId) {
+      conditions.push(eq(projectTeams.projectId, projectId));
+    }
+    const teamRows = await this.db.select().from(projectTeams).where(and(...conditions)).orderBy(asc(projectTeams.createdAt));
+    if (teamRows.length === 0) {
+      return [];
+    }
+    const memberRows = await this.db.select().from(projectTeamMembers)
+      .where(inArray(projectTeamMembers.projectTeamId, teamRows.map((team) => team.id)))
+      .orderBy(asc(projectTeamMembers.position), asc(projectTeamMembers.createdAt));
+
+    return teamRows.map((team) => this.mapProjectTeamDetail(team, memberRows));
+  }
+
+  async createProjectTeam(input: ProjectTeamCreate, access?: AccessBoundary): Promise<ProjectTeamDetail> {
+    const boundary = requireAccessBoundary(access);
+    await this.ensureOwnershipBoundary(boundary);
+    const project = await this.assertProjectExists(input.projectId, boundary);
+    const now = this.clock.now();
+    const teamId = crypto.randomUUID();
+
+    await this.db.transaction(async (tx) => {
+      await tx.insert(projectTeams).values({
+        id: teamId,
+        projectId: project.id,
+        workspaceId: project.workspaceId,
+        teamId: project.teamId,
+        name: input.name,
+        description: input.description ?? null,
+        concurrencyCap: input.concurrencyCap,
+        sourceTemplateId: null,
+        createdAt: now,
+        updatedAt: now
+      });
+      await this.replaceProjectTeamMembers(tx, teamId, input.members, now);
+    });
+
+    return this.getProjectTeam(teamId, boundary);
+  }
+
+  async importProjectTeam(input: ProjectTeamImport, access?: AccessBoundary): Promise<ProjectTeamDetail> {
+    const blueprintId = input.blueprintId ?? input.templateId;
+    const blueprint = agentTeamBlueprints.find((candidate) => candidate.id === blueprintId);
+    if (!blueprintId || !blueprint) {
+      throw new HttpError(404, `team blueprint ${blueprintId ?? "unknown"} not found`);
+    }
+
+    const boundary = requireAccessBoundary(access);
+    await this.ensureOwnershipBoundary(boundary);
+    const project = await this.assertProjectExists(input.projectId, boundary);
+    const now = this.clock.now();
+    const teamId = crypto.randomUUID();
+
+    await this.db.transaction(async (tx) => {
+      await tx.insert(projectTeams).values({
+        id: teamId,
+        projectId: project.id,
+        workspaceId: project.workspaceId,
+        teamId: project.teamId,
+        name: input.name ?? blueprint.name,
+        description: input.description ?? blueprint.summary,
+        concurrencyCap: blueprint.suggestedConcurrencyCap,
+        sourceTemplateId: blueprint.id,
+        createdAt: now,
+        updatedAt: now
+      });
+      await this.replaceProjectTeamMembers(tx, teamId, blueprint.members.map((member) => ({
+        name: member.displayName,
+        role: resolveRuntimeRole(member.roleProfile),
+        profile: member.roleProfile,
+        responsibility: member.responsibility
+      })), now);
+    });
+
+    return this.getProjectTeam(teamId, boundary);
+  }
+
+  async getProjectTeam(projectTeamId: string, access?: AccessBoundary): Promise<ProjectTeamDetail> {
+    const team = await this.assertProjectTeamExists(projectTeamId, access);
+    const memberRows = await this.db.select().from(projectTeamMembers)
+      .where(eq(projectTeamMembers.projectTeamId, projectTeamId))
+      .orderBy(asc(projectTeamMembers.position), asc(projectTeamMembers.createdAt));
+    return this.mapProjectTeamDetail(team, memberRows);
+  }
+
+  async updateProjectTeam(projectTeamId: string, input: ProjectTeamUpdate, access?: AccessBoundary): Promise<ProjectTeamDetail> {
+    const existing = await this.assertProjectTeamExists(projectTeamId, access);
+    const now = this.clock.now();
+
+    await this.db.transaction(async (tx) => {
+      await tx.update(projectTeams).set({
+        name: input.name ?? existing.name,
+        description: input.description === undefined ? existing.description : input.description,
+        concurrencyCap: input.concurrencyCap ?? existing.concurrencyCap,
+        updatedAt: now
+      }).where(eq(projectTeams.id, projectTeamId));
+
+      if (input.members) {
+        await this.replaceProjectTeamMembers(tx, projectTeamId, input.members, now);
+      }
+    });
+
+    const [updatedTeam] = await this.db.select().from(projectTeams).where(eq(projectTeams.id, projectTeamId));
+    if (input.name && updatedTeam) {
+      await this.db.update(runs).set({
+        projectTeamName: input.name,
+        updatedAt: now
+      }).where(eq(runs.projectTeamId, projectTeamId));
+      await this.db.update(repeatableRunDefinitions).set({
+        projectTeamName: input.name,
+        updatedAt: now
+      }).where(eq(repeatableRunDefinitions.projectTeamId, projectTeamId));
+    }
+
+    return this.getProjectTeam(projectTeamId, access);
+  }
+
+  async deleteProjectTeam(projectTeamId: string, access?: AccessBoundary) {
+    await this.assertProjectTeamExists(projectTeamId, access);
+    const linkedDefinition = await this.db.select({ id: repeatableRunDefinitions.id, name: repeatableRunDefinitions.name })
+      .from(repeatableRunDefinitions)
+      .where(eq(repeatableRunDefinitions.projectTeamId, projectTeamId));
+    if (linkedDefinition[0]) {
+      throw new HttpError(409, `project team is still referenced by repeatable run ${linkedDefinition[0].name}`);
+    }
+    const linkedRun = await this.db.select({ id: runs.id, goal: runs.goal })
+      .from(runs)
+      .where(eq(runs.projectTeamId, projectTeamId));
+    if (linkedRun[0]) {
+      throw new HttpError(409, `project team is still referenced by run ${linkedRun[0].goal}`);
+    }
+
+    await this.db.transaction(async (tx) => {
+      await tx.delete(projectTeamMembers).where(eq(projectTeamMembers.projectTeamId, projectTeamId));
+      await tx.delete(projectTeams).where(eq(projectTeams.id, projectTeamId));
     });
   }
 
@@ -1219,11 +1448,20 @@ export class ControlPlaneService {
   async createRepeatableRunDefinition(input: RepeatableRunDefinitionCreate, access?: AccessBoundary) {
     const boundary = requireAccessBoundary(access);
     const repository = await this.assertRepositoryExists(input.repositoryId, boundary);
+    const projectTeam = await this.assertProjectTeamExists(input.projectTeamId, boundary);
+    if (!repository.projectId) {
+      throw new HttpError(409, "repeatable runs require a repository assigned to a project");
+    }
+    if (projectTeam.projectId !== repository.projectId) {
+      throw new HttpError(409, `project team ${projectTeam.id} does not belong to repository project ${repository.projectId}`);
+    }
     const now = this.clock.now();
 
     const [definition] = await this.db.insert(repeatableRunDefinitions).values({
       id: crypto.randomUUID(),
       repositoryId: repository.id,
+      projectTeamId: projectTeam.id,
+      projectTeamName: projectTeam.name,
       workspaceId: repository.workspaceId,
       teamId: repository.teamId,
       name: input.name,
@@ -1242,10 +1480,29 @@ export class ControlPlaneService {
     const repository = input.repositoryId
       ? await this.assertRepositoryExists(input.repositoryId, access)
       : await this.assertRepositoryExists(existing.repositoryId, access);
+    const projectTeam = input.projectTeamId
+      ? await this.assertProjectTeamExists(input.projectTeamId, access)
+      : existing.projectTeamId
+        ? await this.assertProjectTeamExists(existing.projectTeamId, access)
+        : null;
+    const preservingLegacyTeamlessDefinition = !existing.projectTeamId
+      && input.projectTeamId === undefined
+      && input.repositoryId === undefined;
+    if (!repository.projectId) {
+      throw new HttpError(409, "repeatable runs require a repository assigned to a project");
+    }
+    if (!projectTeam && !preservingLegacyTeamlessDefinition) {
+      throw new HttpError(400, "project repeatable runs require projectTeamId");
+    }
+    if (projectTeam && projectTeam.projectId !== repository.projectId) {
+      throw new HttpError(409, `project team ${projectTeam.id} does not belong to repository project ${repository.projectId}`);
+    }
     const now = this.clock.now();
 
     const [definition] = await this.db.update(repeatableRunDefinitions).set({
       repositoryId: repository.id,
+      projectTeamId: projectTeam?.id ?? existing.projectTeamId ?? undefined,
+      projectTeamName: projectTeam?.name ?? existing.projectTeamName ?? undefined,
       workspaceId: repository.workspaceId,
       teamId: repository.teamId,
       name: input.name ?? existing.name,
@@ -1495,10 +1752,7 @@ export class ControlPlaneService {
         .orderBy(asc(sessions.createdAt))
     ]);
 
-    const mappedTasks = runTasks.map((task): Task => ({
-      ...task,
-      status: task.status as Task["status"]
-    }));
+    const mappedTasks = runTasks.map((task) => this.mapTask(task));
 
     const mappedSessions = runSessions.map(({ session }): Session => this.mapSession(session));
 
@@ -1518,6 +1772,18 @@ export class ControlPlaneService {
     if (projectId) {
       await this.assertProjectExists(projectId, access);
     }
+    const projectTeam = input.projectTeamId
+      ? await this.assertProjectTeamExists(input.projectTeamId, access)
+      : null;
+    if (projectId && !projectTeam) {
+      throw new HttpError(400, "project runs require projectTeamId");
+    }
+    if (!projectId && projectTeam) {
+      throw new HttpError(400, "ad-hoc runs cannot set projectTeamId");
+    }
+    if (projectTeam && projectTeam.projectId !== projectId) {
+      throw new HttpError(409, `project team ${projectTeam.id} does not belong to project ${projectId}`);
+    }
 
     const id = crypto.randomUUID();
     const now = this.clock.now();
@@ -1534,6 +1800,8 @@ export class ControlPlaneService {
       workspaceId: repository.workspaceId,
       teamId: repository.teamId,
       projectId,
+      projectTeamId: projectTeam?.id ?? null,
+      projectTeamName: projectTeam?.name ?? null,
       goal: input.goal,
       status: "pending",
       branchName: input.branchName ?? null,
@@ -1693,6 +1961,8 @@ export class ControlPlaneService {
       };
       const run = await this.createRun({
         repositoryId: repository.id,
+        projectId: repository.projectId ?? null,
+        projectTeamId: repeatableRun.projectTeamId,
         goal: repeatableRun.execution.goal,
         branchName: repeatableRun.execution.branchName ?? undefined,
         planArtifactPath: repeatableRun.execution.planArtifactPath ?? undefined,
@@ -1767,12 +2037,31 @@ export class ControlPlaneService {
     if (input.projectId) {
       await this.assertProjectExists(input.projectId, access);
     }
+    const nextProjectId = input.projectId === undefined ? existingRun.projectId : input.projectId;
+    const nextProjectTeam = input.projectTeamId === undefined
+      ? existingRun.projectTeamId
+        ? await this.assertProjectTeamExists(existingRun.projectTeamId, access)
+        : null
+      : input.projectTeamId
+        ? await this.assertProjectTeamExists(input.projectTeamId, access)
+        : null;
+    if (nextProjectId && !nextProjectTeam) {
+      throw new HttpError(400, "project runs require projectTeamId");
+    }
+    if (!nextProjectId && nextProjectTeam) {
+      throw new HttpError(400, "ad-hoc runs cannot set projectTeamId");
+    }
+    if (nextProjectTeam && nextProjectTeam.projectId !== nextProjectId) {
+      throw new HttpError(409, `project team ${nextProjectTeam.id} does not belong to project ${nextProjectId}`);
+    }
     const now = this.clock.now();
     const context = resolveRunContext(input.context, input.metadata, existingRun.metadata);
     const handoff = resolveRunHandoffConfig(input.handoff, existingRun.handoffConfig);
 
     const [run] = await this.db.update(runs).set({
-      projectId: input.projectId === undefined ? existingRun.projectId : input.projectId,
+      projectId: nextProjectId,
+      projectTeamId: nextProjectTeam?.id ?? null,
+      projectTeamName: nextProjectTeam?.name ?? null,
       goal: input.goal ?? existingRun.goal,
       branchName: input.branchName === undefined ? existingRun.branchName : input.branchName,
       budgetTokens: input.budgetTokens === undefined ? existingRun.budgetTokens : input.budgetTokens,
@@ -2030,10 +2319,11 @@ export class ControlPlaneService {
     const boundary = requireAccessBoundary(access);
     if (runId) {
       await this.assertRunExists(runId, boundary);
-      return this.db.select().from(tasks).where(eq(tasks.runId, runId)).orderBy(asc(tasks.createdAt));
+      const taskRows = await this.db.select().from(tasks).where(eq(tasks.runId, runId)).orderBy(asc(tasks.createdAt));
+      return taskRows.map((task) => this.mapTask(task));
     }
 
-    return this.db.select({
+    const taskRows = await this.db.select({
       id: tasks.id,
       runId: tasks.runId,
       parentTaskId: tasks.parentTaskId,
@@ -2043,7 +2333,14 @@ export class ControlPlaneService {
       status: tasks.status,
       priority: tasks.priority,
       ownerAgentId: tasks.ownerAgentId,
+      verificationStatus: tasks.verificationStatus,
+      verifierAgentId: tasks.verifierAgentId,
+      latestVerificationSummary: tasks.latestVerificationSummary,
+      latestVerificationFindings: tasks.latestVerificationFindings,
+      latestVerificationChangeRequests: tasks.latestVerificationChangeRequests,
+      latestVerificationEvidence: tasks.latestVerificationEvidence,
       dependencyIds: tasks.dependencyIds,
+      definitionOfDone: tasks.definitionOfDone,
       acceptanceCriteria: tasks.acceptanceCriteria,
       validationTemplates: tasks.validationTemplates,
       createdAt: tasks.createdAt,
@@ -2053,10 +2350,14 @@ export class ControlPlaneService {
       .innerJoin(runs, eq(tasks.runId, runs.id))
       .where(and(eq(runs.workspaceId, boundary.workspaceId), eq(runs.teamId, boundary.teamId)))
       .orderBy(asc(tasks.createdAt));
+
+    return taskRows.map((task) => this.mapTask(task));
   }
 
   async createTask(input: TaskCreate, access?: AccessBoundary) {
     const run = await this.assertRunExists(input.runId, access);
+    const definitionOfDone = input.definitionOfDone ?? [];
+    const acceptanceCriteria = input.acceptanceCriteria ?? [];
 
     if (input.ownerAgentId) {
       await this.assertAgentExists(input.ownerAgentId, access);
@@ -2085,8 +2386,15 @@ export class ControlPlaneService {
       status: initialStatus,
       priority: input.priority,
       ownerAgentId: input.ownerAgentId ?? null,
+      verificationStatus: definitionOfDone.length > 0 ? "pending" : "not_required",
+      verifierAgentId: null,
+      latestVerificationSummary: null,
+      latestVerificationFindings: [],
+      latestVerificationChangeRequests: [],
+      latestVerificationEvidence: [],
       dependencyIds: input.dependencyIds,
-      acceptanceCriteria: input.acceptanceCriteria,
+      definitionOfDone,
+      acceptanceCriteria,
       validationTemplates: normalizeValidationTemplates(input.validationTemplates),
       createdAt: now,
       updatedAt: now
@@ -2098,7 +2406,7 @@ export class ControlPlaneService {
       await this.enqueueRunnableWorkerDispatches(input.runId, access);
     }
 
-    return persistedTask;
+    return this.mapTask(persistedTask);
   }
 
   async updateTaskStatus(taskId: string, input: TaskStatusUpdate, access?: AccessBoundary) {
@@ -2108,7 +2416,9 @@ export class ControlPlaneService {
       await this.assertAgentExists(input.ownerAgentId, access);
     }
 
-    const ready = await this.areDependenciesSatisfied(task.runId, task.dependencyIds);
+    const nextDependencyIds = input.dependencyIds ?? task.dependencyIds;
+    await this.assertDependenciesBelongToRun(task.runId, nextDependencyIds);
+    const ready = await this.areDependenciesSatisfied(task.runId, nextDependencyIds);
 
     if (input.status === "in_progress" && !ready) {
       throw new HttpError(409, "task dependencies are not satisfied");
@@ -2120,6 +2430,7 @@ export class ControlPlaneService {
     const [updated] = await this.db.update(tasks).set({
       status: effectiveStatus,
       ownerAgentId: input.ownerAgentId ?? task.ownerAgentId,
+      dependencyIds: nextDependencyIds,
       updatedAt: now
     }).where(eq(tasks.id, taskId)).returning();
 
@@ -2132,7 +2443,7 @@ export class ControlPlaneService {
       await this.reconcileRunExecutionState(task.runId, access);
     }
 
-    return expectPersistedRecord(updated, "task");
+    return this.mapTask(expectPersistedRecord(updated, "task"));
   }
 
   async createAgent(input: AgentCreate, access?: AccessBoundary) {
@@ -2164,8 +2475,10 @@ export class ControlPlaneService {
       const [createdAgent] = await tx.insert(agents).values({
         id,
         runId: input.runId,
+        projectTeamMemberId: input.projectTeamMemberId ?? null,
         name: input.name,
         role: input.role,
+        profile: input.profile ?? "default",
         status: input.status,
         worktreePath: input.worktreePath ?? null,
         branchName: input.branchName ?? null,
@@ -2268,8 +2581,10 @@ export class ControlPlaneService {
     const agentRows = await this.db.select({
       id: agents.id,
       runId: agents.runId,
+      projectTeamMemberId: agents.projectTeamMemberId,
       name: agents.name,
       role: agents.role,
+      profile: agents.profile,
       status: agents.status,
       worktreePath: agents.worktreePath,
       branchName: agents.branchName,
@@ -2679,9 +2994,107 @@ export class ControlPlaneService {
     return this.mapWorkerDispatchAssignment(expectPersistedRecord(updatedAssignment, "worker dispatch assignment"));
   }
 
+  private async loadRunProjectTeam(projectTeamId: string | null, access?: AccessBoundary): Promise<ProjectTeamDetail | null> {
+    if (!projectTeamId) {
+      return null;
+    }
+
+    return this.getProjectTeam(projectTeamId, access);
+  }
+
+  private selectProjectTeamMemberForRole(
+    projectTeam: ProjectTeamDetail | null,
+    role: string,
+    runAgents: Agent[]
+  ): ProjectTeamMember | null {
+    if (!projectTeam) {
+      return null;
+    }
+
+    const candidates = projectTeam.members
+      .filter((member) => member.role === role)
+      .sort((left, right) => left.position - right.position || left.name.localeCompare(right.name));
+
+    if (candidates.length === 0) {
+      return null;
+    }
+
+    const assignmentCounts = new Map<string, number>(candidates.map((member) => [member.id, 0]));
+    for (const agent of runAgents) {
+      if (!agent.projectTeamMemberId || !assignmentCounts.has(agent.projectTeamMemberId)) {
+        continue;
+      }
+      assignmentCounts.set(agent.projectTeamMemberId, (assignmentCounts.get(agent.projectTeamMemberId) ?? 0) + 1);
+    }
+
+    return [...candidates].sort((left, right) =>
+      (assignmentCounts.get(left.id) ?? 0) - (assignmentCounts.get(right.id) ?? 0)
+      || left.position - right.position
+      || left.name.localeCompare(right.name)
+    )[0] ?? null;
+  }
+
+  private selectVerifierProjectTeamMember(
+    projectTeam: ProjectTeamDetail | null,
+    taskRole: string,
+    runAgents: Agent[],
+    workerAgentId: string
+  ): ProjectTeamMember | null {
+    if (!projectTeam) {
+      return null;
+    }
+
+    const selectCandidate = (roles: string[], excludeMemberId?: string | null) => {
+      const candidates = projectTeam.members
+        .filter((member) => roles.includes(member.role))
+        .filter((member) => member.id !== excludeMemberId)
+        .sort((left, right) => left.position - right.position || left.name.localeCompare(right.name));
+
+      if (candidates.length === 0) {
+        return null;
+      }
+
+      const assignmentCounts = new Map<string, number>(candidates.map((member) => [member.id, 0]));
+      for (const agent of runAgents) {
+        if (agent.id === workerAgentId || !agent.projectTeamMemberId || !assignmentCounts.has(agent.projectTeamMemberId)) {
+          continue;
+        }
+
+        assignmentCounts.set(agent.projectTeamMemberId, (assignmentCounts.get(agent.projectTeamMemberId) ?? 0) + 1);
+      }
+
+      return [...candidates].sort((left, right) =>
+        (assignmentCounts.get(left.id) ?? 0) - (assignmentCounts.get(right.id) ?? 0)
+        || left.position - right.position
+        || left.name.localeCompare(right.name)
+      )[0] ?? null;
+    };
+
+    const workerAgent = runAgents.find((agent) => agent.id === workerAgentId) ?? null;
+    const workerMemberId = workerAgent?.projectTeamMemberId ?? null;
+    const explicitReviewer = selectCandidate(preferredReviewerRoles, workerMemberId);
+
+    if (explicitReviewer) {
+      return explicitReviewer;
+    }
+
+    const reviewLikeRoles = projectTeam.members
+      .map((member) => member.role)
+      .filter((role, index, allRoles) => allRoles.indexOf(role) === index)
+      .filter((role) => !preferredReviewerRoles.includes(role) && normalizeReviewLikeRole(role));
+    const reviewLikeMember = selectCandidate(reviewLikeRoles, workerMemberId);
+
+    if (reviewLikeMember) {
+      return reviewLikeMember;
+    }
+
+    return selectCandidate([taskRole], workerMemberId);
+  }
+
   async enqueueRunnableWorkerDispatches(runId: string, access?: AccessBoundary) {
     const runDetail = await this.getRun(runId, access);
     const repository = this.mapRepository(await this.assertRepositoryExists(runDetail.repositoryId, access));
+    const projectTeam = await this.loadRunProjectTeam(runDetail.projectTeamId, access);
 
     if (["awaiting_approval", "completed", "failed", "cancelled"].includes(runDetail.status)) {
       return [];
@@ -2736,11 +3149,17 @@ export class ControlPlaneService {
     const workspaceProvisioningMode = resolveWorkspaceProvisioningMode();
 
     for (const task of tasksToQueue) {
+      const projectTeamMember = this.selectProjectTeamMemberForRole(projectTeam, task.role, runDetail.agents);
+      if (runDetail.projectTeamId && !projectTeamMember) {
+        throw new HttpError(409, `project team ${runDetail.projectTeamName ?? runDetail.projectTeamId} has no member for role ${task.role}`);
+      }
       const existingAgent = existingAgentsByTaskId.get(task.id);
       const agent = existingAgent ?? await this.createAgent({
         runId,
-        name: `${task.role}-${task.title}`.slice(0, 72),
-        role: task.role,
+        projectTeamMemberId: projectTeamMember?.id,
+        name: (projectTeamMember?.name ?? `${task.role}-${task.title}`).slice(0, 72),
+        role: projectTeamMember?.role ?? task.role,
+        profile: projectTeamMember?.profile ?? "default",
         status: "idle",
         branchName: runDetail.branchName ?? repository.defaultBranch,
         currentTaskId: task.id
@@ -2774,12 +3193,13 @@ export class ControlPlaneService {
         worktreePath,
         branchName: runDetail.branchName ?? repository.defaultBranch,
         prompt: this.buildTaskExecutionPrompt(runDetail, repository, task),
-        profile: "default",
+        profile: updatedAgent?.profile ?? agent.profile,
         sandbox: workerSandbox,
         approvalPolicy: workerApprovalPolicy,
         includePlanTool: false,
         requiredCapabilities: ["workspace-write"],
         metadata: {
+          assignmentKind: "worker",
           runContext: runDetail.context
         },
         maxAttempts: 3,
@@ -2795,6 +3215,9 @@ export class ControlPlaneService {
           body: [
             `Take task ${task.title}.`,
             task.description,
+            task.definitionOfDone.length > 0
+              ? `Definition of done: ${task.definitionOfDone.join("; ")}`
+              : "Definition of done: no persisted task-specific checks were provided.",
             task.acceptanceCriteria.length > 0
               ? `Acceptance criteria: ${task.acceptanceCriteria.join("; ")}`
               : "Acceptance criteria: complete the assigned slice and report blockers."
@@ -2884,11 +3307,21 @@ export class ControlPlaneService {
       updatedAt: now
     }).where(eq(agents.id, nextAssignment.agentId));
 
-    await this.db.update(tasks).set({
-      status: "in_progress",
-      ownerAgentId: nextAssignment.agentId,
-      updatedAt: now
-    }).where(eq(tasks.id, nextAssignment.taskId));
+    if (normalizeAssignmentKind(nextAssignment.metadata) === "verification") {
+      await this.db.update(tasks).set({
+        status: "awaiting_review",
+        ownerAgentId: nextAssignment.agentId,
+        verificationStatus: "in_progress",
+        verifierAgentId: nextAssignment.agentId,
+        updatedAt: now
+      }).where(eq(tasks.id, nextAssignment.taskId));
+    } else {
+      await this.db.update(tasks).set({
+        status: "in_progress",
+        ownerAgentId: nextAssignment.agentId,
+        updatedAt: now
+      }).where(eq(tasks.id, nextAssignment.taskId));
+    }
 
     await this.reconcileRunExecutionState(nextAssignment.runId);
 
@@ -2902,7 +3335,7 @@ export class ControlPlaneService {
       throw new HttpError(409, `worker dispatch assignment ${assignmentId} is claimed by a different node`);
     }
 
-    return this.transitionWorkerDispatchFailureOrCompletion(assignment, input.status, input.reason ?? null, input.nodeId);
+    return this.transitionWorkerDispatchFailureOrCompletion(assignment, input);
   }
 
   async reconcileWorkerNode(nodeId: string, input: WorkerNodeReconcile): Promise<WorkerNodeReconcileReport> {
@@ -2931,9 +3364,11 @@ export class ControlPlaneService {
     for (const assignment of nodeAssignments) {
       const updated = await this.transitionWorkerDispatchFailureOrCompletion(
         assignment,
-        "failed",
-        `node_lost:${input.reason}`,
-        nodeId
+        {
+          nodeId,
+          status: "failed",
+          reason: `node_lost:${input.reason}`
+        }
       );
 
       if (updated.state === "retrying") {
@@ -3746,6 +4181,18 @@ export class ControlPlaneService {
     return project;
   }
 
+  private async assertProjectTeamExists(projectTeamId: string, access?: AccessBoundary) {
+    const [projectTeam] = await this.db.select().from(projectTeams).where(eq(projectTeams.id, projectTeamId));
+
+    if (!projectTeam) {
+      throw new HttpError(404, `project team ${projectTeamId} not found`);
+    }
+
+    this.assertBoundaryMatch(access, projectTeam.workspaceId, projectTeam.teamId, "project team", projectTeamId);
+
+    return projectTeam;
+  }
+
   private async assertRepositoryExists(repositoryId: string, access?: AccessBoundary) {
     const [repository] = await this.db.select().from(repositories).where(eq(repositories.id, repositoryId));
 
@@ -3756,6 +4203,33 @@ export class ControlPlaneService {
     this.assertBoundaryMatch(access, repository.workspaceId, repository.teamId, "repository", repositoryId);
 
     return repository;
+  }
+
+  private async replaceProjectTeamMembers(
+    tx: Pick<AppDb, "delete" | "insert">,
+    projectTeamId: string,
+    members: ProjectTeamMemberCreateInput[],
+    now: Date
+  ) {
+    await tx.delete(projectTeamMembers).where(eq(projectTeamMembers.projectTeamId, projectTeamId));
+    if (members.length === 0) {
+      return;
+    }
+
+    await tx.insert(projectTeamMembers).values(
+      members.map((member, index) => ({
+        id: crypto.randomUUID(),
+        projectTeamId,
+        key: `${slugifyProjectTeamMemberKey(member.name)}-${index + 1}`,
+        position: index,
+        name: member.name,
+        role: member.role,
+        profile: member.profile,
+        responsibility: member.responsibility ?? null,
+        createdAt: now,
+        updatedAt: now
+      }))
+    );
   }
 
   private async assertWorkerNodeExists(nodeId: string) {
@@ -3919,12 +4393,14 @@ export class ControlPlaneService {
   private mapProjectSummary(
     project: ProjectRecord,
     repositoryRows: Array<typeof repositories.$inferSelect>,
-    runRows: Array<typeof runs.$inferSelect>
+    runRows: Array<typeof runs.$inferSelect>,
+    projectTeamRows: ProjectTeamRecord[]
   ): ProjectSummary {
     const projectRuns = runRows.filter((run) => run.projectId === project.id);
 
     return {
       ...this.mapProject(project),
+      teamCount: projectTeamRows.filter((team) => team.projectId === project.id).length,
       repositoryCount: repositoryRows.filter((repository) => repository.projectId === project.id).length,
       runCount: projectRuns.length,
       latestRunAt: projectRuns.length === 0
@@ -3946,19 +4422,27 @@ export class ControlPlaneService {
     return {
       projectId,
       runId: run.id,
-      run: this.mapRun(run)
+      run: {
+        ...this.mapRun(run),
+        projectId: run.projectId ?? null
+      }
     };
   }
 
   private mapProjectDetail(
     project: ProjectRecord,
     repositoryRows: Array<typeof repositories.$inferSelect>,
-    runRows: Array<typeof runs.$inferSelect>
+    runRows: Array<typeof runs.$inferSelect>,
+    projectTeamRows: ProjectTeamRecord[],
+    projectTeamMemberRows: ProjectTeamMemberRecord[] = []
   ): ProjectDetail {
-    const summary = this.mapProjectSummary(project, repositoryRows, runRows);
+    const summary = this.mapProjectSummary(project, repositoryRows, runRows, projectTeamRows);
 
     return {
       ...summary,
+      projectTeams: projectTeamRows
+        .filter((team) => team.projectId === project.id)
+        .map((team) => this.mapProjectTeamDetail(team, projectTeamMemberRows)),
       repositoryAssignments: repositoryRows
         .filter((repository) => repository.projectId === project.id)
         .map((repository) => this.mapProjectRepositoryAssignment(project.id, repository)),
@@ -3966,6 +4450,35 @@ export class ControlPlaneService {
         .filter((run) => run.projectId === project.id)
         .map((run) => this.mapProjectRunAssignment(project.id, run))
     };
+  }
+
+  private mapProjectTeamMember(record: ProjectTeamMemberRecord): ProjectTeamMember {
+    return {
+      ...record,
+      responsibility: record.responsibility ?? null
+    };
+  }
+
+  private mapProjectTeam(record: ProjectTeamRecord): ProjectTeam {
+    return {
+      ...record,
+      description: record.description ?? null,
+      sourceBlueprintId: record.sourceTemplateId ?? null,
+      sourceTemplateId: record.sourceTemplateId ?? null
+    };
+  }
+
+  private mapProjectTeamDetail(
+    record: ProjectTeamRecord,
+    memberRows: ProjectTeamMemberRecord[]
+  ): ProjectTeamDetail {
+    return projectTeamDetailSchema.parse({
+      ...this.mapProjectTeam(record),
+      members: memberRows
+        .filter((member) => member.projectTeamId === record.id)
+        .map((member) => this.mapProjectTeamMember(member)),
+      memberCount: memberRows.filter((member) => member.projectTeamId === record.id).length
+    });
   }
 
   private mapRepository(repository: typeof repositories.$inferSelect): Repository {
@@ -3998,6 +4511,19 @@ export class ControlPlaneService {
     return {
       ...artifact,
       kind: artifact.kind as Artifact["kind"]
+    };
+  }
+
+  private mapTask(task: typeof tasks.$inferSelect): Task {
+    return {
+      ...task,
+      status: task.status as Task["status"],
+      verificationStatus: task.verificationStatus as TaskVerificationStatus,
+      verifierAgentId: task.verifierAgentId ?? null,
+      latestVerificationSummary: task.latestVerificationSummary ?? null,
+      latestVerificationFindings: task.latestVerificationFindings ?? [],
+      latestVerificationChangeRequests: task.latestVerificationChangeRequests ?? [],
+      latestVerificationEvidence: task.latestVerificationEvidence ?? []
     };
   }
 
@@ -4046,6 +4572,9 @@ export class ControlPlaneService {
   }
 
   private buildTaskExecutionPrompt(run: RunDetail, repository: Repository, task: Task) {
+    const definitionOfDone = task.definitionOfDone.length > 0
+      ? task.definitionOfDone.map((criterion) => `- ${criterion}`).join("\n")
+      : "- No persisted definition of done was provided.";
     const acceptanceCriteria = task.acceptanceCriteria.length > 0
       ? task.acceptanceCriteria.map((criterion) => `- ${criterion}`).join("\n")
       : "- Complete the assigned task and leave clear implementation notes.";
@@ -4060,9 +4589,150 @@ export class ControlPlaneService {
       "",
       task.description,
       "",
+      "Definition of done:",
+      definitionOfDone,
+      "",
       "Acceptance criteria:",
       acceptanceCriteria
     ].join("\n");
+  }
+
+  private buildVerifierAssignmentPrompt(run: RunDetail, repository: Repository, task: Task, workerSummary: string) {
+    const definitionOfDone = task.definitionOfDone.length > 0
+      ? task.definitionOfDone.map((criterion) => `- ${criterion}`).join("\n")
+      : "- No persisted definition of done was provided.";
+    const acceptanceCriteria = task.acceptanceCriteria.length > 0
+      ? task.acceptanceCriteria.map((criterion) => `- ${criterion}`).join("\n")
+      : "- No separate acceptance summary was provided.";
+    const runContext = formatRunExecutionContext(run.context);
+
+    return [
+      `Repository: ${repository.name}`,
+      `Run goal: ${run.goal}`,
+      ...(runContext ? [runContext] : []),
+      `Task: ${task.title}`,
+      `Worker role: ${task.role}`,
+      "",
+      task.description,
+      "",
+      "Definition of done:",
+      definitionOfDone,
+      "",
+      "Acceptance criteria:",
+      acceptanceCriteria,
+      "",
+      `Worker summary: ${workerSummary}`,
+      "",
+      "Review the delivered work against the persisted task contract."
+    ].join("\n");
+  }
+
+  private async enqueueVerifierAssignment(input: {
+    run: RunDetail;
+    repository: Repository;
+    projectTeam: ProjectTeamDetail | null;
+    task: Task;
+    workerAssignment: WorkerDispatchAssignment;
+    workerOutcome: Extract<WorkerDispatchCompletionOutcome, { kind: "worker" }>;
+    access?: AccessBoundary;
+  }) {
+    const now = this.clock.now();
+    const workerAgent = input.run.agents.find((agent) => agent.id === input.workerAssignment.agentId) ?? null;
+    const verifierMember = this.selectVerifierProjectTeamMember(
+      input.projectTeam,
+      input.task.role,
+      input.run.agents,
+      input.workerAssignment.agentId
+    );
+    const fallbackReviewerAgent = input.run.agents.find((agent) =>
+      agent.id !== input.workerAssignment.agentId && (
+      preferredReviewerRoles.includes(agent.role) || normalizeReviewLikeRole(agent.role)
+      )) ?? null;
+    const fallbackRole = verifierMember?.role
+      ?? fallbackReviewerAgent?.role
+      ?? input.task.role;
+    const fallbackProfile = verifierMember?.profile
+      ?? fallbackReviewerAgent?.profile
+      ?? workerAgent?.profile
+      ?? "default";
+    const verifierAgent = await this.createAgent({
+      runId: input.run.id,
+      projectTeamMemberId: verifierMember?.id,
+      name: (verifierMember?.name ?? `${fallbackRole}-${input.task.title}-verifier`).slice(0, 72),
+      role: fallbackRole,
+      profile: fallbackProfile,
+      status: "idle",
+      worktreePath: input.workerAssignment.worktreePath,
+      branchName: input.run.branchName ?? input.repository.defaultBranch,
+      currentTaskId: input.task.id
+    }, input.access);
+    const verifierPrompt = this.buildVerifierAssignmentPrompt(
+      input.run,
+      input.repository,
+      input.task,
+      input.workerOutcome.summary
+    );
+    const verifierAssignment = await this.createWorkerDispatchAssignment({
+      runId: input.run.id,
+      taskId: input.task.id,
+      agentId: verifierAgent.id,
+      repositoryId: input.repository.id,
+      repositoryName: input.repository.name,
+      queue: "worker-dispatch",
+      stickyNodeId: null,
+      preferredNodeId: null,
+      requiredCapabilities: ["workspace-write"],
+      worktreePath: input.workerAssignment.worktreePath,
+      branchName: input.run.branchName ?? input.repository.defaultBranch,
+      prompt: verifierPrompt,
+      profile: verifierAgent.profile,
+      sandbox: process.env.CODEX_SWARM_WORKER_SANDBOX?.trim() || "workspace-write",
+      approvalPolicy: process.env.CODEX_SWARM_WORKER_APPROVAL_POLICY?.trim() || "on-request",
+      includePlanTool: false,
+      metadata: {
+        assignmentKind: "verification",
+        workerAssignmentId: input.workerAssignment.id,
+        workerAgentId: input.workerAssignment.agentId,
+        workerSummary: input.workerOutcome.summary,
+        workerOutcomeStatus: input.workerOutcome.outcomeStatus,
+        blockingIssues: input.workerOutcome.blockingIssues,
+        requestedAt: now.toISOString(),
+        runContext: input.run.context
+      },
+      maxAttempts: 3,
+      leaseTtlSeconds: 300
+    });
+
+    await this.db.update(tasks).set({
+      status: "awaiting_review",
+      ownerAgentId: input.workerAssignment.agentId,
+      verificationStatus: "requested",
+      verifierAgentId: verifierAgent.id,
+      latestVerificationSummary: `Verification requested after worker completion: ${input.workerOutcome.summary}`,
+      latestVerificationFindings: [],
+      latestVerificationChangeRequests: [],
+      latestVerificationEvidence: [],
+      updatedAt: now
+    }).where(eq(tasks.id, input.task.id));
+
+    await this.db.update(agents).set({
+      currentTaskId: null,
+      updatedAt: now
+    }).where(eq(agents.id, input.workerAssignment.agentId));
+
+    await this.recordControlPlaneEvent(controlPlaneEventDefinitions.taskVerificationRequested, {
+      runId: input.run.id,
+      entityId: input.task.id,
+      status: "requested",
+      summary: `Verification requested for task ${input.task.title}`,
+      metadata: {
+        workerAgentId: input.workerAssignment.agentId,
+        verifierAgentId: verifierAgent.id,
+        verifierAssignmentId: verifierAssignment.id
+      }
+    });
+
+    return verifierAssignment;
   }
 
   private async repairRunStateFromDispatchAssignments(runId: string) {
@@ -4099,13 +4769,40 @@ export class ControlPlaneService {
         continue;
       }
 
+      const assignmentKind = normalizeAssignmentKind(assignment.metadata);
+
       if (assignment.state === "completed") {
-        if (task.status !== "completed" || task.ownerAgentId !== assignment.agentId) {
-          await this.db.update(tasks).set({
-            status: "completed",
-            ownerAgentId: assignment.agentId,
-            updatedAt: now
-          }).where(eq(tasks.id, task.id));
+        if (assignmentKind === "verification") {
+          const verificationStatus = task.verificationStatus as TaskVerificationStatus;
+          const expectedStatus: Task["status"] = verificationStatus === "passed"
+            ? "completed"
+            : verificationStatus === "blocked"
+              ? "blocked"
+              : "awaiting_review";
+
+          if (task.status !== expectedStatus || task.ownerAgentId !== assignment.agentId || task.verifierAgentId !== assignment.agentId) {
+            await this.db.update(tasks).set({
+              status: expectedStatus,
+              ownerAgentId: assignment.agentId,
+              verifierAgentId: assignment.agentId,
+              updatedAt: now
+            }).where(eq(tasks.id, task.id));
+          }
+        } else {
+          const workerOutcomeStatus = assignment.metadata?.workerOutcomeStatus;
+          const expectedStatus: Task["status"] = workerOutcomeStatus === "blocked"
+            ? "blocked"
+            : taskRequiresVerification(this.mapTask(task))
+              ? "awaiting_review"
+              : "completed";
+
+          if (task.status !== expectedStatus || task.ownerAgentId !== assignment.agentId) {
+            await this.db.update(tasks).set({
+              status: expectedStatus,
+              ownerAgentId: assignment.agentId,
+              updatedAt: now
+            }).where(eq(tasks.id, task.id));
+          }
         }
 
         agentIdsToStop.add(assignment.agentId);
@@ -4121,7 +4818,17 @@ export class ControlPlaneService {
       }
 
       if (assignment.state === "claimed") {
-        if (task.status !== "in_progress" || task.ownerAgentId !== assignment.agentId) {
+        if (assignmentKind === "verification") {
+          if (task.status !== "awaiting_review" || task.ownerAgentId !== assignment.agentId || task.verificationStatus !== "in_progress" || task.verifierAgentId !== assignment.agentId) {
+            await this.db.update(tasks).set({
+              status: "awaiting_review",
+              ownerAgentId: assignment.agentId,
+              verificationStatus: "in_progress",
+              verifierAgentId: assignment.agentId,
+              updatedAt: now
+            }).where(eq(tasks.id, task.id));
+          }
+        } else if (task.status !== "in_progress" || task.ownerAgentId !== assignment.agentId) {
           await this.db.update(tasks).set({
             status: "in_progress",
             ownerAgentId: assignment.agentId,
@@ -4142,7 +4849,17 @@ export class ControlPlaneService {
       }
 
       if (assignment.state === "queued" || assignment.state === "retrying") {
-        if (task.status !== "pending" || task.ownerAgentId !== assignment.agentId) {
+        if (assignmentKind === "verification") {
+          if (task.status !== "awaiting_review" || task.ownerAgentId !== assignment.agentId || task.verificationStatus !== "requested" || task.verifierAgentId !== assignment.agentId) {
+            await this.db.update(tasks).set({
+              status: "awaiting_review",
+              ownerAgentId: assignment.agentId,
+              verificationStatus: "requested",
+              verifierAgentId: assignment.agentId,
+              updatedAt: now
+            }).where(eq(tasks.id, task.id));
+          }
+        } else if (task.status !== "pending" || task.ownerAgentId !== assignment.agentId) {
           await this.db.update(tasks).set({
             status: "pending",
             ownerAgentId: assignment.agentId,
@@ -4450,10 +5167,7 @@ export class ControlPlaneService {
     const repository = await this.assertRepositoryExists(runRecord.repositoryId, access);
     const runDetail = this.mapRun(runRecord, repository.projectId ?? null);
     const runTasks = (await this.db.select().from(tasks).where(eq(tasks.runId, runId)).orderBy(asc(tasks.createdAt)))
-      .map((task): Task => ({
-        ...task,
-        status: task.status as Task["status"]
-      }));
+      .map((task) => this.mapTask(task));
     const handoff = runDetail.handoff;
     const handoffExecution = runDetail.handoffExecution;
 
@@ -4610,6 +5324,8 @@ export class ControlPlaneService {
   private mapAgent(agent: AgentRecord, agentSessions: SessionRecord[]): Agent {
     return {
       ...agent,
+      profile: agent.profile ?? "default",
+      projectTeamMemberId: agent.projectTeamMemberId ?? null,
       status: agent.status as Agent["status"],
       observability: this.buildAgentObservability(agent, agentSessions)
     };
@@ -4688,44 +5404,147 @@ export class ControlPlaneService {
 
   private async transitionWorkerDispatchFailureOrCompletion(
     assignment: WorkerDispatchAssignment,
-    status: "completed" | "failed",
-    reason: string | null,
-    nodeId: string
+    input: WorkerDispatchComplete
   ) {
     const now = this.clock.now();
     const sessionId = assignment.sessionId ?? null;
+    const assignmentKind = input.outcome?.kind ?? normalizeAssignmentKind(assignment.metadata);
+    const task = await this.assertTaskExists(assignment.taskId);
 
-    if (status === "completed") {
+    if (input.status === "completed") {
+      const nextMetadata = {
+        ...assignment.metadata,
+        assignmentKind,
+        ...(input.outcome?.kind === "worker"
+          ? {
+            workerSummary: input.outcome.summary,
+            workerOutcomeStatus: input.outcome.outcomeStatus,
+            blockingIssues: input.outcome.blockingIssues
+          }
+          : {}),
+        ...(input.outcome?.kind === "verification"
+          ? {
+            verificationSummary: input.outcome.summary,
+            verificationOutcomeStatus: input.outcome.outcomeStatus,
+            verificationFindings: input.outcome.findings,
+            verificationChangeRequests: input.outcome.changeRequests,
+            verificationEvidence: input.outcome.evidence
+          }
+          : {})
+      };
       const [updatedAssignment] = await this.db.update(workerDispatchAssignments).set({
         state: "completed",
-        claimedByNodeId: nodeId,
+        claimedByNodeId: input.nodeId,
         completedAt: now,
         lastFailureReason: null,
+        metadata: nextMetadata,
         updatedAt: now
       }).where(eq(workerDispatchAssignments.id, assignment.id)).returning();
 
       await this.db.update(agents).set({
         status: "stopped",
+        currentTaskId: null,
         updatedAt: now
       }).where(eq(agents.id, assignment.agentId));
 
-      await this.db.update(tasks).set({
-        status: "completed",
-        ownerAgentId: assignment.agentId,
-        updatedAt: now
-      }).where(eq(tasks.id, assignment.taskId));
-
       if (sessionId) {
         await this.db.update(sessions).set({
-          workerNodeId: nodeId,
-          stickyNodeId: nodeId,
+          workerNodeId: input.nodeId,
+          stickyNodeId: input.nodeId,
           state: "stopped",
           staleReason: null,
           updatedAt: now
         }).where(eq(sessions.id, sessionId));
       }
 
-      await this.maybeUnblockDependentTasks(assignment.runId, assignment.taskId, "completed");
+      if (assignmentKind === "verification" && input.outcome?.kind === "verification") {
+        const verificationStatus = input.outcome.outcomeStatus;
+        const taskStatus: Task["status"] = verificationStatus === "passed"
+          ? "completed"
+          : verificationStatus === "blocked"
+            ? "blocked"
+            : "awaiting_review";
+        await this.db.update(tasks).set({
+          status: taskStatus,
+          ownerAgentId: assignment.agentId,
+          verificationStatus,
+          verifierAgentId: assignment.agentId,
+          latestVerificationSummary: input.outcome.summary,
+          latestVerificationFindings: input.outcome.findings,
+          latestVerificationChangeRequests: input.outcome.changeRequests,
+          latestVerificationEvidence: input.outcome.evidence,
+          updatedAt: now
+        }).where(eq(tasks.id, assignment.taskId));
+
+        await this.recordControlPlaneEvent(
+          verificationStatus === "passed"
+            ? controlPlaneEventDefinitions.taskVerificationPassed
+            : verificationStatus === "blocked"
+              ? controlPlaneEventDefinitions.taskVerificationBlocked
+              : controlPlaneEventDefinitions.taskVerificationFailed,
+          {
+            runId: assignment.runId,
+            entityId: assignment.taskId,
+            status: verificationStatus,
+            summary: input.outcome.summary,
+            metadata: {
+              verifierAgentId: assignment.agentId,
+              findings: input.outcome.findings,
+              changeRequests: input.outcome.changeRequests,
+              evidence: input.outcome.evidence
+            }
+          }
+        );
+
+        if (verificationStatus === "passed") {
+          await this.maybeUnblockDependentTasks(assignment.runId, assignment.taskId, "completed");
+        }
+      } else {
+        const workerOutcome = input.outcome?.kind === "worker"
+          ? input.outcome
+          : {
+            kind: "worker" as const,
+            summary: "Assignment completed.",
+            outcomeStatus: "completed" as const,
+            blockingIssues: []
+          };
+
+        if (workerOutcome.outcomeStatus === "completed") {
+          if (taskRequiresVerification(this.mapTask(task))) {
+            const runDetail = await this.getRun(assignment.runId);
+            const repository = this.mapRepository(await this.assertRepositoryExists(runDetail.repositoryId));
+            const projectTeam = await this.loadRunProjectTeam(runDetail.projectTeamId);
+            await this.enqueueVerifierAssignment({
+              run: runDetail,
+              repository,
+              projectTeam,
+              task: this.mapTask(task),
+              workerAssignment: assignment,
+              workerOutcome
+            });
+          } else {
+            await this.db.update(tasks).set({
+              status: "completed",
+              ownerAgentId: assignment.agentId,
+              verificationStatus: "not_required",
+              verifierAgentId: null,
+              latestVerificationSummary: null,
+              latestVerificationFindings: [],
+              latestVerificationChangeRequests: [],
+              latestVerificationEvidence: [],
+              updatedAt: now
+            }).where(eq(tasks.id, assignment.taskId));
+            await this.maybeUnblockDependentTasks(assignment.runId, assignment.taskId, "completed");
+          }
+        } else if (workerOutcome.outcomeStatus === "blocked") {
+          await this.db.update(tasks).set({
+            status: "blocked",
+            ownerAgentId: assignment.agentId,
+            updatedAt: now
+          }).where(eq(tasks.id, assignment.taskId));
+        }
+      }
+
       await this.enqueueRunnableWorkerDispatches(assignment.runId);
       await this.reconcileRunExecutionState(assignment.runId);
 
@@ -4734,6 +5553,10 @@ export class ControlPlaneService {
 
     const nextAttempt = assignment.attempt + 1;
     const canRetry = nextAttempt < assignment.maxAttempts;
+    const nextMetadata = {
+      ...assignment.metadata,
+      assignmentKind
+    };
     const [updatedAssignment] = await this.db.update(workerDispatchAssignments).set({
       state: canRetry ? "retrying" : "failed",
       attempt: nextAttempt,
@@ -4742,7 +5565,8 @@ export class ControlPlaneService {
       claimedByNodeId: null,
       claimedAt: null,
       completedAt: canRetry ? null : now,
-      lastFailureReason: reason,
+      lastFailureReason: input.reason ?? null,
+      metadata: nextMetadata,
       updatedAt: now
     }).where(eq(workerDispatchAssignments.id, assignment.id)).returning();
 
@@ -4751,19 +5575,31 @@ export class ControlPlaneService {
         workerNodeId: null,
         stickyNodeId: canRetry ? null : assignment.stickyNodeId,
         state: canRetry ? "pending" : "stale",
-        staleReason: reason,
+        staleReason: input.reason ?? null,
         updatedAt: now
       }).where(eq(sessions.id, sessionId));
     }
 
     await this.db.update(agents).set({
       status: canRetry ? "idle" : "failed",
+      currentTaskId: canRetry ? assignment.taskId : null,
       updatedAt: now
     }).where(eq(agents.id, assignment.agentId));
 
     await this.db.update(tasks).set({
-      status: canRetry ? "pending" : "failed",
+      status: assignmentKind === "verification"
+        ? (canRetry ? "awaiting_review" : "failed")
+        : (canRetry ? "pending" : "failed"),
       ownerAgentId: assignment.agentId,
+      verificationStatus: assignmentKind === "verification"
+        ? (canRetry ? "requested" : "blocked")
+        : task.verificationStatus,
+      verifierAgentId: assignmentKind === "verification"
+        ? assignment.agentId
+        : task.verifierAgentId,
+      latestVerificationSummary: assignmentKind === "verification" && !canRetry
+        ? `Verification dispatch failed: ${input.reason ?? "unknown failure"}`
+        : task.latestVerificationSummary,
       updatedAt: now
     }).where(eq(tasks.id, assignment.taskId));
 
@@ -5040,7 +5876,11 @@ export class ControlPlaneService {
   }
 
   private mapRepeatableRunDefinition(record: RepeatableRunDefinitionRecord): RepeatableRunDefinition {
-    return repeatableRunDefinitionSchema.parse(record);
+    return repeatableRunDefinitionSchema.parse({
+      ...record,
+      projectTeamId: record.projectTeamId ?? null,
+      projectTeamName: record.projectTeamName ?? null
+    });
   }
 
   private mapRepeatableRunTrigger(record: RepeatableRunTriggerRecord): RepeatableRunTrigger {
@@ -5064,6 +5904,8 @@ export class ControlPlaneService {
     return {
       ...run,
       projectId: runProjectId,
+      projectTeamId: run.projectTeamId ?? null,
+      projectTeamName: run.projectTeamName ?? null,
       status: run.status as Run["status"],
       budgetCostUsd: centsToDollars(run.budgetCostUsd),
       branchPublishApprovalId: run.branchPublishApprovalId ?? null,

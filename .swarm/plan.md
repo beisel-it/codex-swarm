@@ -1,71 +1,120 @@
 # Swarm Plan
 
 ## Goal
-Projects should be able to plan repeatable runs that are able to react to modular external events - the first and DOD implementation will be triggering repeatable pre-configured runs that are executed when a webhook is received
+# Automatische Task-DoD-Verifikation mit Reviewer-Paarung
 
-The target design should be extensible later with further external inputs and should allow passing the received event to the run context
+  ## Summary
 
-An __EXAMPLE__ User story:
+  Jeder vom Leader erzeugte Task bekommt ein neues strukturiertes Feld definitionOfDone. Der Ausführer-Agent erhält diese DoD im Worker-Prompt und darf einen Task nicht mehr endgültig selbst freigeben.
+  Stattdessen läuft jeder DoD-fähige Task durch einen zweiten, automatisch erzeugten Verifikationsschritt. Der Verifier prüft die gelieferte Arbeit gegen die gespeicherte DoD und meldet nur das Ergebnis an
+  den Leader: bei Erfolg wird der Task abgeschlossen, bei Fehlern erzeugt der Leader einen neuen Rework-/Change-Request-Task auf Basis der Verifier-Findings.
 
-As a user of codex-swarm I would love it if codex-swarm could run preconfigured runs for a project on a received webhook. This will allow me to create a PR / Issue Review Run that triggers automatically when a new issue or PR is openend
+  ## Key Changes
 
-__FUTURE__ extension but current __NON GOAL__: we could extend this into service connections wrapped per upstream service that contain per service signals and pre defined configuration how to handle them. (these are only examples and are CLEARLY NON_GOAL - ready made connection to atlassian, gitlab, github, ms.......)
+  - Leader-Plan und Task-Verträge
+      - LeaderPlanTask und das Leader-JSON-Schema in packages/orchestration um definitionOfDone: string[] erweitern.
+      - Persistiertes Task-Schema in packages/contracts und API-Create-Flow um definitionOfDone erweitern; acceptanceCriteria bleibt bestehen, dient aber nur noch als menschenlesbare Kurzfassung bzw.
+        Kompatibilitätsfläche.
+      - Leader-Prompts so verschärfen, dass für jeden Task zwingend eine konkrete, überprüfbare DoD geliefert werden muss.
+      - Plan-Artefakte und Task-Detail-Ausgaben um die DoD ergänzen, damit Operatoren und Folgeagenten dieselbe Soll-Definition sehen.
+  - Ausführungs- und Review-Lifecycle
+      - Worker-Outcomes behalten completed|needs_slicing|blocked, aber completed bedeutet nur noch "bereit zur Verifikation", nicht direkt "Task final abgeschlossen".
+      - Nach erfolgreichem Worker-Assignment wird der Task in awaiting_review überführt und eine Verifier-Assignment erzeugt, statt ihn direkt auf completed zu setzen.
+      - Verifier erhält einen eigenen Prompt mit Taskbeschreibung, definitionOfDone, acceptanceCriteria, Worker-Summary, vorhandenen Artefakten, Validations und relevanten Nachrichten.
+      - Neuer Verifier-Outcome in packages/orchestration, z. B. passed|failed|blocked plus findings[], changeRequests[], optionale Evidenz-Artefakte und Nachricht an den Leader.
+      - Bei passed wird der ursprüngliche Task auf completed gesetzt.
+      - Bei failed bleibt der ursprüngliche Task offen bzw. geht in einen Rework-Zustand über, und der Leader erzeugt genau einen neuen Follow-up-Task mit den Verifier-Change-Requests; der ursprüngliche Task
+        hängt von diesem Rework-Task ab oder wird darüber wieder geöffnet.
+      - Bei blocked des Verifiers wird wie heute über den Leader eskaliert, nicht durch direkte Task-Erzeugung des Verifiers.
+      - validationTemplates bleiben erhalten und laufen weiterhin als maschinelle Prüfung; der Verifier nutzt deren Resultate als Evidenz, ersetzt sie aber nicht.
+  - Rollen- und Scheduling-Regeln
+      - Primärer Verifier-Typ ist eine vorhandene Review-Rolle des Teams; bevorzugt reviewer, sonst jede bestehende Rolle mit Review-Charakter wie visual-reviewer.
+      - Falls kein geeigneter Reviewer vorhanden ist, fällt die Verifikation auf einen zweiten Agenten derselben Fachrolle wie der Ausführer zurück.
+      - Der Verifier muss immer ein anderer Agent als der Ausführer sein.
+      - Dispatch-/Concurrency-Logik so anpassen, dass der Verifier als zweiter Schritt desselben Tasks eingeplant wird, ohne den DAG zu duplizieren.
+      - Run-Abschlusslogik so ändern, dass awaiting_review nie als abgeschlossen zählt und ein Run erst fertig ist, wenn alle Tasks die Verifikation bestanden haben.
+  - API, Observability und UI
+      - Task- und Run-Responses um DoD- und Verifikationsmetadaten ergänzen, mindestens: definitionOfDone, verificationStatus, verifierAgentId, latestVerificationSummary.
+      - Neue Control-Plane-Events ergänzen, z. B. task.verification_requested, task.verification_passed, task.verification_failed.
+      - Review-/Board-/Lifecycle-Flächen so erweitern, dass sichtbar ist: Ausführer fertig, Verifikation läuft, Verifikation fehlgeschlagen, Rework angefordert.
+  - Run-/Task-Status-Reconciliation, Dispatch-Queueing und Concurrency verhalten sich korrekt mit Worker+Verifier-Paaren.
+  - UI/TUI zeigen DoD, Verifikationsstatus und offene Change Requests konsistent an.
+  - Bestehende Validation-Template-Flows bleiben funktionsfähig und werden als Evidenz im Verifier-Prompt sichtbar.
+
+  ## Assumptions and Defaults
+
+  - definitionOfDone ist das normative Prüfziel; acceptanceCriteria bleibt aus Kompatibilitäts- und UI-Gründen bestehen.
+  - Verifier dürfen keine Folge-Tasks direkt anlegen und keine Fixes selbst ausführen; nur der Leader resliced bzw. erzeugt Rework.
+  - Jede taskgebundene Verifikation ist verpflichtend für alle neuen Leader-generierten Tasks.
+  - Verifikations-Fallback ohne Reviewer-Rolle erfolgt auf einen zweiten Agenten derselben Fachrolle.
+  - Vorhandene Runs/Tasks ohne definitionOfDone bleiben lesbar; die neue automatische Verifikation gilt nur für neu geplante Tasks nach dem Schema-Upgrade.
 
 ## Summary
-Implement repeatable webhook-triggered runs by adding extensible trigger configuration, inbound webhook handling, run-context event propagation, execution wiring, UI/API management, and operational documentation while keeping upstream service-specific integrations out of scope.
+Initial near-term swarm slice covers contract/schema groundwork, verification lifecycle implementation, operator-facing UI states, repeatable validation, documentation, and an integration review before closure.
 
 ## Tasks
 
-1. Define extensible external trigger architecture
-   Role: tech-lead
-   Description: Design the first-class model for repeatable project runs that can be triggered by modular external events, with webhook reception as the initial implementation. Specify how trigger definitions reference preconfigured run templates, how inbound event payloads are normalized into run context, and how the design remains extensible for future non-webhook input sources without introducing service-specific connectors in this milestone.
+1. Define verification UX states and task detail presentation
+   Role: designer
+   Description: Design the operator-facing states for task execution and verification so board, review, lifecycle, and task detail surfaces show definition of done, awaiting_review, verification passed, verification failed, and rework requested consistently.
    Acceptance Criteria:
-   - Architecture defines entities and lifecycle for reusable run configuration, external trigger definitions, and inbound event context propagation.
-   - Webhook is explicitly scoped as the first trigger type while future trigger/input types can be added without breaking the core model.
-   - Run context contract includes a structured place for the received event payload and trigger metadata.
-   - Non-goals exclude upstream vendor-specific service connection implementations in this milestone.
+   - State definitions cover board cards, task detail, review views, and lifecycle history for the new verification flow.
+   - Design notes specify how definitionOfDone, verificationStatus, verifier identity, latest verification summary, and open change requests should be displayed.
+   - Handoff includes explicit UI copy and empty/loading/error states for verification metadata.
 
-2. Add shared contracts for trigger configuration and event context
+2. Extend planning and persisted task contracts with definition of done
    Role: backend-developer
-   Description: Implement shared contract types and validation schemas for repeatable run definitions, webhook trigger configuration, inbound event envelopes, and the run context shape that carries received external event data through orchestration.
+   Description: Add definitionOfDone to leader planning schemas, persisted task contracts, API create/read flows, and task artifacts while keeping acceptanceCriteria as a compatibility-facing summary field. Tighten leader prompt contracts so new tasks always include concrete, testable DoD items.
    Acceptance Criteria:
-   - Shared contracts validate trigger configuration, webhook metadata, and event-to-run context payloads.
-   - Contracts are usable by API, worker, and frontend without duplicating schema definitions.
-   - Run context schema supports passing the received event and trigger metadata into execution.
-   - Schema design is additive and leaves room for future external input types.
+   - Leader plan task types and emitted leader JSON schema include definitionOfDone: string[] for newly planned tasks.
+   - Persisted task schemas and task creation/read APIs carry definitionOfDone without breaking reads of legacy tasks that lack it.
+   - Task detail and plan artifacts expose definitionOfDone alongside acceptanceCriteria for downstream agents and operators.
+   - Leader prompt contract requires concrete, verifiable definitionOfDone output for every new task.
 
-3. Implement webhook ingestion and run triggering API flow
+3. Implement verifier pairing and review-gated task completion
    Role: backend-developer
-   Description: Add API support for receiving configured webhooks, validating the trigger configuration, storing audit information, and enqueueing the corresponding repeatable run with the normalized event attached to run context.
+   Description: Change orchestration so worker completion means ready for verification, then enqueue a distinct verifier assignment for a different agent, prefer reviewer-type roles with fallback to a second agent of the worker's specialty, capture verifier outcomes and findings, gate task completion on passed, and drive failed/blocking paths through the leader without verifier-authored follow-up tasks.
    Acceptance Criteria:
-   - API exposes a webhook ingestion path that resolves a configured repeatable run trigger.
-   - Inbound requests are validated against configured trigger definitions before a run is created.
-   - Triggered runs persist enough audit information to trace webhook receipt to run creation.
-   - The enqueued run includes normalized event data in the run context passed to orchestration.
+   - Worker completed outcomes transition tasks into awaiting_review instead of directly completed, and run completion logic excludes awaiting_review tasks.
+   - Verifier assignment is created automatically with a different agent than the worker, preferring reviewer roles and otherwise falling back to a second agent of the same functional role.
+   - Verifier prompt includes task description, definitionOfDone, acceptanceCriteria, worker summary, artifacts, validations, and relevant messages.
+   - Verifier outcomes support passed, failed, and blocked with findings/change requests/evidence and update task state accordingly.
+   - Failed verification does not let the verifier create tasks directly and instead returns structured findings that the leader can use for a single rework task.
+   - Control-plane events and API responses expose verificationStatus, verifierAgentId, latestVerificationSummary, and related verification metadata.
 
-4. Propagate external event context through worker execution
-   Role: backend-developer
-   Description: Update worker and orchestration execution paths so triggered runs receive the external event context consistently, making it available to repeatable run logic and downstream agents without special-casing webhook semantics inside the core execution loop.
-   Acceptance Criteria:
-   - Worker execution loads and forwards external event context from the triggered run record into runtime context.
-   - Repeatable run execution can read structured trigger metadata and original/normalized event payloads.
-   - Execution changes do not regress manually started runs that have no external event context.
-   - Core execution remains generic enough to support future trigger sources beyond webhooks.
-
-5. Add project-facing configuration surfaces for repeatable webhook runs
+4. Expose definition of done and verification lifecycle in product surfaces
    Role: frontend-developer
-   Description: Implement frontend support to create, inspect, and manage repeatable run configurations and webhook trigger definitions so users can configure automatic runs for cases like PR or issue review without editing raw backend records.
+   Description: Implement the designed UI changes so board, review, lifecycle, and task detail surfaces show definitionOfDone, verification progress, verifier metadata, latest verification summary, and open change requests using the new backend contracts.
    Acceptance Criteria:
-   - UI lets users associate a repeatable run configuration with a webhook trigger for a project.
-   - UI surfaces the trigger status and enough detail to understand what event data will be passed to the run.
-   - Validation errors and misconfiguration states from API contracts are shown clearly.
-   - Frontend uses shared contracts/endpoints rather than introducing divergent trigger models.
+   - Task detail surfaces render definitionOfDone and distinguish it from acceptanceCriteria.
+   - Board and lifecycle views visibly differentiate worker finished, verification running, verification failed, rework requested, and completed after verification.
+   - Review-oriented surfaces show verifier metadata, latest verification summary, and open change requests when present.
+   - UI behavior matches the agreed design states and handles absent verification metadata for legacy tasks gracefully.
 
-6. Verify end-to-end behavior and document operator workflow
-   Role: technical-writer
-   Description: Produce end-to-end verification coverage and operational documentation for configuring a repeatable webhook-triggered run, receiving a webhook, and observing the resulting run with attached event context. Document current scope and explicit non-goals for future service-specific integrations.
+5. Prove verification-gated completion with repeatable checks
+   Role: tester
+   Description: Add repeatable test coverage and validation evidence for the new contracts and execution lifecycle, including legacy compatibility, verifier pairing rules, run completion gating, and validation-template evidence propagation into verifier context.
    Acceptance Criteria:
-   - Verification covers configured webhook receipt leading to creation and execution of the intended repeatable run.
-   - Documentation explains how event payload and trigger metadata are available in run context.
-   - Operational docs describe setup, expected behavior, and debugging/audit points for webhook-triggered runs.
-   - Docs clearly state that service-specific integrations and connection packs are future work and not part of this delivery.
+   - Automated coverage exercises new-task creation with definitionOfDone and legacy-task reads without it.
+   - Lifecycle tests prove worker completion routes to awaiting_review, verifier assignment is distinct from the worker, and only passed verification leads to completed.
+   - Failure-path tests prove verifier findings do not create tasks directly and instead leave actionable data for leader-driven rework.
+   - Run reconciliation and queueing tests cover worker plus verifier pairing without DAG duplication or premature run completion.
+   - Validation-template results remain functional and are visible as evidence in verifier inputs or stored verification context.
+
+6. Document operator and rollout changes for DoD-based verification
+   Role: technical-writer
+   Description: Update operator-facing and rollout documentation to explain the new meaning of definitionOfDone, the worker-to-verifier lifecycle, reviewer fallback rules, legacy-task behavior, and how change requests and verification states appear in the system.
+   Acceptance Criteria:
+   - Docs explain that definitionOfDone is the normative verification target and acceptanceCriteria remains a compatibility-oriented summary.
+   - Operator guidance describes awaiting_review, verification outcomes, rework handling, and verifier non-authority to create follow-up tasks directly.
+   - Rollout notes cover legacy tasks without definitionOfDone and clarify that mandatory automatic verification applies to newly planned tasks only.
+   - Documentation references the UI and API fields operators will use to inspect verification state and findings.
+
+7. Review end-to-end correctness of the verification pairing change
+   Role: reviewer
+   Description: Perform a focused integration review of the shipped backend, frontend, tests, and docs to catch regressions in pairing rules, task closure semantics, rework generation boundaries, and operator visibility before the milestone is accepted.
+   Acceptance Criteria:
+   - Review checks that no task can be finally closed from worker completion alone for the new flow.
+   - Review verifies verifier-agent separation, reviewer-role preference, and same-role fallback behavior are implemented consistently.
+   - Review confirms failed verification yields leader-consumable findings/change requests without verifier-side fixes or direct follow-up task creation.
+   - Review reports any remaining correctness or rollout risks across API, orchestration, UI, and documentation.

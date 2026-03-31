@@ -15,6 +15,7 @@ import {
   inboundExternalEventEnvelopeSchema,
   identityEntrypointSchema,
   projectDetailSchema,
+  projectTeamImportSchema,
   projectSummarySchema,
   repeatableRunDefinitionSchema,
   repeatableRunTriggerCreateSchema,
@@ -42,7 +43,8 @@ import {
   workerNodeRuntimeSchema,
   workerNodeRegisterSchema,
   validationCreateSchema,
-  taskCreateSchema
+  taskCreateSchema,
+  taskSchema
 } from "../src/index.js";
 
 describe("repositoryCreateSchema", () => {
@@ -237,10 +239,33 @@ describe("project schemas", () => {
     const run = runCreateSchema.parse({
       repositoryId: "550e8400-e29b-41d4-a716-446655440000",
       projectId: "550e8400-e29b-41d4-a716-446655440010",
+      projectTeamId: "550e8400-e29b-41d4-a716-446655440011",
       goal: "Ship alpha"
     });
 
     expect(run.projectId).toBe("550e8400-e29b-41d4-a716-446655440010");
+  });
+});
+
+describe("projectTeamImportSchema", () => {
+  it("accepts blueprint-based project team imports", () => {
+    const input = projectTeamImportSchema.parse({
+      projectId: "550e8400-e29b-41d4-a716-446655440110",
+      blueprintId: "development-stack"
+    });
+
+    expect(input.blueprintId).toBe("development-stack");
+    expect(input.templateId).toBeUndefined();
+  });
+
+  it("keeps templateId as a compatibility alias for blueprintId", () => {
+    const input = projectTeamImportSchema.parse({
+      projectId: "550e8400-e29b-41d4-a716-446655440111",
+      templateId: "development-stack"
+    });
+
+    expect(input.templateId).toBe("development-stack");
+    expect(input.blueprintId).toBeUndefined();
   });
 });
 
@@ -255,7 +280,102 @@ describe("taskCreateSchema", () => {
 
     expect(task.priority).toBe(3);
     expect(task.dependencyIds).toEqual([]);
+    expect(task.definitionOfDone).toEqual([]);
     expect(task.acceptanceCriteria).toEqual([]);
+  });
+
+  it("preserves a supplied definition of done for new task creation", () => {
+    const task = taskCreateSchema.parse({
+      runId: "550e8400-e29b-41d4-a716-446655440000",
+      title: "Write tests",
+      description: "Add coverage for verification-gated completion",
+      role: "tester",
+      definitionOfDone: [
+        "new task creation persists structured definition of done checks"
+      ],
+      acceptanceCriteria: ["task remains readable in operator UIs"]
+    });
+
+    expect(task.definitionOfDone).toEqual([
+      "new task creation persists structured definition of done checks"
+    ]);
+    expect(task.acceptanceCriteria).toEqual([
+      "task remains readable in operator UIs"
+    ]);
+  });
+});
+
+describe("taskSchema", () => {
+  it("defaults verification fields for new persisted tasks", () => {
+    const now = new Date("2026-03-30T09:00:00.000Z");
+    const task = taskSchema.parse({
+      id: "550e8400-e29b-41d4-a716-446655440091",
+      runId: "550e8400-e29b-41d4-a716-446655440000",
+      parentTaskId: null,
+      title: "Reviewable task",
+      description: "Carries verification metadata",
+      role: "backend-developer",
+      status: "awaiting_review",
+      priority: 2,
+      ownerAgentId: "550e8400-e29b-41d4-a716-446655440092",
+      definitionOfDone: ["implementation is reviewable"],
+      acceptanceCriteria: ["implementation is reviewable"],
+      validationTemplates: [],
+      createdAt: now,
+      updatedAt: now
+    });
+
+    expect(task.verificationStatus).toBe("not_required");
+    expect(task.verifierAgentId).toBeNull();
+    expect(task.latestVerificationSummary).toBeNull();
+    expect(task.latestVerificationFindings).toEqual([]);
+    expect(task.latestVerificationChangeRequests).toEqual([]);
+    expect(task.latestVerificationEvidence).toEqual([]);
+  });
+
+  it("accepts legacy persisted tasks without definitionOfDone", () => {
+    const now = new Date("2026-03-30T09:00:00.000Z");
+    const task = taskSchema.parse({
+      id: "550e8400-e29b-41d4-a716-446655440090",
+      runId: "550e8400-e29b-41d4-a716-446655440000",
+      parentTaskId: null,
+      title: "Legacy task",
+      description: "Predates definition of done persistence",
+      role: "backend-developer",
+      status: "pending",
+      priority: 3,
+      ownerAgentId: null,
+      dependencyIds: [],
+      acceptanceCriteria: ["legacy summary remains available"],
+      validationTemplates: [],
+      createdAt: now,
+      updatedAt: now
+    });
+
+    expect(task.definitionOfDone).toEqual([]);
+    expect(task.acceptanceCriteria).toEqual(["legacy summary remains available"]);
+  });
+});
+
+describe("workerDispatchCompleteSchema", () => {
+  it("accepts structured verification completion outcomes", () => {
+    const completion = workerDispatchCompleteSchema.parse({
+      nodeId: "550e8400-e29b-41d4-a716-446655440099",
+      status: "completed",
+      outcome: {
+        kind: "verification",
+        summary: "Definition of done is not satisfied yet.",
+        outcomeStatus: "failed",
+        findings: ["The task does not include the requested verification output."],
+        changeRequests: ["Add the missing verification output and rerun the checks."],
+        evidence: ["artifact:.swarm/reports/verification.md"]
+      }
+    });
+
+    expect(completion.outcome).toMatchObject({
+      kind: "verification",
+      outcomeStatus: "failed"
+    });
   });
 });
 
@@ -265,6 +385,8 @@ describe("repeatableRunDefinitionSchema", () => {
     const definition = repeatableRunDefinitionSchema.parse({
       id: "550e8400-e29b-41d4-a716-446655440100",
       repositoryId: "550e8400-e29b-41d4-a716-446655440000",
+      projectTeamId: "550e8400-e29b-41d4-a716-446655440011",
+      projectTeamName: "Issue review team",
       workspaceId: "workspace-1",
       teamId: "team-1",
       name: "Issue review",
@@ -285,6 +407,31 @@ describe("repeatableRunDefinitionSchema", () => {
     expect(definition.execution.metadata).toEqual({
       preset: "issue-review"
     });
+  });
+
+  it("accepts legacy stored repeatable run definitions without a project team id", () => {
+    const now = new Date("2026-03-30T09:00:00.000Z");
+    const definition = repeatableRunDefinitionSchema.parse({
+      id: "550e8400-e29b-41d4-a716-446655440100",
+      repositoryId: "550e8400-e29b-41d4-a716-446655440000",
+      projectTeamId: null,
+      projectTeamName: null,
+      workspaceId: "workspace-1",
+      teamId: "team-1",
+      name: "Legacy repeatable run",
+      description: null,
+      status: "active",
+      execution: {
+        goal: "Use legacy settings",
+        concurrencyCap: 1,
+        metadata: {}
+      },
+      createdAt: now,
+      updatedAt: now
+    });
+
+    expect(definition.projectTeamId).toBeNull();
+    expect(definition.projectTeamName).toBeNull();
   });
 });
 
@@ -439,6 +586,7 @@ describe("runDetailSchema", () => {
           priority: 3,
           ownerAgentId: null,
           dependencyIds: [],
+          definitionOfDone: [],
           acceptanceCriteria: [],
           validationTemplates: [],
           createdAt: now,
@@ -455,6 +603,7 @@ describe("runDetailSchema", () => {
           priority: 3,
           ownerAgentId: null,
           dependencyIds: ["550e8400-e29b-41d4-a716-446655440010"],
+          definitionOfDone: [],
           acceptanceCriteria: [],
           validationTemplates: [],
           createdAt: now,
@@ -605,6 +754,8 @@ describe("runsByJobScopeSchema", () => {
           id: "550e8400-e29b-41d4-a716-446655440020",
           repositoryId: "550e8400-e29b-41d4-a716-446655440001",
           projectId: "550e8400-e29b-41d4-a716-446655440010",
+          projectTeamId: "550e8400-e29b-41d4-a716-446655440011",
+          projectTeamName: "Core delivery",
           workspaceId: "workspace-1",
           teamId: "team-1",
           goal: "Project run",

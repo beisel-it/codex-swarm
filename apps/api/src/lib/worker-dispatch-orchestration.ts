@@ -1,15 +1,18 @@
 import { execFile } from "node:child_process";
-import { readFile } from "node:fs/promises";
 import { isAbsolute, resolve } from "node:path";
 import { promisify } from "node:util";
 import type {
+  Artifact,
   Repository,
   RunDetail,
   Session,
+  ValidationHistoryEntry,
   WorkerDispatchAssignment
 } from "@codex-swarm/contracts";
 import {
+  buildVerifierTaskExecutionPrompt,
   buildWorkerTaskExecutionPrompt,
+  parseVerifierTaskOutcome,
   parseWorkerTaskOutcome
 } from "@codex-swarm/orchestration";
 import {
@@ -84,6 +87,23 @@ function toDate(value: Date | string | null | undefined) {
   return value instanceof Date ? value : new Date(value);
 }
 
+function getOptionalEnv(name: string) {
+  const value = process.env[name]?.trim();
+  return value && value.length > 0 ? value : null;
+}
+
+function resolveCodexExecutionProfile() {
+  return getOptionalEnv("CODEX_SWARM_WORKER_PROFILE") ?? "default";
+}
+
+function resolveAssignmentExecutionProfile(_profile: string | null | undefined) {
+  // Project-team profiles identify the intended swarm role, not a guaranteed
+  // local Codex CLI profile on the worker host. Worker execution must use the
+  // configured runtime profile instead of forwarding role names like
+  // "leader" or "design-researcher" into `codex exec -p ...`.
+  return resolveCodexExecutionProfile();
+}
+
 function toSessionRecord(session: Session, worktreePath: string) {
   return {
     sessionId: session.id,
@@ -105,6 +125,10 @@ function resolveAssignmentTask(runDetail: RunDetail, assignment: WorkerDispatchA
     : null;
 }
 
+function resolveAssignmentKind(assignment: WorkerDispatchAssignment) {
+  return assignment.metadata?.assignmentKind === "verification" ? "verification" : "worker";
+}
+
 function buildInboundMessages(
   runDetail: RunDetail,
   assignment: WorkerDispatchAssignment,
@@ -115,6 +139,27 @@ function buildInboundMessages(
   return messages
     .filter((message) => message.senderAgentId !== assignment.agentId)
     .filter((message) => message.kind === "broadcast" || message.recipientAgentId === assignment.agentId)
+    .map((message) => ({
+      sender: message.senderAgentId ? (agentNames.get(message.senderAgentId) ?? message.senderAgentId) : "system",
+      body: message.body
+    }));
+}
+
+function buildVerifierMessages(
+  runDetail: RunDetail,
+  assignment: WorkerDispatchAssignment,
+  messages: RunMessage[]
+) {
+  const workerAgentId = typeof assignment.metadata?.workerAgentId === "string"
+    ? assignment.metadata.workerAgentId
+    : null;
+  const agentNames = new Map(runDetail.agents.map((agent) => [agent.id, agent.name] as const));
+
+  return messages
+    .filter((message) => message.kind === "broadcast"
+      || message.senderAgentId === workerAgentId
+      || message.recipientAgentId === workerAgentId
+      || message.recipientAgentId === assignment.agentId)
     .map((message) => ({
       sender: message.senderAgentId ? (agentNames.get(message.senderAgentId) ?? message.senderAgentId) : "system",
       body: message.body
@@ -143,7 +188,13 @@ async function publishWorkerOutcomeMessages(
   runDetail: RunDetail,
   assignment: WorkerDispatchAssignment,
   summary: string,
-  outcome: ReturnType<typeof parseWorkerTaskOutcome>
+  outcome: {
+    summary?: string;
+    status: string;
+    messages: Array<{ target: string; body: string }>;
+    blockingIssues?: string[];
+    artifacts?: unknown[];
+  }
 ) {
   const leaderAgent = runDetail.agents.find((agent) => agent.role === "tech-lead" && agent.id !== assignment.agentId) ?? null;
   const postedTargets = new Set<string>();
@@ -279,14 +330,20 @@ async function recordWorkerOutcomeArtifacts(
   request: WorkerDispatchOrchestrationRequest,
   assignment: WorkerDispatchAssignment,
   workspacePath: string,
-  outcome: ReturnType<typeof parseWorkerTaskOutcome>
+  outcome: {
+    artifacts?: Array<{
+      kind: string;
+      path: string;
+      contentType: string;
+      contentBase64?: string;
+      metadata?: Record<string, unknown>;
+    }>;
+  }
 ) {
   for (const artifact of outcome.artifacts ?? []) {
     const resolvedArtifactPath = isAbsolute(artifact.path)
       ? artifact.path
       : resolve(workspacePath, artifact.path);
-    const contentBase64 = artifact.contentBase64
-      ?? (await readFile(resolvedArtifactPath)).toString("base64");
 
     await request(
       "POST",
@@ -297,7 +354,9 @@ async function recordWorkerOutcomeArtifacts(
         kind: artifact.kind,
         path: artifact.path,
         contentType: artifact.contentType,
-        contentBase64,
+        ...(artifact.contentBase64
+          ? { contentBase64: artifact.contentBase64 }
+          : {}),
         metadata: {
           source: "worker-outcome",
           assignmentId: assignment.id,
@@ -357,6 +416,27 @@ async function recordWorkerOutcomeHandoff(
   }
 }
 
+function buildVerifierArtifactContexts(taskArtifacts: Artifact[]) {
+  return taskArtifacts.map((artifact) => ({
+    kind: artifact.kind,
+    path: artifact.path,
+    contentType: artifact.contentType,
+    summary: typeof artifact.metadata?.source === "string"
+      ? `source=${artifact.metadata.source}`
+      : null
+  }));
+}
+
+function buildVerifierValidationContexts(taskValidations: ValidationHistoryEntry[]) {
+  return taskValidations.map((validation) => ({
+    name: validation.name,
+    status: validation.status,
+    command: validation.command,
+    summary: validation.summary ?? null,
+    artifactPath: validation.artifactPath ?? null
+  }));
+}
+
 export async function runManagedWorkerDispatch(
   input: WorkerDispatchOrchestrationInput
 ): Promise<WorkerDispatchOrchestrationResult | null> {
@@ -399,7 +479,7 @@ export async function runManagedWorkerDispatch(
   const supervisor = new CodexServerSupervisor({
     config: {
       cwd: workspace.path,
-      profile: assignment.profile,
+      profile: resolveAssignmentExecutionProfile(assignment.profile),
       sandbox: assignment.sandbox,
       approvalPolicy: assignment.approvalPolicy,
       includePlanTool: assignment.includePlanTool
@@ -410,18 +490,43 @@ export async function runManagedWorkerDispatch(
   try {
     const runMessages = await input.request<RunMessage[]>("GET", `/api/v1/messages?runId=${assignment.runId}`);
     const task = resolveAssignmentTask(runDetail, assignment);
+    const assignmentKind = resolveAssignmentKind(assignment);
     const inboundMessages = buildInboundMessages(runDetail, assignment, runMessages);
     const effectivePrompt = task
-      ? buildWorkerTaskExecutionPrompt({
-        repositoryName: repository.name,
-        runGoal: runDetail.goal,
-        runContext: runDetail.context,
-        taskTitle: task.title,
-        taskRole: task.role,
-        taskDescription: [task.description, assignment.prompt].filter(Boolean).join("\n\nOperator brief:\n"),
-        acceptanceCriteria: task.acceptanceCriteria,
-        inboundMessages
-      })
+      ? assignmentKind === "verification"
+        ? buildVerifierTaskExecutionPrompt({
+          repositoryName: repository.name,
+          runGoal: runDetail.goal,
+          runContext: runDetail.context,
+          taskTitle: task.title,
+          taskRole: task.role,
+          taskDescription: [task.description, assignment.prompt].filter(Boolean).join("\n\nOperator brief:\n"),
+          definitionOfDone: task.definitionOfDone,
+          acceptanceCriteria: task.acceptanceCriteria,
+          workerSummary: typeof assignment.metadata?.workerSummary === "string"
+            ? assignment.metadata.workerSummary
+            : "No worker summary was captured.",
+          artifacts: buildVerifierArtifactContexts(
+            (await input.request<Artifact[]>("GET", `/api/v1/artifacts?runId=${assignment.runId}`))
+              .filter((artifact) => artifact.taskId === task.id)
+          ),
+          validations: buildVerifierValidationContexts(
+            (await input.request<ValidationHistoryEntry[]>("GET", `/api/v1/validations?runId=${assignment.runId}`))
+              .filter((validation) => validation.taskId === task.id)
+          ),
+          relevantMessages: buildVerifierMessages(runDetail, assignment, runMessages)
+        })
+        : buildWorkerTaskExecutionPrompt({
+          repositoryName: repository.name,
+          runGoal: runDetail.goal,
+          runContext: runDetail.context,
+          taskTitle: task.title,
+          taskRole: task.role,
+          taskDescription: [task.description, assignment.prompt].filter(Boolean).join("\n\nOperator brief:\n"),
+          definitionOfDone: task.definitionOfDone,
+          acceptanceCriteria: task.acceptanceCriteria,
+          inboundMessages
+        })
       : assignment.prompt;
     const existingSession = assignment.sessionId
       ? runDetail.sessions.find((candidate) => candidate.id === assignment.sessionId)
@@ -522,48 +627,99 @@ export async function runManagedWorkerDispatch(
       supervisorStatus = stopped.supervisor.status === "failed" ? "failed" : "stopped";
     }
 
+    let completionPayload: Record<string, unknown> | null = null;
+
     if (responseOutput && assignment.taskId) {
-      const outcome = parseWorkerTaskOutcome(responseOutput);
-      const synchronizedBranchName = await synchronizeRunBranchContext(input.request, runDetail, workspace.path);
+      if (assignmentKind === "verification") {
+        const outcome = parseVerifierTaskOutcome(responseOutput);
 
-      await recordWorkerOutcomeArtifacts(
-        input.request,
-        assignment,
-        workspace.path,
-        outcome
-      );
+        await recordWorkerOutcomeArtifacts(
+          input.request,
+          assignment,
+          workspace.path,
+          outcome
+        );
 
-      await recordWorkerOutcomeHandoff(
-        input.request,
-        runDetail,
-        repository,
-        assignment,
-        outcome,
-        synchronizedBranchName
-      );
+        await publishWorkerOutcomeMessages(
+          input.request,
+          runDetail,
+          assignment,
+          outcome.summary,
+          {
+            summary: outcome.summary,
+            status: outcome.status === "passed" ? "completed" : "blocked",
+            messages: outcome.messages,
+            blockingIssues: outcome.blockingIssues,
+            ...(outcome.artifacts ? { artifacts: outcome.artifacts } : {})
+          }
+        );
 
-      await publishWorkerOutcomeMessages(
-        input.request,
-        runDetail,
-        assignment,
-        outcome.summary,
-        outcome
-      );
+        completionPayload = {
+          outcome: {
+            kind: "verification",
+            summary: outcome.summary,
+            outcomeStatus: outcome.status,
+            findings: outcome.findings,
+            changeRequests: outcome.changeRequests,
+            evidence: [
+              ...outcome.findings.map((finding) => `finding:${finding}`),
+              ...outcome.changeRequests.map((request) => `change_request:${request}`),
+              ...(outcome.artifacts ?? []).map((artifact) => `artifact:${artifact.path}`)
+            ]
+          }
+        };
+      } else {
+        const outcome = parseWorkerTaskOutcome(responseOutput);
+        const synchronizedBranchName = await synchronizeRunBranchContext(input.request, runDetail, workspace.path);
 
-      if (outcome.status === "needs_slicing") {
-        await runLeaderResliceLoop({
-          request: input.request,
-          runId: assignment.runId,
-          parentTaskId: assignment.taskId,
-          actorId: assignment.agentId,
-          workerOutcome: outcome,
-          executeTool: input.executeTool,
-          ...(input.supervisorCommand ? { supervisorCommand: input.supervisorCommand } : {})
-        });
+        await recordWorkerOutcomeArtifacts(
+          input.request,
+          assignment,
+          workspace.path,
+          outcome
+        );
+
+        await recordWorkerOutcomeHandoff(
+          input.request,
+          runDetail,
+          repository,
+          assignment,
+          outcome,
+          synchronizedBranchName
+        );
+
+        await publishWorkerOutcomeMessages(
+          input.request,
+          runDetail,
+          assignment,
+          outcome.summary,
+          outcome
+        );
+
+        if (outcome.status === "needs_slicing" || (outcome.status === "blocked" && outcome.blockerKind === "actionable")) {
+          await runLeaderResliceLoop({
+            request: input.request,
+            runId: assignment.runId,
+            parentTaskId: assignment.taskId,
+            actorId: assignment.agentId,
+            workerOutcome: outcome,
+            executeTool: input.executeTool,
+            ...(input.supervisorCommand ? { supervisorCommand: input.supervisorCommand } : {})
+          });
+        }
+
+        completionPayload = {
+          outcome: {
+            kind: "worker",
+            summary: outcome.summary,
+            outcomeStatus: outcome.status,
+            blockingIssues: outcome.blockingIssues
+          }
+        };
       }
     }
 
-    if (assignment.taskId) {
+    if (assignment.taskId && assignmentKind !== "verification") {
       const task = resolveAssignmentTask(runDetail, assignment);
 
       if (task) {
@@ -585,7 +741,8 @@ export async function runManagedWorkerDispatch(
       `/api/v1/worker-dispatch-assignments/${assignment.id}`,
       {
         nodeId: input.nodeId,
-        status: "completed"
+        status: "completed",
+        ...(completionPayload ?? {})
       }
     );
 

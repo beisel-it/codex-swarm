@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 
 import { getConfig } from "../src/config.js";
+import { CURRENT_CONTROL_PLANE_SCHEMA_VERSION } from "../src/db/versioning.js";
 
 describe("getConfig", () => {
   const originalNodeEnv = process.env.NODE_ENV;
@@ -63,7 +64,7 @@ describe("getConfig", () => {
       HOST: "0.0.0.0",
       ARTIFACT_STORAGE_ROOT: ".swarm/artifacts",
       ARTIFACT_BASE_URL: "http://localhost:3000",
-      CONTROL_PLANE_SCHEMA_VERSION: "2026-03-30",
+      CONTROL_PLANE_SCHEMA_VERSION: CURRENT_CONTROL_PLANE_SCHEMA_VERSION,
       CONTROL_PLANE_CONFIG_VERSION: "1",
       DEV_AUTH_TOKEN: "codex-swarm-dev-token",
       DEV_AUTH_ROLE: "platform-admin",
@@ -92,7 +93,7 @@ describe("getConfig", () => {
       GIT_COMMAND: "git",
       GITHUB_CLI_COMMAND: "gh",
       CORS_ALLOWED_ORIGINS: [],
-      CONTROL_PLANE_SCHEMA_VERSION: "2026-03-30",
+      CONTROL_PLANE_SCHEMA_VERSION: CURRENT_CONTROL_PLANE_SCHEMA_VERSION,
       CONTROL_PLANE_CONFIG_VERSION: "2",
       DEV_AUTH_TOKEN: "secret-token",
       DEV_AUTH_PRINCIPAL: "alice",
@@ -135,7 +136,7 @@ describe("getConfig", () => {
       GIT_COMMAND: "git",
       GITHUB_CLI_COMMAND: "gh",
       CORS_ALLOWED_ORIGINS: [],
-      CONTROL_PLANE_SCHEMA_VERSION: "2026-03-30",
+      CONTROL_PLANE_SCHEMA_VERSION: CURRENT_CONTROL_PLANE_SCHEMA_VERSION,
       CONTROL_PLANE_CONFIG_VERSION: "2",
       DEV_AUTH_TOKEN: "secret-token",
       DEV_AUTH_PRINCIPAL: "alice",

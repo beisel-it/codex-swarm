@@ -18,6 +18,7 @@ const paramsSchema = z.object({
   id: z.uuid()
 });
 
+const ARTIFACT_ROUTE_BODY_LIMIT_BYTES = 256 * 1024 * 1024;
 const MAX_ARTIFACT_DETAIL_BYTES = 128 * 1024;
 const MAX_DIFF_PREVIEW_CHARS = 4_000;
 
@@ -34,6 +35,23 @@ function isTextArtifact(artifact: Artifact) {
     || artifact.contentType.endsWith("+json")
     || artifact.contentType.endsWith("/json")
     || artifact.contentType.endsWith("+xml");
+}
+
+function resolveArtifactSourcePath(input: z.infer<typeof artifactCreateSchema>) {
+  if (input.contentBase64) {
+    return null;
+  }
+
+  const metadata = asRecord(input.metadata);
+  const resolvedArtifactPath = typeof metadata?.resolvedArtifactPath === "string"
+    ? metadata.resolvedArtifactPath.trim()
+    : "";
+
+  if (resolvedArtifactPath.length > 0) {
+    return resolvedArtifactPath;
+  }
+
+  return input.path;
 }
 
 function buildDerivedDiffSummary(rawDiff: string, truncated: boolean) {
@@ -243,7 +261,7 @@ export const artifactRoutes: FastifyPluginAsync = async (app) => {
       .send(content);
   });
 
-  app.post("/artifacts", async (request, reply) => {
+  app.post("/artifacts", { bodyLimit: ARTIFACT_ROUTE_BODY_LIMIT_BYTES }, async (request, reply) => {
     return app.observability.withTrace("api.artifacts.create", async () => {
       const input = artifactCreateSchema.parse(request.body);
       const artifact = requireValue(
@@ -257,7 +275,7 @@ export const artifactRoutes: FastifyPluginAsync = async (app) => {
       );
       const content = input.contentBase64
         ? Buffer.from(input.contentBase64, "base64")
-        : await readFile(input.path);
+        : await readFile(resolveArtifactSourcePath(input) as string);
       const storedArtifact = await app.controlPlane.attachArtifactStorage(
         artifact.id,
         await persistArtifactBlob(app.config, artifact.id, content)

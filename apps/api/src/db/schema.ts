@@ -49,10 +49,38 @@ export const projects = pgTable("projects", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
 });
 
+export const projectTeams = pgTable("project_teams", {
+  id: text("id").primaryKey(),
+  projectId: text("project_id").notNull().references(() => projects.id),
+  workspaceId: text("workspace_id").notNull(),
+  teamId: text("team_id").notNull(),
+  name: text("name").notNull(),
+  description: text("description"),
+  concurrencyCap: integer("concurrency_cap").notNull().default(1),
+  sourceTemplateId: text("source_template_id"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
+});
+
+export const projectTeamMembers = pgTable("project_team_members", {
+  id: text("id").primaryKey(),
+  projectTeamId: text("project_team_id").notNull().references(() => projectTeams.id),
+  key: text("key").notNull(),
+  position: integer("position").notNull().default(0),
+  name: text("name").notNull(),
+  role: text("role").notNull(),
+  profile: text("profile").notNull(),
+  responsibility: text("responsibility"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
+});
+
 export const runs = pgTable("runs", {
   id: text("id").primaryKey(),
   repositoryId: text("repository_id").notNull().references(() => repositories.id),
   projectId: text("project_id"),
+  projectTeamId: text("project_team_id"),
+  projectTeamName: text("project_team_name"),
   workspaceId: text("workspace_id").notNull(),
   teamId: text("team_id").notNull(),
   goal: text("goal").notNull(),
@@ -100,6 +128,8 @@ export const runs = pgTable("runs", {
 export const repeatableRunDefinitions = pgTable("repeatable_run_definitions", {
   id: text("id").primaryKey(),
   repositoryId: text("repository_id").notNull().references(() => repositories.id),
+  projectTeamId: text("project_team_id").notNull(),
+  projectTeamName: text("project_team_name"),
   workspaceId: text("workspace_id").notNull(),
   teamId: text("team_id").notNull(),
   name: text("name").notNull(),
@@ -150,7 +180,14 @@ export const tasks = pgTable("tasks", {
   status: text("status").notNull(),
   priority: integer("priority").notNull().default(3),
   ownerAgentId: text("owner_agent_id"),
+  verificationStatus: text("verification_status").notNull().default("not_required"),
+  verifierAgentId: text("verifier_agent_id"),
+  latestVerificationSummary: text("latest_verification_summary"),
+  latestVerificationFindings: jsonb("latest_verification_findings").$type<string[]>().notNull().default([]),
+  latestVerificationChangeRequests: jsonb("latest_verification_change_requests").$type<string[]>().notNull().default([]),
+  latestVerificationEvidence: jsonb("latest_verification_evidence").$type<string[]>().notNull().default([]),
   dependencyIds: jsonb("dependency_ids").$type<string[]>().notNull().default([]),
+  definitionOfDone: jsonb("definition_of_done").$type<string[]>().notNull().default([]),
   acceptanceCriteria: jsonb("acceptance_criteria").$type<string[]>().notNull().default([]),
   validationTemplates: jsonb("validation_templates").$type<Array<{
     name: string;
@@ -165,8 +202,10 @@ export const tasks = pgTable("tasks", {
 export const agents = pgTable("agents", {
   id: text("id").primaryKey(),
   runId: text("run_id").notNull().references(() => runs.id),
+  projectTeamMemberId: text("project_team_member_id"),
   name: text("name").notNull(),
   role: text("role").notNull(),
+  profile: text("profile").notNull().default("default"),
   status: text("status").notNull(),
   worktreePath: text("worktree_path"),
   branchName: text("branch_name"),

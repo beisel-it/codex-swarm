@@ -98,6 +98,7 @@ export interface PlanTaskDocument {
   title: string;
   role: string;
   description?: string;
+  definitionOfDone?: string[];
   acceptanceCriteria?: string[];
 }
 
@@ -280,6 +281,14 @@ export function buildPlanMarkdown(input: PlanDocumentInput) {
 
     if (task.description) {
       lines.push(`   Description: ${task.description}`);
+    }
+
+    if (task.definitionOfDone && task.definitionOfDone.length > 0) {
+      lines.push("   Definition of Done:");
+
+      for (const criterion of task.definitionOfDone) {
+        lines.push(`   - ${criterion}`);
+      }
     }
 
     if (task.acceptanceCriteria && task.acceptanceCriteria.length > 0) {
@@ -1048,6 +1057,7 @@ export function createLocalCodexCliExecutor(options: LocalCodexCliExecutorOption
       }
 
       const bypass = input.sandbox === "danger-full-access" || input.approvalPolicy === "never";
+      const resolvedCwd = resolve(input.cwd);
 
       args = [
         ...baseArgs,
@@ -1056,12 +1066,12 @@ export function createLocalCodexCliExecutor(options: LocalCodexCliExecutorOption
         "--json",
         ...(bypass ? ["--dangerously-bypass-approvals-and-sandbox"] : ["--full-auto"]),
         "-C",
-        input.cwd,
+        resolvedCwd,
         ...(input.profile && input.profile !== "default" ? ["-p", input.profile] : []),
         ...(bypass ? [] : ["-s", input.sandbox]),
         input.prompt
       ];
-      cwd = input.cwd;
+      cwd = resolvedCwd;
     }
 
     const child = spawnImpl(executable, args, {

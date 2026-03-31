@@ -43,6 +43,41 @@ This is a product-boundary decision: Codex Swarm’s primary control actions are
 run orchestration, review, recovery, and handoff workflows, not arbitrary
 record editing for every persisted table.
 
+## Task Verification Contract
+
+The delivered task contract now distinguishes between the normative verification
+target and the compatibility summary:
+
+- `definitionOfDone`: the stored checklist that worker prompts and verifier
+  prompts use as the source of truth
+- `acceptanceCriteria`: a short compatibility-facing summary for operators,
+  older reads, and UI fallback copy
+
+For task inspection, the supported routes are still `GET /api/v1/runs/:id` and
+`GET /api/v1/tasks?runId=<id>`. Operators should expect task payloads to expose
+verification-aware fields directly:
+
+- `status`, including `awaiting_review`
+- `definitionOfDone`
+- `acceptanceCriteria`
+- `verificationStatus`
+- `verifierAgentId`
+- `latestVerificationSummary`
+- `latestVerificationFindings`
+- `latestVerificationChangeRequests`
+- `latestVerificationEvidence`
+
+The verification lifecycle is evented through the existing event stream rather
+than a separate review API:
+
+- `task.verification_requested`
+- `task.verification_passed`
+- `task.verification_failed`
+- `task.verification_blocked`
+
+Those events are visible through `GET /api/v1/events` and are intended to back
+board, lifecycle, review, audit, and operator troubleshooting flows.
+
 ## Supersession Mapping
 
 | Planned MCP tool | Delivered HTTP replacement | Live evidence |

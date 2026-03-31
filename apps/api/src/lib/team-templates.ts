@@ -1,6 +1,6 @@
-import type { AgentTeamTemplate } from "@codex-swarm/contracts";
+import type { AgentTeamBlueprint } from "@codex-swarm/contracts";
 
-export const agentTeamTemplates: AgentTeamTemplate[] = [
+export const agentTeamBlueprints: AgentTeamBlueprint[] = [
   {
     id: "development-stack",
     name: "Development stack",
@@ -104,5 +104,53 @@ export const agentTeamTemplates: AgentTeamTemplate[] = [
         responsibility: "Update runbooks, operator docs, and recovery guidance."
       }
     ]
+  },
+  {
+    id: "web-design-studio",
+    name: "Web design studio",
+    summary: "Research, art direction, design engineering, visual review, and browser validation for distinctive web experiences.",
+    focus: "studio",
+    suggestedGoal: "Research the topic and audience, collect references, and ship a distinctive, modern website with real visual and browser-level validation.",
+    suggestedConcurrencyCap: 4,
+    members: [
+      {
+        key: "leader",
+        displayName: "Leader",
+        roleProfile: "leader",
+        responsibility: "Own sequencing, keep research and design handoffs explicit, and close the visual delivery objective."
+      },
+      {
+        key: "research",
+        displayName: "Design Researcher",
+        roleProfile: "design-researcher",
+        responsibility: "Research the topic, audience, institution, and reference landscape before art direction starts."
+      },
+      {
+        key: "art-direction",
+        displayName: "Art Director",
+        roleProfile: "art-director",
+        responsibility: "Define the visual thesis, typography, palette, hierarchy, and motion direction from the research pack."
+      },
+      {
+        key: "design-engineering",
+        displayName: "Design Engineer",
+        roleProfile: "design-engineer",
+        responsibility: "Implement the experience in production-ready frontend code without flattening the visual direction."
+      },
+      {
+        key: "visual-review",
+        displayName: "Visual Reviewer",
+        roleProfile: "visual-reviewer",
+        responsibility: "Run screenshot-first aesthetic review for originality, hierarchy, motion, and anti-generic quality control."
+      },
+      {
+        key: "tester",
+        displayName: "Tester",
+        roleProfile: "tester",
+        responsibility: "Prove responsive behavior, browser behavior, and the key acceptance flows."
+      }
+    ]
   }
 ];
+
+export const agentTeamTemplates = agentTeamBlueprints;

@@ -18,6 +18,7 @@ import type { LeaderPlanningLoopRequest } from "../src/lib/leader-planning-loop.
 import { runLeaderPlanningLoop } from "../src/lib/leader-planning-loop.js";
 import { runManagedWorkerDispatch } from "../src/lib/worker-dispatch-orchestration.js";
 import { HttpError } from "../src/lib/http-error.js";
+import { CURRENT_CONTROL_PLANE_SCHEMA_VERSION } from "../src/db/versioning.js";
 
 const ids = {
   project: "10101010-1010-4010-8010-101010101010",
@@ -609,6 +610,7 @@ class FakeVerticalSliceControlPlane {
       priority: input.priority,
       ownerAgentId: input.ownerAgentId ?? null,
       dependencyIds: input.dependencyIds,
+      definitionOfDone: input.definitionOfDone,
       acceptanceCriteria: input.acceptanceCriteria,
       validationTemplates: input.validationTemplates ?? [],
       createdAt: new Date(),
@@ -631,6 +633,7 @@ class FakeVerticalSliceControlPlane {
     const task = run.tasks.find((candidate: any) => candidate.id === taskId);
     task.status = input.status;
     task.ownerAgentId = input.ownerAgentId ?? task.ownerAgentId;
+    task.dependencyIds = input.dependencyIds ?? task.dependencyIds;
 
     if (input.status === "completed") {
       for (const candidate of run.tasks) {
@@ -1486,7 +1489,7 @@ describe("buildApp", () => {
     expect(response.json()).toMatchObject({
       status: "ok",
       versions: {
-        schema: "2026-03-30",
+        schema: CURRENT_CONTROL_PLANE_SCHEMA_VERSION,
         config: "1"
       }
     });
@@ -4077,12 +4080,16 @@ describe("buildApp", () => {
         role: "backend-developer",
         priority: 2,
         dependencyIds: [],
+        definitionOfDone: ["task record persists a reusable definition of done"],
         acceptanceCriteria: ["task is saved"]
       }
     });
 
     expect(createTaskAResponse.statusCode).toBe(201);
-    expect(createTaskAResponse.json().status).toBe("pending");
+    expect(createTaskAResponse.json()).toMatchObject({
+      status: "pending",
+      definitionOfDone: ["task record persists a reusable definition of done"]
+    });
 
     const createTaskBResponse = await app.inject({
       method: "POST",
@@ -4095,12 +4102,16 @@ describe("buildApp", () => {
         role: "backend-developer",
         priority: 3,
         dependencyIds: [ids.taskA],
+        definitionOfDone: ["dependency relationship stays intact while task waits"],
         acceptanceCriteria: ["task unblocks when dependency completes"]
       }
     });
 
     expect(createTaskBResponse.statusCode).toBe(201);
-    expect(createTaskBResponse.json().status).toBe("blocked");
+    expect(createTaskBResponse.json()).toMatchObject({
+      status: "blocked",
+      definitionOfDone: ["dependency relationship stays intact while task waits"]
+    });
 
     const completeTaskResponse = await app.inject({
       method: "PATCH",
@@ -4401,6 +4412,7 @@ describe("buildApp", () => {
           role: "backend-developer",
           priority: 2,
           dependencyIds: [],
+          definitionOfDone: ["control-plane route exists and is callable"],
           acceptanceCriteria: ["control-plane route exists"]
         }
       });
@@ -4416,6 +4428,7 @@ describe("buildApp", () => {
           role: "frontend-developer",
           priority: 3,
           dependencyIds: [ids.taskA],
+          definitionOfDone: ["board renders the task graph for reviewers"],
           acceptanceCriteria: ["board shows the task graph"]
         }
       });
@@ -4431,12 +4444,14 @@ describe("buildApp", () => {
             title: "Define API scope",
             role: "backend-developer",
             description: "Establish the first backend deliverable",
+            definitionOfDone: ["control-plane route exists and is callable"],
             acceptanceCriteria: ["control-plane route exists"]
           },
           {
             title: "Render review board",
             role: "frontend-developer",
             description: "Expose plan progress to reviewers",
+            definitionOfDone: ["board renders the task graph for reviewers"],
             acceptanceCriteria: ["board shows the task graph"]
           }
         ]
@@ -4452,12 +4467,14 @@ describe("buildApp", () => {
               title: "Define API scope",
               role: "backend-developer",
               description: "Establish the first backend deliverable",
+              definitionOfDone: ["control-plane route exists and is callable"],
               acceptanceCriteria: ["control-plane route exists"]
             },
             {
               title: "Render review board",
               role: "frontend-developer",
               description: "Expose plan progress to reviewers",
+              definitionOfDone: ["board renders the task graph for reviewers"],
               acceptanceCriteria: ["board shows the task graph"]
             }
           ]
@@ -4466,6 +4483,8 @@ describe("buildApp", () => {
 
       expect(planArtifact.path).toBe(join(cwd, ".swarm/plan.md"));
       expect(await readFile(planArtifact.path, "utf8")).toBe(markdown);
+      expect(markdown).toContain("Definition of Done:");
+      expect(markdown).toContain("control-plane route exists and is callable");
 
       const createArtifactResponse = await app.inject({
         method: "POST",
@@ -4621,6 +4640,75 @@ describe("buildApp", () => {
     }
   });
 
+  it("stores worker outcome artifact content from resolvedArtifactPath metadata", async () => {
+    const app = await buildApp({
+      config: getConfig({
+        NODE_ENV: "test",
+        PORT: 3000,
+        HOST: "127.0.0.1",
+        DATABASE_URL: "postgres://unused/test",
+        DEV_AUTH_TOKEN: "test-token",
+        OPENAI_TRACING_DISABLED: true
+      }),
+      controlPlane: new FakeVerticalSliceControlPlane() as unknown as ControlPlaneService
+    });
+
+    const headers = {
+      authorization: "Bearer test-token"
+    };
+
+    const tempFile = await mkdtemp(join(tmpdir(), "artifact-route-"));
+    const artifactPath = join(tempFile, "report.json");
+
+    await writeFile(artifactPath, "{\"ok\":true,\"source\":\"worker-outcome\"}", "utf8");
+
+    try {
+      const createRunResponse = await app.inject({
+        method: "POST",
+        url: "/api/v1/runs",
+        headers,
+        payload: {
+          repositoryId: ids.repository,
+          goal: "Persist worker artifact from filesystem",
+          metadata: {}
+        }
+      });
+
+      expect(createRunResponse.statusCode).toBe(201);
+
+      const response = await app.inject({
+        method: "POST",
+        url: "/api/v1/artifacts",
+        headers,
+        payload: {
+          runId: ids.run,
+          kind: "report",
+          path: "shared/.swarm/report.json",
+          contentType: "application/json",
+          metadata: {
+            source: "worker-outcome",
+            resolvedArtifactPath: artifactPath
+          }
+        }
+      });
+
+      expect(response.statusCode).toBe(201);
+      expect(response.json()).toMatchObject({
+        kind: "report",
+        path: "shared/.swarm/report.json",
+        sizeBytes: 37,
+        metadata: {
+          source: "worker-outcome",
+          resolvedArtifactPath: artifactPath,
+          storageKey: expect.any(String)
+        }
+      });
+    } finally {
+      await rm(tempFile, { recursive: true, force: true });
+      await app.close();
+    }
+  });
+
   it("executes a leader planning loop and persists the generated task DAG", async () => {
     const app = await buildApp({
       config: getConfig({
@@ -4711,6 +4799,10 @@ describe("buildApp", () => {
                   title: "Draft the leader plan",
                   role: "tech-lead",
                   description: "Persist the plan artifact and review the DAG",
+                  definitionOfDone: [
+                    ".swarm/plan.md exists and includes the planned tasks",
+                    "plan artifact is linked to the run detail"
+                  ],
                   acceptanceCriteria: [
                     ".swarm/plan.md exists",
                     "plan artifact is linked to the run"
@@ -4722,6 +4814,10 @@ describe("buildApp", () => {
                   title: "Implement the hello-world backend slice",
                   role: "backend-developer",
                   description: "Pick up the first delegated coding task",
+                  definitionOfDone: [
+                    "task is ready for implementation",
+                    "leader handoff metadata is persisted for the worker"
+                  ],
                   acceptanceCriteria: [
                     "task is ready for implementation",
                     "leader handoff is persisted"
@@ -4770,6 +4866,8 @@ describe("buildApp", () => {
       const planMarkdown = await readFile(result.planArtifactPath, "utf8");
       expect(planMarkdown).toContain("Draft the leader plan");
       expect(planMarkdown).toContain("Implement the hello-world backend slice");
+      expect(planMarkdown).toContain("Definition of Done:");
+      expect(planMarkdown).toContain("plan artifact is linked to the run detail");
 
       const runDetailResponse = await app.inject({
         method: "GET",
@@ -4808,6 +4906,437 @@ describe("buildApp", () => {
     } finally {
       await rm(workspaceRoot, { recursive: true, force: true });
       await app.close();
+    }
+  });
+
+  it("fails the planning loop when the leader returns cyclic task dependencies", async () => {
+    const app = await buildApp({
+      config: getConfig({
+        NODE_ENV: "test",
+        PORT: 3000,
+        HOST: "127.0.0.1",
+        DATABASE_URL: "postgres://unused/test",
+        DEV_AUTH_TOKEN: "test-token",
+        OPENAI_TRACING_DISABLED: true
+      }),
+      controlPlane: new FakeVerticalSliceControlPlane() as unknown as ControlPlaneService
+    });
+
+    const headers = {
+      authorization: "Bearer test-token"
+    };
+    const workspaceRoot = await mkdtemp(join(tmpdir(), "codex-swarm-leader-loop-cycle-"));
+
+    try {
+      const createRunResponse = await app.inject({
+        method: "POST",
+        url: "/api/v1/runs",
+        headers,
+        payload: {
+          repositoryId: ids.repository,
+          goal: "Verify cyclic leader plans fail instead of being silently serialized",
+          concurrencyCap: 2
+        }
+      });
+
+      expect(createRunResponse.statusCode).toBe(201);
+
+      const request: LeaderPlanningLoopRequest = async <T>(
+        method: string,
+        path: string,
+        payload?: Record<string, unknown>
+      ) => {
+        const response = await (app.inject as any)({
+          method,
+          url: path,
+          headers,
+          ...(payload ? { payload } : {})
+        }) as {
+          statusCode: number;
+          body: string;
+          json(): T;
+        };
+
+        if (response.statusCode >= 400) {
+          throw new Error(`${method} ${path} failed with ${response.statusCode}: ${response.body}`);
+        }
+
+        return response.json() as T;
+      };
+
+      await expect(runLeaderPlanningLoop({
+        request,
+        runId: ids.run,
+        workspaceRoot,
+        actorId: "tech-lead",
+        runtimeConfig: {
+          cwd: workspaceRoot,
+          profile: "default",
+          sandbox: "workspace-write",
+          approvalPolicy: "on-request",
+          includePlanTool: true,
+          workerNodeId: ids.workerNode,
+          placementConstraintLabels: ["remote"]
+        },
+        supervisorCommand: [
+          process.execPath,
+          "--input-type=module",
+          "-e",
+          "setInterval(() => {}, 1000);"
+        ],
+        executeTool: async (toolRequest: unknown) => ({
+          threadId: "thread-leader-plan-cycle",
+          output: typeof toolRequest === "object" && toolRequest !== null && "tool" in toolRequest && toolRequest.tool === "codex"
+            ? "leader-started"
+            : JSON.stringify({
+              summary: "Return an invalid cyclic plan",
+              tasks: [
+                {
+                  key: "env-check",
+                  title: "Verify prerequisites",
+                  role: "infrastructure-engineer",
+                  description: "Check the environment",
+                  definitionOfDone: ["environment prerequisites are verified before stack start"],
+                  acceptanceCriteria: ["environment is ready"],
+                  dependencyKeys: ["stack-start"]
+                },
+                {
+                  key: "stack-start",
+                  title: "Start the stack",
+                  role: "backend-developer",
+                  description: "Boot the local services",
+                  definitionOfDone: ["local services start successfully"],
+                  acceptanceCriteria: ["services start"],
+                  dependencyKeys: ["env-check", "ui-validate"]
+                },
+                {
+                  key: "ui-validate",
+                  title: "Validate the UI",
+                  role: "frontend-developer",
+                  description: "Open the app",
+                  definitionOfDone: ["UI is reachable after the stack starts"],
+                  acceptanceCriteria: ["UI is reachable"],
+                  dependencyKeys: ["stack-start"]
+                }
+              ]
+            })
+        })
+      })).rejects.toThrow(/invalid cyclic dependencies|cycle/);
+    } finally {
+      await rm(workspaceRoot, { recursive: true, force: true });
+      await app.close();
+    }
+  });
+
+  it("builds the leader planning prompt from the run project team roles", async () => {
+    const workspaceRoot = await mkdtemp(join(tmpdir(), "codex-swarm-leader-team-roles-"));
+    const transcriptEntries: Array<{ kind: string; text: string }> = [];
+    const taskStore: any[] = [];
+    const runDetail: any = {
+      id: ids.run,
+      repositoryId: ids.repository,
+      projectId: ids.project,
+      projectTeamId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      projectTeamName: "Web design studio",
+      workspaceId: defaultBoundary.workspaceId,
+      teamId: defaultBoundary.teamId,
+      goal: "Plan a web design studio run with team-specific roles.",
+      status: "pending",
+      branchName: "main",
+      planArtifactPath: null,
+      budgetTokens: null,
+      budgetCostUsd: null,
+      concurrencyCap: 2,
+      policyProfile: "standard",
+      publishedBranch: null,
+      branchPublishedAt: null,
+      branchPublishApprovalId: null,
+      pullRequestUrl: null,
+      pullRequestNumber: null,
+      pullRequestStatus: null,
+      pullRequestApprovalId: null,
+      handoffStatus: "pending",
+      handoffConfig: {
+        mode: "manual",
+        provider: null,
+        baseBranch: null,
+        autoPublishBranch: false,
+        autoCreatePullRequest: false,
+        titleTemplate: null,
+        bodyTemplate: null
+      },
+      handoffExecution: {
+        state: "idle",
+        failureReason: null,
+        attemptedAt: null,
+        completedAt: null
+      },
+      completedAt: null,
+      metadata: {
+        runContext: defaultRunContext
+      },
+      context: defaultRunContext,
+      createdBy: "dev-user",
+      createdAt: new Date("2026-03-28T00:00:00.000Z"),
+      updatedAt: new Date("2026-03-28T00:00:00.000Z"),
+      tasks: taskStore,
+      agents: [],
+      sessions: []
+    };
+    const projectTeamDetail = {
+      id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      workspaceId: defaultBoundary.workspaceId,
+      teamId: defaultBoundary.teamId,
+      projectId: ids.project,
+      name: "Web design studio",
+      description: null,
+      concurrencyCap: 4,
+      sourceBlueprintId: "web-design-studio",
+      sourceTemplateId: "web-design-studio",
+      createdAt: new Date("2026-03-28T00:00:00.000Z"),
+      updatedAt: new Date("2026-03-28T00:00:00.000Z"),
+      memberCount: 6,
+      members: [
+        {
+          id: "m1",
+          projectTeamId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          key: "leader-1",
+          position: 0,
+          name: "Leader",
+          role: "tech-lead",
+          profile: "leader",
+          responsibility: "Own sequencing.",
+          createdAt: new Date("2026-03-28T00:00:00.000Z"),
+          updatedAt: new Date("2026-03-28T00:00:00.000Z")
+        },
+        {
+          id: "m2",
+          projectTeamId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          key: "research-1",
+          position: 1,
+          name: "Design Researcher",
+          role: "design-researcher",
+          profile: "design-researcher",
+          responsibility: "Research topic and references.",
+          createdAt: new Date("2026-03-28T00:00:00.000Z"),
+          updatedAt: new Date("2026-03-28T00:00:00.000Z")
+        },
+        {
+          id: "m3",
+          projectTeamId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          key: "art-1",
+          position: 2,
+          name: "Art Director",
+          role: "art-director",
+          profile: "art-director",
+          responsibility: "Define the visual direction.",
+          createdAt: new Date("2026-03-28T00:00:00.000Z"),
+          updatedAt: new Date("2026-03-28T00:00:00.000Z")
+        },
+        {
+          id: "m4",
+          projectTeamId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          key: "engineer-1",
+          position: 3,
+          name: "Design Engineer",
+          role: "design-engineer",
+          profile: "design-engineer",
+          responsibility: "Implement the designed experience.",
+          createdAt: new Date("2026-03-28T00:00:00.000Z"),
+          updatedAt: new Date("2026-03-28T00:00:00.000Z")
+        },
+        {
+          id: "m5",
+          projectTeamId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          key: "review-1",
+          position: 4,
+          name: "Visual Reviewer",
+          role: "visual-reviewer",
+          profile: "visual-reviewer",
+          responsibility: "Review visual originality and hierarchy.",
+          createdAt: new Date("2026-03-28T00:00:00.000Z"),
+          updatedAt: new Date("2026-03-28T00:00:00.000Z")
+        },
+        {
+          id: "m6",
+          projectTeamId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          key: "tester-1",
+          position: 5,
+          name: "Tester",
+          role: "tester",
+          profile: "tester",
+          responsibility: "Validate the browser experience.",
+          createdAt: new Date("2026-03-28T00:00:00.000Z"),
+          updatedAt: new Date("2026-03-28T00:00:00.000Z")
+        }
+      ]
+    };
+
+    try {
+      const request: LeaderPlanningLoopRequest = async <T>(
+        method: string,
+        path: string,
+        payload?: Record<string, unknown>
+      ) => {
+        if (method === "POST" && path === `/api/v1/runs/${ids.run}/budget-checkpoints`) {
+          return {
+            decision: "within_budget",
+            exceeded: [],
+            updatedAt: new Date("2026-03-28T00:00:00.000Z").toISOString(),
+            approvalId: null,
+            continueAllowed: true
+          } as T;
+        }
+
+        if (method === "POST" && path === "/api/v1/agents") {
+          const agent = {
+            id: ids.agent,
+            runId: ids.run,
+            projectTeamMemberId: null,
+            name: "leader",
+            role: "tech-lead",
+            profile: "default",
+            status: "idle",
+            worktreePath: null,
+            branchName: null,
+            currentTaskId: null,
+            lastHeartbeatAt: null,
+            createdAt: new Date(),
+            updatedAt: new Date()
+          };
+          const sessionPayload = payload?.session as Record<string, unknown>;
+          const session = {
+            id: ids.session,
+            agentId: ids.agent,
+            threadId: sessionPayload.threadId,
+            cwd: sessionPayload.cwd,
+            sandbox: sessionPayload.sandbox,
+            approvalPolicy: sessionPayload.approvalPolicy,
+            includePlanTool: sessionPayload.includePlanTool,
+            workerNodeId: sessionPayload.workerNodeId ?? null,
+            stickyNodeId: sessionPayload.workerNodeId ?? null,
+            placementConstraintLabels: sessionPayload.placementConstraintLabels ?? [],
+            lastHeartbeatAt: null,
+            state: "active",
+            staleReason: null,
+            metadata: sessionPayload.metadata ?? {},
+            createdAt: new Date(),
+            updatedAt: new Date()
+          };
+          runDetail.agents = [agent];
+          runDetail.sessions = [session];
+          return { id: ids.agent } as T;
+        }
+
+        if (method === "GET" && path === `/api/v1/runs/${ids.run}`) {
+          return runDetail as T;
+        }
+
+        if (method === "GET" && path === `/api/v1/project-teams/${projectTeamDetail.id}`) {
+          return projectTeamDetail as T;
+        }
+
+        if (method === "POST" && path === `/api/v1/sessions/${ids.session}/transcript`) {
+          transcriptEntries.push(...((payload?.entries as Array<{ kind: string; text: string }>) ?? []));
+          return { ok: true } as T;
+        }
+
+        if (method === "POST" && path === "/api/v1/artifacts") {
+          return { id: "artifact-1" } as T;
+        }
+
+        if (method === "PATCH" && path === `/api/v1/runs/${ids.run}/status`) {
+          runDetail.status = payload?.status;
+          runDetail.planArtifactPath = payload?.planArtifactPath;
+          return runDetail as T;
+        }
+
+        if (method === "POST" && path === "/api/v1/tasks") {
+          const task = {
+            id: crypto.randomUUID(),
+            runId: ids.run,
+            parentTaskId: payload?.parentTaskId ?? null,
+            title: payload?.title,
+            description: payload?.description,
+            role: payload?.role,
+            status: Array.isArray(payload?.dependencyIds) && payload!.dependencyIds.length > 0 ? "blocked" : "pending",
+            priority: payload?.priority ?? 1,
+            ownerAgentId: null,
+            dependencyIds: payload?.dependencyIds ?? [],
+            definitionOfDone: payload?.definitionOfDone ?? [],
+            acceptanceCriteria: payload?.acceptanceCriteria ?? [],
+            validationTemplates: [],
+            createdAt: new Date(),
+            updatedAt: new Date()
+          };
+          taskStore.push(task);
+          return task as T;
+        }
+
+        throw new Error(`unexpected request ${method} ${path}`);
+      };
+
+      await runLeaderPlanningLoop({
+        request,
+        runId: ids.run,
+        workspaceRoot,
+        actorId: "tech-lead",
+        runtimeConfig: {
+          cwd: workspaceRoot,
+          profile: "default",
+          sandbox: "workspace-write",
+          approvalPolicy: "on-request",
+          includePlanTool: true,
+          workerNodeId: ids.workerNode,
+          placementConstraintLabels: ["remote"]
+        },
+        supervisorCommand: [
+          process.execPath,
+          "--input-type=module",
+          "-e",
+          "setInterval(() => {}, 1000);"
+        ],
+        executeTool: async (toolRequest: unknown) => ({
+          threadId: "thread-team-role-plan",
+          output: typeof toolRequest === "object" && toolRequest !== null && "tool" in toolRequest && toolRequest.tool === "codex"
+            ? "leader-started"
+            : JSON.stringify({
+              summary: "Use the studio team roles.",
+              tasks: [
+                {
+                  key: "research",
+                  title: "Research the audience",
+                  role: "design-researcher",
+                  description: "Collect audience and reference context.",
+                  definitionOfDone: ["research findings are captured for downstream design work"],
+                  acceptanceCriteria: ["research plan exists"],
+                  dependencyKeys: []
+                },
+                {
+                  key: "direction",
+                  title: "Set visual direction",
+                  role: "art-director",
+                  description: "Turn the research into art direction.",
+                  definitionOfDone: ["visual direction is defined from the research findings"],
+                  acceptanceCriteria: ["visual thesis is defined"],
+                  dependencyKeys: ["research"]
+                }
+              ]
+            })
+        })
+      });
+
+      const planningPrompt = transcriptEntries.find((entry) =>
+        entry.kind === "prompt" && entry.text.includes("You are the leader agent for a Codex Swarm orchestration run."));
+
+      expect(planningPrompt?.text).toContain("Available team roles:");
+      expect(planningPrompt?.text).toContain("design-researcher");
+      expect(planningPrompt?.text).toContain("art-director");
+      expect(planningPrompt?.text).toContain("design-engineer");
+      expect(planningPrompt?.text).toContain("visual-reviewer");
+      expect(planningPrompt?.text).toContain("do not invent task roles outside the available team role list");
+    } finally {
+      await rm(workspaceRoot, { recursive: true, force: true });
     }
   });
 
@@ -5728,6 +6257,176 @@ describe("buildApp", () => {
           text: expect.stringContaining("\"summary\":\"worker completed\"")
         })
       ]);
+    } finally {
+      await rm(repoRoot, { recursive: true, force: true });
+      await app.close();
+    }
+  });
+
+  it("uses the configured worker runtime profile instead of the assignment profile", async () => {
+    vi.stubEnv("CODEX_SWARM_WORKER_PROFILE", "fallback-profile");
+
+    const verticalSlice = new FakeVerticalSliceControlPlane();
+    const app = await buildApp({
+      config: getConfig({
+        NODE_ENV: "test",
+        PORT: 3000,
+        HOST: "127.0.0.1",
+        DATABASE_URL: "postgres://unused/test",
+        DEV_AUTH_TOKEN: "test-token",
+        OPENAI_TRACING_DISABLED: true
+      }),
+      controlPlane: verticalSlice as unknown as ControlPlaneService
+    });
+
+    const headers = {
+      authorization: "Bearer test-token"
+    };
+    const repoRoot = await mkdtemp(join(tmpdir(), "codex-swarm-managed-dispatch-profile-repo-"));
+
+    try {
+      await writeFile(join(repoRoot, "README.md"), "managed worker profile dispatch\n", "utf8");
+      execFileSync("git", ["init", "--initial-branch=main"], { cwd: repoRoot, stdio: "pipe" });
+      execFileSync("git", ["config", "user.name", "Codex Swarm"], { cwd: repoRoot, stdio: "pipe" });
+      execFileSync("git", ["config", "user.email", "codex-swarm@example.com"], { cwd: repoRoot, stdio: "pipe" });
+      execFileSync("git", ["add", "README.md"], { cwd: repoRoot, stdio: "pipe" });
+      execFileSync("git", ["commit", "-m", "initial"], { cwd: repoRoot, stdio: "pipe" });
+      (verticalSlice as any).repositories[0].url = repoRoot;
+
+      const request: LeaderPlanningLoopRequest = async <T>(
+        method: string,
+        path: string,
+        payload?: Record<string, unknown>
+      ) => {
+        const response = await (app.inject as any)({
+          method,
+          url: path,
+          headers,
+          ...(payload ? { payload } : {})
+        }) as {
+          statusCode: number;
+          body: string;
+          json(): T;
+        };
+
+        if (response.statusCode >= 400) {
+          throw new Error(`${method} ${path} failed with ${response.statusCode}: ${response.body}`);
+        }
+
+        return response.json() as T;
+      };
+
+      const runResponse = await app.inject({
+        method: "POST",
+        url: "/api/v1/runs",
+        headers,
+        payload: {
+          repositoryId: ids.repository,
+          goal: "Exercise worker runtime profile selection",
+          concurrencyCap: 1,
+          metadata: {}
+        }
+      });
+
+      expect(runResponse.statusCode).toBe(201);
+
+      const agentResponse = await app.inject({
+        method: "POST",
+        url: "/api/v1/agents",
+        headers,
+        payload: {
+          runId: ids.run,
+          name: "worker-profile",
+          role: "design-engineer",
+          status: "idle",
+          session: {
+            threadId: "thread-worker-profile",
+            cwd: process.cwd(),
+            sandbox: "workspace-write",
+            approvalPolicy: "on-request",
+            includePlanTool: false,
+            metadata: {
+              source: "managed-worker-dispatch-profile-test"
+            }
+          }
+        }
+      });
+
+      expect(agentResponse.statusCode).toBe(201);
+
+      const taskResponse = await app.inject({
+        method: "POST",
+        url: "/api/v1/tasks",
+        headers,
+        payload: {
+          runId: ids.run,
+          title: "Managed worker dispatch profile task",
+          description: "Ensure worker dispatch uses the configured runtime profile",
+          role: "design-engineer",
+          priority: 1,
+          dependencyIds: [],
+          acceptanceCriteria: ["worker dispatch uses the configured runtime profile"]
+        }
+      });
+
+      expect(taskResponse.statusCode).toBe(201);
+      const taskId = taskResponse.json().id as string;
+
+      const worktreeRoot = await mkdtemp(join(tmpdir(), "codex-swarm-managed-dispatch-profile-"));
+      const dispatchResponse = await app.inject({
+        method: "POST",
+        url: "/api/v1/worker-dispatch-assignments",
+        headers,
+        payload: {
+          runId: ids.run,
+          taskId,
+          agentId: ids.agent,
+          repositoryId: ids.repository,
+          repositoryName: "codex-swarm",
+          stickyNodeId: ids.workerNode,
+          requiredCapabilities: ["remote"],
+          worktreePath: join(worktreeRoot, "worker-profile"),
+          prompt: "Continue the managed worker session with the assigned role profile",
+          profile: "design-engineer",
+          sandbox: "workspace-write",
+          approvalPolicy: "on-request"
+        }
+      });
+
+      expect(dispatchResponse.statusCode).toBe(201);
+
+      let seenProfile: string | null = null;
+      const result = await runManagedWorkerDispatch({
+        request,
+        nodeId: ids.workerNode,
+        workspaceRoot: process.cwd(),
+        supervisorCommand: [
+          process.execPath,
+          "--input-type=module",
+          "-e",
+          "setInterval(() => {}, 1000);"
+        ],
+        executeTool: async (toolRequest) => {
+          seenProfile = "input" in toolRequest
+            ? (toolRequest as { input: { profile?: string } }).input.profile ?? null
+            : (toolRequest as { message: { params?: { profile?: string } } }).message.params?.profile ?? null;
+
+          return {
+            threadId: "thread-worker-profile",
+            output: JSON.stringify({
+              summary: "worker completed",
+              status: "completed",
+              messages: [],
+              blockingIssues: []
+            })
+          };
+        }
+      });
+
+      expect(result).toMatchObject({
+        status: "completed"
+      });
+      expect(seenProfile).toBe("fallback-profile");
     } finally {
       await rm(repoRoot, { recursive: true, force: true });
       await app.close();
@@ -6661,6 +7360,7 @@ describe("buildApp", () => {
                   title: "Prepare schema slice",
                   role: "backend-developer",
                   description: "Create the schema-facing preparation slice.",
+                  definitionOfDone: ["schema concerns are isolated in a dedicated slice"],
                   acceptanceCriteria: ["schema concerns are isolated"],
                   dependencyKeys: []
                 },
@@ -6669,6 +7369,7 @@ describe("buildApp", () => {
                   title: "Finish API follow-up slice",
                   role: "backend-developer",
                   description: "Finish the API wiring after the schema slice lands.",
+                  definitionOfDone: ["API wiring follows the schema prep work cleanly"],
                   acceptanceCriteria: ["API wiring follows the schema prep work"],
                   dependencyKeys: ["schema-slice"]
                 }
@@ -6742,7 +7443,7 @@ describe("buildApp", () => {
     }
   });
 
-  it("does not create follow-on tasks when a worker reports blocked", async () => {
+  it("does not create follow-on tasks when a worker reports externally blocked work", async () => {
     const verticalSlice = new FakeVerticalSliceControlPlane();
     const app = await buildApp({
       config: getConfig({
@@ -6916,6 +7617,7 @@ describe("buildApp", () => {
           output: JSON.stringify({
             summary: "The required scaffold is missing in this workspace.",
             status: "blocked",
+            blockerKind: "external",
             messages: [
               {
                 target: "leader",
@@ -6956,6 +7658,259 @@ describe("buildApp", () => {
           })
         ])
       );
+    } finally {
+      await rm(worktreeRoot, { recursive: true, force: true });
+      await rm(repoRoot, { recursive: true, force: true });
+      await app.close();
+    }
+  });
+
+  it("creates unblock follow-on tasks when a worker reports an actionable blocker", async () => {
+    const verticalSlice = new FakeVerticalSliceControlPlane();
+    const app = await buildApp({
+      config: getConfig({
+        NODE_ENV: "test",
+        PORT: 3000,
+        HOST: "127.0.0.1",
+        DATABASE_URL: "postgres://unused/test",
+        DEV_AUTH_TOKEN: "test-token",
+        OPENAI_TRACING_DISABLED: true
+      }),
+      controlPlane: verticalSlice as unknown as ControlPlaneService
+    });
+
+    const headers = {
+      authorization: "Bearer test-token"
+    };
+    const repoRoot = await mkdtemp(join(tmpdir(), "codex-swarm-actionable-blocked-repo-"));
+    const worktreeRoot = await mkdtemp(join(tmpdir(), "codex-swarm-actionable-blocked-"));
+
+    try {
+      await writeFile(join(repoRoot, "README.md"), "actionable blocked dispatch\n", "utf8");
+      execFileSync("git", ["init", "--initial-branch=main"], { cwd: repoRoot, stdio: "pipe" });
+      execFileSync("git", ["config", "user.name", "Codex Swarm"], { cwd: repoRoot, stdio: "pipe" });
+      execFileSync("git", ["config", "user.email", "codex-swarm@example.com"], { cwd: repoRoot, stdio: "pipe" });
+      execFileSync("git", ["add", "README.md"], { cwd: repoRoot, stdio: "pipe" });
+      execFileSync("git", ["commit", "-m", "initial"], { cwd: repoRoot, stdio: "pipe" });
+      (verticalSlice as any).repositories[0].url = repoRoot;
+
+      const request: LeaderPlanningLoopRequest = async <T>(
+        method: string,
+        path: string,
+        payload?: Record<string, unknown>
+      ) => {
+        const response = await (app.inject as any)({
+          method,
+          url: path,
+          headers,
+          ...(payload ? { payload } : {})
+        }) as {
+          statusCode: number;
+          body: string;
+          json(): T;
+        };
+
+        if (response.statusCode >= 400) {
+          throw new Error(`${method} ${path} failed: ${response.statusCode} ${response.body}`);
+        }
+
+        return response.json() as T;
+      };
+
+      await app.inject({
+        method: "POST",
+        url: "/api/v1/runs",
+        headers,
+        payload: {
+          repositoryId: ids.repository,
+          goal: "Verify actionable blocked worker outcomes expand into unblock tasks",
+          concurrencyCap: 2,
+          metadata: {}
+        }
+      });
+
+      const leaderResponse = await app.inject({
+        method: "POST",
+        url: "/api/v1/agents",
+        headers,
+        payload: {
+          runId: ids.run,
+          name: "leader",
+          role: "tech-lead",
+          status: "idle",
+          session: {
+            threadId: "thread-leader-unblock",
+            cwd: process.cwd(),
+            sandbox: "workspace-write",
+            approvalPolicy: "on-request",
+            includePlanTool: true,
+            metadata: {
+              source: "worker-actionable-blocked-test"
+            }
+          }
+        }
+      });
+
+      expect(leaderResponse.statusCode).toBe(201);
+      const workerResponse = await app.inject({
+        method: "POST",
+        url: "/api/v1/agents",
+        headers,
+        payload: {
+          runId: ids.run,
+          name: "worker-primary",
+          role: "tester",
+          status: "idle",
+          session: {
+            threadId: "thread-worker-unblock",
+            cwd: process.cwd(),
+            sandbox: "workspace-write",
+            approvalPolicy: "on-request",
+            includePlanTool: false,
+            metadata: {
+              source: "worker-actionable-blocked-test"
+            }
+          }
+        }
+      });
+
+      expect(workerResponse.statusCode).toBe(201);
+      const workerAgentId = workerResponse.json().id as string;
+      const workerRunDetailResponse = await app.inject({
+        method: "GET",
+        url: `/api/v1/runs/${ids.run}`,
+        headers
+      });
+      const workerSessionId = workerRunDetailResponse.json().sessions.find((session: any) => session.agentId === workerAgentId).id as string;
+
+      const taskResponse = await app.inject({
+        method: "POST",
+        url: "/api/v1/tasks",
+        headers,
+        payload: {
+          runId: ids.run,
+          title: "Implement feature behind missing scaffold",
+          description: "Implementation is blocked until scaffold work exists.",
+          role: "tester",
+          priority: 1,
+          dependencyIds: [],
+          acceptanceCriteria: ["spawns unblock follow-on work"],
+          validationTemplates: []
+        }
+      });
+
+      const taskId = taskResponse.json().id as string;
+
+      await app.inject({
+        method: "POST",
+        url: "/api/v1/worker-dispatch-assignments",
+        headers,
+        payload: {
+          runId: ids.run,
+          taskId,
+          agentId: workerAgentId,
+          sessionId: workerSessionId,
+          repositoryId: ids.repository,
+          repositoryName: "codex-swarm",
+          stickyNodeId: ids.workerNode,
+          requiredCapabilities: ["remote"],
+          worktreePath: join(worktreeRoot, "worker-unblock"),
+          prompt: "Primary worker dispatch prompt",
+          profile: "default",
+          sandbox: "workspace-write",
+          approvalPolicy: "on-request"
+        }
+      });
+
+      const result = await runManagedWorkerDispatch({
+        request,
+        nodeId: ids.workerNode,
+        workspaceRoot: process.cwd(),
+        supervisorCommand: [
+          process.execPath,
+          "--input-type=module",
+          "-e",
+          "setInterval(() => {}, 1000);"
+        ],
+        executeTool: async (toolRequest: any) => {
+          const prompt = "input" in toolRequest
+            ? toolRequest.input.prompt
+            : toolRequest.message.params.prompt;
+
+          if (prompt.includes("Primary worker dispatch prompt")) {
+            return {
+              threadId: "thread-worker-unblock",
+              output: JSON.stringify({
+                summary: "Implementation is blocked until scaffold tasks land.",
+                status: "blocked",
+                blockerKind: "actionable",
+                messages: [
+                  {
+                    target: "leader",
+                    body: "Please create scaffold and fixture follow-up tasks."
+                  }
+                ],
+                blockingIssues: [
+                  "Required scaffold files do not exist yet."
+                ]
+              })
+            };
+          }
+
+          return {
+            threadId: "thread-leader-unblock",
+            output: JSON.stringify({
+              summary: "Create the missing scaffold work before retrying implementation.",
+              tasks: [
+                {
+                  key: "scaffold",
+                  title: "Create scaffold files",
+                  role: "backend-developer",
+                  description: "Add the missing scaffold files needed by implementation.",
+                  definitionOfDone: ["required scaffold files exist for the blocked task"],
+                  acceptanceCriteria: ["scaffold files exist"],
+                  dependencyKeys: []
+                },
+                {
+                  key: "fixtures",
+                  title: "Prepare scaffold fixtures",
+                  role: "backend-developer",
+                  description: "Add fixtures that validate the scaffold.",
+                  definitionOfDone: ["fixtures validate the new scaffold files"],
+                  acceptanceCriteria: ["fixtures cover the scaffold"],
+                  dependencyKeys: ["scaffold"]
+                }
+              ]
+            })
+          };
+        }
+      });
+
+      expect(result).toMatchObject({ status: "completed" });
+
+      const tasksResponse = await app.inject({
+        method: "GET",
+        url: `/api/v1/tasks?runId=${ids.run}`,
+        headers
+      });
+
+      const tasks = tasksResponse.json();
+      const followOnTasks = tasks.filter((task: any) => task.parentTaskId === taskId);
+      expect(followOnTasks).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            title: "Create scaffold files",
+            dependencyIds: []
+          }),
+          expect.objectContaining({
+            title: "Prepare scaffold fixtures",
+            dependencyIds: [expect.any(String)]
+          })
+        ])
+      );
+      expect(followOnTasks.some((task: any) => task.dependencyIds.includes(taskId))).toBe(false);
+      const parentTask = tasks.find((task: any) => task.id === taskId);
+      expect(parentTask.dependencyIds).toEqual(expect.arrayContaining(followOnTasks.map((task: any) => task.id)));
     } finally {
       await rm(worktreeRoot, { recursive: true, force: true });
       await rm(repoRoot, { recursive: true, force: true });

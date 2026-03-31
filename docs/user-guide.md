@@ -26,9 +26,11 @@ execution progress, and failure state explicitly in the run and review surfaces.
 Runs move through the board and run-detail surfaces with:
 
 - status and task progression
+- definition of done and verification state per task
 - worker/session placement
 - approvals and review history
 - validations and artifacts
+- verifier summaries and change requests when rework is needed
 - publish/PR handoff state
 
 Projects can also preconfigure repeatable runs and attach generic webhook
@@ -40,6 +42,10 @@ operator workflow, event-context fields, and debugging steps, use
 
 Review surfaces expose:
 
+- definition of done as the task's primary review contract
+- acceptance criteria as a compatibility-oriented summary
+- task verification state, verifier identity, and latest verification summary
+- open verifier findings and change requests when a task fails verification
 - approval requests and resolution state
 - requested and resolved payloads
 - delegated approval provenance
@@ -72,8 +78,9 @@ Use the board as the default landing surface for active work:
 
 1. Select the repository-backed run in the left rail.
 2. Confirm the goal, branch, publish state, and PR reflection in the run overview card.
-3. Scan fleet visibility before acting on blocked work so you can distinguish execution issues from node-placement issues.
-4. Use the task lanes and DAG to identify the next unblock path.
+3. Scan each task card for `awaiting review`, `Verification failed`, or `Rework requested` before treating worker completion as done.
+4. Scan fleet visibility before acting on blocked work so you can distinguish execution issues from node-placement issues.
+5. Use the task lanes and DAG to identify the next unblock path.
 
 ![Board overview showing active runs, fleet posture, onboarding state, and task lanes](./assets/screenshots/user-board-overview.png)
 
@@ -93,10 +100,31 @@ Use Run Detail when you need placement, recovery, or provider handoff specifics:
 Use the review console when a run is waiting on human or delegated approval:
 
 1. Open `Review` and select the approval request from the left-side review list.
-2. Read the requested context and structured payload before deciding.
-3. Inspect the diff summary, changed files, and inline diff preview when the approval has a linked diff artifact.
-4. Cross-check recent validations and the generic artifact list in the same surface so approval is tied to current evidence.
-5. Record resolution feedback directly in the browser, then approve or reject from the action row.
+2. Read the task `definitionOfDone` first; that is the normative verification target for newly planned tasks.
+3. Use `acceptanceCriteria` only as the compatibility summary, not as a substitute for the stored DoD.
+4. Inspect the current verification state, verifier identity, latest verification summary, and any open change requests.
+5. Inspect the diff summary, changed files, and inline diff preview when the approval has a linked diff artifact.
+6. Cross-check recent validations and the generic artifact list in the same surface so approval is tied to current evidence.
+7. Record resolution feedback directly in the browser, then approve or reject from the action row.
+
+## Verification-Aware Task Reading
+
+When a task has `definitionOfDone`, operators should interpret task state this
+way:
+
+- `in_progress`: worker execution is still active
+- `awaiting_review`: worker execution finished, but the task is not done until a
+  separate verifier finishes
+- `Verification in progress`: the verifier is actively checking the delivered
+  work against the stored DoD
+- `Verification failed`: findings and change requests are present; the leader
+  must convert those into rework
+- `Rework requested`: follow-up work is open and the original task is still not
+  complete
+- `Verified complete`: the task passed verification and can now count as done
+
+Tasks without `definitionOfDone` are legacy records. They remain readable in
+the UI, but they do not opt into the new mandatory worker-to-verifier flow.
 
 ![Review console showing approval context, diff summary, validations, and artifacts](./assets/screenshots/user-review-console.png)
 
