@@ -274,6 +274,38 @@ async function publishWorkerOutcomeMessages(
   }
 }
 
+async function runLeaderResliceLoopSafely(
+  request: WorkerDispatchOrchestrationRequest,
+  runDetail: RunDetail,
+  assignment: WorkerDispatchAssignment,
+  workerOutcome: WorkerTaskOutcome,
+  executeTool: CodexToolExecutor,
+  supervisorCommand?: string[]
+) {
+  try {
+    await runLeaderResliceLoop({
+      request,
+      runId: assignment.runId,
+      parentTaskId: assignment.taskId!,
+      actorId: assignment.agentId,
+      workerOutcome,
+      executeTool,
+      ...(supervisorCommand ? { supervisorCommand } : {})
+    })
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error)
+    const leaderAgent = runDetail.agents.find((agent) => agent.role === "tech-lead" && agent.id !== assignment.agentId) ?? null
+    const body = `Leader follow-up planning failed after ${assignment.metadata?.assignmentKind === "verification" ? "verification" : "worker"} outcome: ${detail}`
+
+    await postRunMessage(request, {
+      runId: assignment.runId,
+      senderAgentId: assignment.agentId,
+      ...(leaderAgent ? { recipientAgentId: leaderAgent.id, kind: "direct" as const } : { kind: "system" as const }),
+      body
+    })
+  }
+}
+
 function toLeaderResliceOutcomeFromVerification(outcome: VerifierTaskOutcome): WorkerTaskOutcome | null {
   if (outcome.status === "passed") {
     return null;
@@ -713,15 +745,14 @@ export async function runManagedWorkerDispatch(
         };
 
         if (leaderOutcome) {
-          await runLeaderResliceLoop({
-            request: input.request,
-            runId: assignment.runId,
-            parentTaskId: assignment.taskId,
-            actorId: assignment.agentId,
-            workerOutcome: leaderOutcome,
-            executeTool: input.executeTool,
-            ...(input.supervisorCommand ? { supervisorCommand: input.supervisorCommand } : {})
-          });
+          await runLeaderResliceLoopSafely(
+            input.request,
+            runDetail,
+            assignment,
+            leaderOutcome,
+            input.executeTool,
+            input.supervisorCommand
+          );
         }
       } else {
         const outcome = parseWorkerTaskOutcome(responseOutput);
@@ -752,15 +783,14 @@ export async function runManagedWorkerDispatch(
         );
 
         if (outcome.status === "needs_slicing" || (outcome.status === "blocked" && outcome.blockerKind === "actionable")) {
-          await runLeaderResliceLoop({
-            request: input.request,
-            runId: assignment.runId,
-            parentTaskId: assignment.taskId,
-            actorId: assignment.agentId,
-            workerOutcome: outcome,
-            executeTool: input.executeTool,
-            ...(input.supervisorCommand ? { supervisorCommand: input.supervisorCommand } : {})
-          });
+          await runLeaderResliceLoopSafely(
+            input.request,
+            runDetail,
+            assignment,
+            outcome,
+            input.executeTool,
+            input.supervisorCommand
+          );
         }
 
         completionPayload = {

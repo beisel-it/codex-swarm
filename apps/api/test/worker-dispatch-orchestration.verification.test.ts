@@ -667,4 +667,199 @@ describe("runManagedWorkerDispatch verification prompts", () => {
       await rm(repoRoot, { recursive: true, force: true });
     }
   });
+
+  it("keeps verification completion successful when leader rework planning fails", async () => {
+    const repoRoot = await mkdtemp(join(tmpdir(), "codex-swarm-verifier-reslice-failure-repo-"));
+    const worktreeRoot = await mkdtemp(join(tmpdir(), "codex-swarm-verifier-reslice-failure-worktree-"));
+
+    try {
+      await writeFile(join(repoRoot, "README.md"), "verification reslice failure fixture\n", "utf8");
+      execFileSync("git", ["init", "--initial-branch=main"], { cwd: repoRoot, stdio: "pipe" });
+      execFileSync("git", ["config", "user.name", "Codex Swarm"], { cwd: repoRoot, stdio: "pipe" });
+      execFileSync("git", ["config", "user.email", "codex-swarm@example.com"], { cwd: repoRoot, stdio: "pipe" });
+      execFileSync("git", ["add", "README.md"], { cwd: repoRoot, stdio: "pipe" });
+      execFileSync("git", ["commit", "-m", "initial"], { cwd: repoRoot, stdio: "pipe" });
+
+      const repository = createRepository(repoRoot);
+      const runDetail = createRunDetail();
+      runDetail.agents.unshift({
+        id: "leader-agent-1",
+        runId: "run-1",
+        projectTeamMemberId: null,
+        name: "Leader",
+        role: "tech-lead",
+        profile: "leader",
+        status: "idle",
+        worktreePath: null,
+        branchName: "main",
+        currentTaskId: null,
+        lastHeartbeatAt: null,
+        observability: {
+          mode: "unavailable",
+          currentSessionId: null,
+          currentSessionState: null,
+          visibleTranscriptSessionId: null,
+          visibleTranscriptSessionState: null,
+          visibleTranscriptUpdatedAt: null,
+          lineageSource: "not_started"
+        },
+        createdAt: new Date("2026-03-31T09:00:00.000Z"),
+        updatedAt: new Date("2026-03-31T09:00:00.000Z")
+      });
+      runDetail.sessions.unshift({
+        id: "session-leader-1",
+        agentId: "leader-agent-1",
+        threadId: "thread-leader-1",
+        cwd: join(worktreeRoot, "shared"),
+        sandbox: "workspace-write",
+        approvalPolicy: "on-request",
+        includePlanTool: true,
+        workerNodeId: null,
+        stickyNodeId: null,
+        placementConstraintLabels: ["workspace-write"],
+        lastHeartbeatAt: null,
+        state: "stopped",
+        staleReason: null,
+        metadata: {},
+        createdAt: new Date("2026-03-31T09:00:00.000Z"),
+        updatedAt: new Date("2026-03-31T09:00:00.000Z")
+      });
+
+      const assignment = createVerificationAssignment(join(worktreeRoot, "shared"));
+      const postedMessages: Array<Record<string, unknown>> = [];
+      const patchPayloads: Array<Record<string, unknown>> = [];
+
+      const request = async <T>(method: string, path: string, payload?: Record<string, unknown>) => {
+        if (method === "POST" && path === "/api/v1/worker-nodes/node-1/claim-dispatch") {
+          return assignment as T;
+        }
+
+        if (method === "GET" && path === "/api/v1/runs/run-1") {
+          return runDetail as T;
+        }
+
+        if (method === "GET" && path === "/api/v1/repositories") {
+          return [repository] as T;
+        }
+
+        if (method === "GET" && path === "/api/v1/messages?runId=run-1") {
+          return [] as T;
+        }
+
+        if (method === "GET" && path === "/api/v1/artifacts?runId=run-1") {
+          return [] as T;
+        }
+
+        if (method === "GET" && path === "/api/v1/validations?runId=run-1") {
+          return [] as T;
+        }
+
+        if (method === "POST" && path === "/api/v1/runs/run-1/budget-checkpoints") {
+          return {
+            decision: "within_budget",
+            exceeded: [],
+            updatedAt: new Date("2026-03-31T09:02:00.000Z").toISOString(),
+            approvalId: null,
+            continueAllowed: true
+          } as T;
+        }
+
+        if (method === "POST" && path === "/api/v1/messages") {
+          postedMessages.push(payload ?? {});
+          return { id: `message-${postedMessages.length}`, ...(payload ?? {}) } as T;
+        }
+
+        if (
+          method === "POST"
+          && (path === "/api/v1/sessions/session-verifier-1/transcript" || path === "/api/v1/sessions/session-leader-1/transcript")
+        ) {
+          return { ok: true } as T;
+        }
+
+        if (method === "PATCH" && path === "/api/v1/worker-dispatch-assignments/dispatch-verifier-1") {
+          patchPayloads.push(payload ?? {});
+          return {
+            ...assignment,
+            state: "completed",
+            metadata: payload?.outcome ?? assignment.metadata
+          } as T;
+        }
+
+        throw new Error(`unexpected request: ${method} ${path}`);
+      };
+
+      const result = await runManagedWorkerDispatch({
+        request,
+        nodeId: "node-1",
+        workspaceRoot: worktreeRoot,
+        supervisorCommand: [
+          process.execPath,
+          "--input-type=module",
+          "-e",
+          "setInterval(() => {}, 1000);"
+        ],
+        executeTool: async (toolRequest: any) => {
+          const prompt = toolRequest.input?.prompt ?? toolRequest.message?.params?.prompt ?? "";
+
+          if (prompt.includes("You are continuing the leader orchestration session")) {
+            return {
+              threadId: "thread-leader-1",
+              output: "{not valid json"
+            };
+          }
+
+          return {
+            threadId: "thread-verifier-1",
+            output: JSON.stringify({
+              summary: "Definition of done is not satisfied.",
+              status: "failed",
+              findings: [
+                "Blocked ancestry highlighting only covers the final hop."
+              ],
+              changeRequests: [
+                "Use unblock-path metadata when deriving related nodes and edges."
+              ],
+              messages: [
+                {
+                  target: "leader",
+                  body: "Please open rework for unblock-path rendering."
+                }
+              ],
+              blockingIssues: []
+            })
+          };
+        }
+      });
+
+      expect(result).toMatchObject({
+        assignmentId: "dispatch-verifier-1",
+        status: "completed"
+      });
+      expect(patchPayloads).toEqual([
+        expect.objectContaining({
+          nodeId: "node-1",
+          status: "completed",
+          outcome: expect.objectContaining({
+            kind: "verification",
+            outcomeStatus: "failed",
+            changeRequests: ["Use unblock-path metadata when deriving related nodes and edges."]
+          })
+        })
+      ]);
+      expect(postedMessages).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            runId: "run-1",
+            senderAgentId: "verifier-agent-1",
+            recipientAgentId: "leader-agent-1",
+            kind: "direct",
+            body: "Leader follow-up planning failed after verification outcome: output must be exactly one JSON object"
+          })
+        ])
+      );
+    } finally {
+      await rm(worktreeRoot, { recursive: true, force: true });
+      await rm(repoRoot, { recursive: true, force: true });
+    }
+  });
 });
