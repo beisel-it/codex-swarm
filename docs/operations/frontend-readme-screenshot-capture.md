@@ -24,8 +24,8 @@ Capture these desktop-only surfaces and save them under `docs/assets/screenshots
 | Project runs | `/projects/cf58874d-118e-47f5-9e24-d680973935a8/runs` | `readme-project-runs-desktop.png` |
 | Project automation | `/projects/cf58874d-118e-47f5-9e24-d680973935a8/automation` | `readme-project-automation-desktop.png` |
 | Ad-hoc runs | `/adhoc-runs` | `readme-adhoc-runs-desktop.png` |
-| Run board | `/runs/f0053f3f-6bba-4322-8b67-b1ac079eb27d/board` | `readme-run-board-desktop.png` |
-| Run lifecycle | `/runs/f0053f3f-6bba-4322-8b67-b1ac079eb27d/lifecycle` | `readme-run-lifecycle-desktop.png` |
+| Run board | `/runs/2a9cfaf8-b550-4f10-b3a5-40dc91f3ab1f/board` | `readme-run-board-desktop.png` |
+| Run lifecycle | `/runs/2a9cfaf8-b550-4f10-b3a5-40dc91f3ab1f/lifecycle` | `readme-run-lifecycle-desktop.png` |
 | Settings | `/settings` | `readme-settings-desktop.png` |
 
 The README does not currently include:
@@ -48,8 +48,7 @@ Framing rules:
 
 - keep the global shell and local context visible
 - center the primary content for the target surface
-- avoid captures that expose machine-local filesystem paths or other operator-only local identifiers
-- for run surfaces, it is acceptable to hide the `Quick links` sidebar block before capture if it contains local path text
+- prefer the live UI as-is; if run surfaces show `Quick links` local paths in the current product, it is acceptable to leave them visible in the screenshot
 
 ## Surface Notes
 
@@ -77,7 +76,7 @@ Do not reintroduce those files into the README unless the public README structur
 
 1. Open the staging route for the target surface.
 2. Confirm the page has settled and the target content is visible.
-3. Remove or avoid any local-path-only sidebar content that is not safe for public docs.
+3. Keep the live UI framing intact unless a capture exposes something clearly unsafe for publication.
 4. Capture the desktop screenshot.
 5. Save it with the exact approved filename in `docs/assets/screenshots/`.
 6. Verify `README.md` references only the current approved files.
