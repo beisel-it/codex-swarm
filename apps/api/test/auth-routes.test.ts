@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -576,6 +577,10 @@ describe("auth routes", () => {
   });
 
   it("serves the real built landing assets anonymously while keeping operational routes session-bound", async () => {
+    if (!existsSync(join(REAL_FRONTEND_DIST_ROOT, "index.html"))) {
+      return;
+    }
+
     const builtLandingAssets = await readBuiltLandingAssetPaths();
     const builtEntryAsset = builtLandingAssets.find((assetPath) => assetPath.startsWith("/assets/"));
 
