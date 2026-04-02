@@ -2,11 +2,23 @@ import {
   boolean,
   integer,
   jsonb,
+  pgEnum,
   pgTable,
   text,
   timestamp
 } from "drizzle-orm/pg-core";
 import type { ActorIdentity } from "@codex-swarm/contracts";
+
+export const governanceRoleEnum = pgEnum("governance_role", [
+  "org_admin",
+  "workspace_admin",
+  "team_admin",
+  "member",
+  "reviewer",
+  "operator",
+  "service",
+  "system"
+]);
 
 export const repositories = pgTable("repositories", {
   id: text("id").primaryKey(),
@@ -368,4 +380,33 @@ export const teams = pgTable("teams", {
   policyProfile: text("policy_profile").notNull().default("standard"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
+});
+
+export const users = pgTable("users", {
+  id: text("id").primaryKey(),
+  email: text("email").notNull().unique(),
+  displayName: text("display_name").notNull(),
+  isActive: boolean("is_active").notNull().default(true),
+  primaryRole: governanceRoleEnum("primary_role").notNull().default("workspace_admin"),
+  workspaceId: text("workspace_id").notNull().references(() => workspaces.id),
+  teamId: text("team_id").notNull().references(() => teams.id),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
+});
+
+export const passwordCredentials = pgTable("password_credentials", {
+  userId: text("user_id").primaryKey().references(() => users.id),
+  passwordHash: text("password_hash").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
+});
+
+export const browserSessions = pgTable("browser_sessions", {
+  id: text("id").primaryKey(),
+  userId: text("user_id").notNull().references(() => users.id),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  revokedAt: timestamp("revoked_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  lastUsedAt: timestamp("last_used_at", { withTimezone: true }).notNull().defaultNow()
 });

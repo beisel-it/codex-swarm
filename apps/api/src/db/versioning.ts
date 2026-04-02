@@ -1,6 +1,6 @@
 import type { Pool } from "pg";
 
-export const CURRENT_CONTROL_PLANE_SCHEMA_VERSION = "2026-03-31";
+export const CURRENT_CONTROL_PLANE_SCHEMA_VERSION = "2026-04-02-auth-bootstrap";
 export const CURRENT_CONTROL_PLANE_CONFIG_VERSION = "1";
 export const CONTROL_PLANE_METADATA_ID = "control-plane";
 

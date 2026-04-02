@@ -110,10 +110,22 @@ Edit `~/.config/codex-swarm/single-host.env` before starting services.
 Important values:
 
 - `CODEX_SWARM_DB_PASSWORD`
-- `CODEX_SWARM_DEV_AUTH_TOKEN`
 - `CODEX_SWARM_ARTIFACT_STORAGE_ROOT`
 - `CODEX_SWARM_WORKSPACE_ROOT`
 - `CODEX_SWARM_CODEX_COMMAND`
+- `AUTH_SESSION_COOKIE_NAME`
+- `AUTH_SESSION_TTL_SECONDS`
+- `AUTH_SESSION_COOKIE_SAME_SITE`
+- `AUTH_SESSION_COOKIE_SECURE`
+- `AUTH_PASSWORD_SCRYPT_N`
+- `AUTH_PASSWORD_SCRYPT_R`
+- `AUTH_PASSWORD_SCRYPT_P`
+- `AUTH_PASSWORD_SCRYPT_KEYLEN`
+- `AUTH_SERVICE_TOKEN`
+- `CODEX_SWARM_SERVICE_TOKEN`
+- `CODEX_SWARM_SERVICE_NAME`
+- `AUTH_ENABLE_LEGACY_DEV_BEARER`
+- `DEV_AUTH_TOKEN` only if you explicitly enable the legacy dev bearer fallback
 
 ## Build and start
 
@@ -130,6 +142,77 @@ This:
 - enables `codex-swarm.target`
 - restarts the stack
 
+## Bootstrap the first admin
+
+Release installs do not auto-create credentials. After the stack is healthy,
+create the first workspace admin explicitly:
+
+```bash
+codex-swarm auth bootstrap-admin \
+  --email admin@example.com \
+  --password 'change-me-now' \
+  --display-name 'Initial Admin' \
+  --yes
+```
+
+Required inputs:
+
+- `--email`
+- `--password`
+- `--display-name`
+- `--yes` for non-interactive execution
+
+Optional boundary overrides:
+
+- `--workspace-id`
+- `--workspace-name`
+- `--team-id`
+- `--team-name`
+- `--env-file` if you are not using `~/.config/codex-swarm/single-host.env`
+
+Default bootstrap behavior:
+
+- creates the first persisted user
+- assigns the `workspace_admin` governance role
+- creates or binds the default workspace `default-workspace` / `Default Workspace`
+- creates or binds the default team `codex-swarm` / `Codex Swarm`
+- writes through the real API database path instead of seeding ad hoc files
+
+Repeat-run behavior:
+
+- if bootstrap already happened, the command fails cleanly instead of silently rotating or replacing credentials
+- release-1 does not include an overwrite or reset mode
+
+## Login and route access
+
+After bootstrap, open the browser UI and log in with the email/password you
+just created. Release auth uses an HttpOnly session cookie.
+
+Public without login:
+
+- `GET /health`
+- `/webhooks/*`
+- landing/static frontend pages only
+
+Protected:
+
+- all operational frontend routes
+- all non-webhook `/api/v1/*` routes
+
+The old pasted bearer-token path is not the default release flow. It is a
+local/internal fallback only when `AUTH_ENABLE_LEGACY_DEV_BEARER=true`.
+
+Worker and local-daemon control-plane traffic in release mode uses the explicit
+shared service credential path:
+
+- API expects `AUTH_SERVICE_TOKEN`
+- installed worker/local-daemon services export `CODEX_SWARM_SERVICE_TOKEN`
+- the default installed worker identity header comes from `CODEX_SWARM_SERVICE_NAME`
+
+Keep `AUTH_SERVICE_TOKEN` and `CODEX_SWARM_SERVICE_TOKEN` aligned to the same
+secret value. This path is separate from browser session auth and separate from
+the optional legacy dev bearer fallback.
+
 ## Validate
 
 Run:
@@ -143,6 +226,7 @@ Then confirm:
 - `systemctl --user status codex-swarm.target`
 - `curl http://127.0.0.1:4300/health`
 - browser UI reachable on `http://127.0.0.1:4300`
+- login succeeds for the bootstrap admin and the operational shell loads
 
 ## Optional same-host worker fan-out
 

@@ -50,6 +50,7 @@ type RunHandoffMode = 'manual' | 'auto'
 type RuntimeConfig = {
   apiBaseUrl?: string
   apiToken?: string
+  enableLegacyDevBearer?: boolean
 }
 
 declare global {
@@ -262,6 +263,15 @@ type IdentityContext = {
   actorType: 'system' | 'user' | 'service'
 }
 
+type AuthSessionResponse = {
+  authenticated: boolean
+  identity: IdentityContext | null
+  session: {
+    id: string
+    expiresAt: string
+  } | null
+}
+
 type GovernanceAdminReport = {
   generatedAt: string
   approvals: {
@@ -400,6 +410,26 @@ let API_TOKEN = (
   ?? (import.meta.env.VITE_API_TOKEN as string | undefined)
   ?? ''
 ).trim()
+let ENABLE_LEGACY_DEV_BEARER = false
+
+function parseRuntimeBoolean(value: boolean | string | undefined) {
+  if (typeof value === 'boolean') {
+    return value
+  }
+  if (typeof value === 'string') {
+    return value === 'true'
+  }
+  return false
+}
+
+class AuthenticationError extends Error {
+  constructor(message = 'Authentication required') {
+    super(message)
+    this.name = 'AuthenticationError'
+  }
+}
+
+let handleUnauthorizedRequest: (() => void) | null = null
 
 function createEmptySwarmData(): SwarmData {
   return {
@@ -534,7 +564,8 @@ function buildApiUrl(path: string) {
 
 function applyRuntimeConfig(config: RuntimeConfig) {
   API_BASE_URL = (config.apiBaseUrl ?? API_BASE_URL).replace(/\/$/, '')
-  API_TOKEN = (config.apiToken ?? API_TOKEN).trim()
+  API_TOKEN = (config.apiToken ?? '').trim()
+  ENABLE_LEGACY_DEV_BEARER = parseRuntimeBoolean(config.enableLegacyDevBearer)
 }
 
 async function refreshRuntimeConfig() {
@@ -567,6 +598,15 @@ async function refreshRuntimeConfig() {
   applyRuntimeConfig(config)
 }
 
+applyRuntimeConfig({
+  apiBaseUrl: API_BASE_URL,
+  apiToken: API_TOKEN,
+  enableLegacyDevBearer: parseRuntimeBoolean(
+    window.__CODEX_SWARM_CONFIG__?.enableLegacyDevBearer
+    ?? (import.meta.env.VITE_ENABLE_LEGACY_DEV_BEARER as string | undefined),
+  ),
+})
+
 async function buildRequestError(response: Response) {
   let payload: unknown
   try {
@@ -582,23 +622,64 @@ async function buildRequestError(response: Response) {
   return new Error(`Request failed: ${response.status}`)
 }
 
-async function requestJson<T>(path: string, init?: RequestInit, allowRetry = true): Promise<T> {
+function createRequestHeaders(init?: RequestInit) {
   const headers = new Headers(init?.headers ?? {})
   if (init?.body !== undefined && !headers.has('Content-Type')) {
     headers.set('Content-Type', 'application/json')
   }
-  if (API_TOKEN) {
+  if (ENABLE_LEGACY_DEV_BEARER && API_TOKEN) {
     headers.set('Authorization', `Bearer ${API_TOKEN}`)
   }
 
+  return headers
+}
+
+async function performRequest(
+  path: string,
+  init?: RequestInit,
+  options?: {
+    allowRetry?: boolean
+    handleUnauthorized?: boolean
+  },
+) {
+  const allowRetry = options?.allowRetry ?? true
   const response = await fetch(buildApiUrl(path), {
     ...init,
-    headers,
+    headers: createRequestHeaders(init),
+    credentials: 'include',
   })
 
   if (response.status === 401 && allowRetry) {
-    await refreshRuntimeConfig()
-    return requestJson<T>(path, init, false)
+    try {
+      await refreshRuntimeConfig()
+      return performRequest(path, init, {
+        ...options,
+        allowRetry: false,
+      })
+    } catch {
+      // Preserve the original 401 when runtime config refresh is unavailable.
+    }
+  }
+
+  if (response.status === 401 && options?.handleUnauthorized !== false) {
+    handleUnauthorizedRequest?.()
+  }
+
+  return response
+}
+
+async function requestJson<T>(
+  path: string,
+  init?: RequestInit,
+  options?: {
+    allowRetry?: boolean
+    handleUnauthorized?: boolean
+  },
+): Promise<T> {
+  const response = await performRequest(path, init, options)
+
+  if (response.status === 401 && options?.handleUnauthorized !== false) {
+    throw new AuthenticationError()
   }
 
   if (!response.ok) {
@@ -617,7 +698,12 @@ async function loadTeamBlueprints(): Promise<TeamBlueprint[]> {
 }
 
 async function loadProjectSummaries() {
-  return requestJson<ContractProjectSummary[]>('/api/v1/projects').catch(() => [])
+  return requestJson<ContractProjectSummary[]>('/api/v1/projects').catch((error: unknown) => {
+    if (error instanceof AuthenticationError) {
+      throw error
+    }
+    return []
+  })
 }
 
 async function createProject(input: { name: string; description?: string | null }) {
@@ -642,7 +728,12 @@ async function createRepository(input: {
 
 async function loadProjectTeams(projectId?: string) {
   const suffix = projectId ? `?projectId=${encodeURIComponent(projectId)}` : ''
-  return requestJson<ProjectTeamDetail[]>(`/api/v1/project-teams${suffix}`).catch(() => [])
+  return requestJson<ProjectTeamDetail[]>(`/api/v1/project-teams${suffix}`).catch((error: unknown) => {
+    if (error instanceof AuthenticationError) {
+      throw error
+    }
+    return []
+  })
 }
 
 async function createProjectTeam(input: ProjectTeamCreateInput) {
@@ -739,7 +830,12 @@ async function loadArtifactDetail(artifactId: string) {
 }
 
 async function loadRunEvents(runId: string) {
-  return requestJson<ControlPlaneEvent[]>(`/api/v1/events?runId=${encodeURIComponent(runId)}`).catch(() => [])
+  return requestJson<ControlPlaneEvent[]>(`/api/v1/events?runId=${encodeURIComponent(runId)}`).catch((error: unknown) => {
+    if (error instanceof AuthenticationError) {
+      throw error
+    }
+    return []
+  })
 }
 
 async function loadRunDetail(runId: string) {
@@ -747,23 +843,48 @@ async function loadRunDetail(runId: string) {
 }
 
 async function loadRunApprovals(runId: string) {
-  return requestJson<Approval[]>(`/api/v1/approvals?runId=${encodeURIComponent(runId)}`).catch(() => [])
+  return requestJson<Approval[]>(`/api/v1/approvals?runId=${encodeURIComponent(runId)}`).catch((error: unknown) => {
+    if (error instanceof AuthenticationError) {
+      throw error
+    }
+    return []
+  })
 }
 
 async function loadRunValidations(runId: string) {
-  return requestJson<Validation[]>(`/api/v1/validations?runId=${encodeURIComponent(runId)}`).catch(() => [])
+  return requestJson<Validation[]>(`/api/v1/validations?runId=${encodeURIComponent(runId)}`).catch((error: unknown) => {
+    if (error instanceof AuthenticationError) {
+      throw error
+    }
+    return []
+  })
 }
 
 async function loadRunArtifacts(runId: string) {
-  return requestJson<Artifact[]>(`/api/v1/artifacts?runId=${encodeURIComponent(runId)}`).catch(() => [])
+  return requestJson<Artifact[]>(`/api/v1/artifacts?runId=${encodeURIComponent(runId)}`).catch((error: unknown) => {
+    if (error instanceof AuthenticationError) {
+      throw error
+    }
+    return []
+  })
 }
 
 async function loadRunMessages(runId: string) {
-  return requestJson<Message[]>(`/api/v1/messages?runId=${encodeURIComponent(runId)}`).catch(() => [])
+  return requestJson<Message[]>(`/api/v1/messages?runId=${encodeURIComponent(runId)}`).catch((error: unknown) => {
+    if (error instanceof AuthenticationError) {
+      throw error
+    }
+    return []
+  })
 }
 
 async function loadSessionTranscript(sessionId: string) {
-  return requestJson<SessionTranscriptEntry[]>(`/api/v1/sessions/${encodeURIComponent(sessionId)}/transcript`).catch(() => [])
+  return requestJson<SessionTranscriptEntry[]>(`/api/v1/sessions/${encodeURIComponent(sessionId)}/transcript`).catch((error: unknown) => {
+    if (error instanceof AuthenticationError) {
+      throw error
+    }
+    return []
+  })
 }
 
 function mergeRunLiveRefreshRequests(left: RunLiveRefreshRequest | null, right: RunLiveRefreshRequest) {
@@ -849,16 +970,14 @@ async function openRunStream(
   onFrame: (frame: StreamEventFrame) => void,
   onOpen?: () => void,
 ) {
-  const headers = new Headers()
-  if (API_TOKEN) {
-    headers.set('Authorization', `Bearer ${API_TOKEN}`)
-  }
-
-  const response = await fetch(buildApiUrl(`/api/v1/runs/${encodeURIComponent(runId)}/stream`), {
-    headers,
+  const response = await performRequest(`/api/v1/runs/${encodeURIComponent(runId)}/stream`, {
     signal,
     cache: 'no-store',
   })
+
+  if (response.status === 401) {
+    throw new AuthenticationError()
+  }
 
   if (!response.ok) {
     throw await buildRequestError(response)
@@ -953,25 +1072,88 @@ async function loadExternalEventReceipts(repositoryId?: string) {
   return requestJson<ExternalEventReceipt[]>(`/api/v1/external-event-receipts${suffix}`)
 }
 
+async function loadAuthSession() {
+  return requestJson<AuthSessionResponse>('/api/v1/auth/session', undefined, {
+    handleUnauthorized: false,
+  })
+}
+
+async function loginWithPassword(email: string, password: string) {
+  return requestJson<AuthSessionResponse>('/api/v1/auth/login', {
+    method: 'POST',
+    body: JSON.stringify({ email, password }),
+  }, {
+    handleUnauthorized: false,
+  })
+}
+
+async function logoutCurrentSession() {
+  return requestJson<void>('/api/v1/auth/logout', {
+    method: 'POST',
+  }, {
+    handleUnauthorized: false,
+  })
+}
+
 async function loadIdentity() {
-  return requestJson<IdentityContext>('/api/v1/me').catch(() => null)
+  return requestJson<IdentityContext>('/api/v1/me').catch((error: unknown) => {
+    if (error instanceof AuthenticationError) {
+      throw error
+    }
+    return null
+  })
 }
 
 async function loadGovernanceReport() {
-  return requestJson<GovernanceAdminReport>('/api/v1/admin/governance-report').catch(() => null)
+  return requestJson<GovernanceAdminReport>('/api/v1/admin/governance-report').catch((error: unknown) => {
+    if (error instanceof AuthenticationError) {
+      throw error
+    }
+    return null
+  })
 }
 
-async function loadSwarmData(): Promise<SwarmData> {
+async function loadSwarmData(identityOverride?: IdentityContext | null): Promise<SwarmData> {
   try {
     const projectSummaries = await loadProjectSummaries()
     const projectTeams = await loadProjectTeams()
-    const repositories = await requestJson<Repository[]>('/api/v1/repositories').catch(() => [])
-    const runs = await requestJson<Run[]>('/api/v1/runs').catch(() => [])
-    const workerNodes = await requestJson<WorkerNode[]>('/api/v1/worker-nodes').catch(() => [])
-    const repeatableRunDefinitions = await loadRepeatableRunDefinitions().catch(() => [])
-    const repeatableRunTriggers = await loadRepeatableRunTriggers().catch(() => [])
-    const externalEventReceipts = await loadExternalEventReceipts().catch(() => [])
-    const identity = await loadIdentity()
+    const repositories = await requestJson<Repository[]>('/api/v1/repositories').catch((error: unknown) => {
+      if (error instanceof AuthenticationError) {
+        throw error
+      }
+      return []
+    })
+    const runs = await requestJson<Run[]>('/api/v1/runs').catch((error: unknown) => {
+      if (error instanceof AuthenticationError) {
+        throw error
+      }
+      return []
+    })
+    const workerNodes = await requestJson<WorkerNode[]>('/api/v1/worker-nodes').catch((error: unknown) => {
+      if (error instanceof AuthenticationError) {
+        throw error
+      }
+      return []
+    })
+    const repeatableRunDefinitions = await loadRepeatableRunDefinitions().catch((error: unknown) => {
+      if (error instanceof AuthenticationError) {
+        throw error
+      }
+      return []
+    })
+    const repeatableRunTriggers = await loadRepeatableRunTriggers().catch((error: unknown) => {
+      if (error instanceof AuthenticationError) {
+        throw error
+      }
+      return []
+    })
+    const externalEventReceipts = await loadExternalEventReceipts().catch((error: unknown) => {
+      if (error instanceof AuthenticationError) {
+        throw error
+      }
+      return []
+    })
+    const identity = identityOverride ?? await loadIdentity()
     const governance = await loadGovernanceReport()
 
     if (runs.length === 0) {
@@ -991,26 +1173,51 @@ async function loadSwarmData(): Promise<SwarmData> {
     }
 
     const details = await Promise.all(
-      runs.map((run) => requestJson<RunDetail>(`/api/v1/runs/${encodeURIComponent(run.id)}`).catch(() => ({
+      runs.map((run) => requestJson<RunDetail>(`/api/v1/runs/${encodeURIComponent(run.id)}`).catch((error: unknown) => {
+        if (error instanceof AuthenticationError) {
+          throw error
+        }
+        return {
         ...run,
         tasks: [],
         agents: [],
         sessions: [],
         taskDag: null,
-      }))),
+        }
+      })),
     )
 
     const approvals = (await Promise.all(
-      runs.map((run) => requestJson<Approval[]>(`/api/v1/approvals?runId=${encodeURIComponent(run.id)}`).catch(() => [])),
+      runs.map((run) => requestJson<Approval[]>(`/api/v1/approvals?runId=${encodeURIComponent(run.id)}`).catch((error: unknown) => {
+        if (error instanceof AuthenticationError) {
+          throw error
+        }
+        return []
+      })),
     )).flat()
     const validations = (await Promise.all(
-      runs.map((run) => requestJson<Validation[]>(`/api/v1/validations?runId=${encodeURIComponent(run.id)}`).catch(() => [])),
+      runs.map((run) => requestJson<Validation[]>(`/api/v1/validations?runId=${encodeURIComponent(run.id)}`).catch((error: unknown) => {
+        if (error instanceof AuthenticationError) {
+          throw error
+        }
+        return []
+      })),
     )).flat()
     const artifacts = (await Promise.all(
-      runs.map((run) => requestJson<Artifact[]>(`/api/v1/artifacts?runId=${encodeURIComponent(run.id)}`).catch(() => [])),
+      runs.map((run) => requestJson<Artifact[]>(`/api/v1/artifacts?runId=${encodeURIComponent(run.id)}`).catch((error: unknown) => {
+        if (error instanceof AuthenticationError) {
+          throw error
+        }
+        return []
+      })),
     )).flat()
     const messages = (await Promise.all(
-      runs.map((run) => requestJson<Message[]>(`/api/v1/messages?runId=${encodeURIComponent(run.id)}`).catch(() => [])),
+      runs.map((run) => requestJson<Message[]>(`/api/v1/messages?runId=${encodeURIComponent(run.id)}`).catch((error: unknown) => {
+        if (error instanceof AuthenticationError) {
+          throw error
+        }
+        return []
+      })),
     )).flat()
 
     return {
@@ -1034,7 +1241,10 @@ async function loadSwarmData(): Promise<SwarmData> {
       governance,
       source: 'api',
     }
-  } catch {
+  } catch (error) {
+    if (error instanceof AuthenticationError) {
+      throw error
+    }
     return createEmptySwarmData()
   }
 }
@@ -1207,6 +1417,10 @@ function shortRunId(runId: string) {
 function App() {
   const { activeTheme, setActiveTheme, themes } = useTheme()
   const [route, setRoute] = useState<Route>(() => parseRoute(window.location.pathname))
+  const [authStatus, setAuthStatus] = useState<'checking' | 'authenticated' | 'unauthenticated'>('checking')
+  const [authMessage, setAuthMessage] = useState('')
+  const [loginForm, setLoginForm] = useState({ email: '', password: '' })
+  const [loginBusy, setLoginBusy] = useState(false)
   const [data, setData] = useState<SwarmData>(createEmptySwarmData())
   const [projects, setProjects] = useState<ProjectRecord[]>([])
   const [teamBlueprints, setTeamBlueprints] = useState<TeamBlueprint[]>([])
@@ -1257,6 +1471,56 @@ function App() {
   })
   const queueRunLiveRefreshRef = useRef<(runId: string, request: RunLiveRefreshRequest) => void>(() => undefined)
 
+  function clearProtectedState(nextMessage = '') {
+    setData(createEmptySwarmData())
+    setProjects([])
+    setTeamBlueprints([])
+    setRunEvents([])
+    setTranscript([])
+    setPendingRunStarts([])
+    setRefreshError('')
+    setBusy(false)
+    setLoading(false)
+    setAuthStatus('unauthenticated')
+    setAuthMessage(nextMessage)
+  }
+
+  function applyWorkspaceData(swarmData: SwarmData, nextTeamBlueprints: TeamBlueprint[]) {
+    setData(swarmData)
+    setTeamBlueprints(nextTeamBlueprints)
+    setProjects(normalizeProjects(
+      swarmData.projectSummaries.map((project) => ({
+        id: project.id,
+        name: project.name,
+        summary: project.description ?? '',
+        repositoryIds: swarmData.repositories
+          .filter((repository) => repository.projectId === project.id)
+          .map((repository) => repository.id),
+        createdAt: new Date(project.createdAt).toISOString(),
+        updatedAt: new Date(project.updatedAt).toISOString(),
+      })),
+    ))
+  }
+
+  async function hydrateWorkspace(identityOverride?: IdentityContext | null) {
+    setLoading(true)
+    const [swarmData, nextTeamBlueprints] = await Promise.all([
+      loadSwarmData(identityOverride),
+      loadTeamBlueprints().catch((error: unknown) => {
+        if (error instanceof AuthenticationError) {
+          throw error
+        }
+        return []
+      }),
+    ])
+
+    applyWorkspaceData(swarmData, nextTeamBlueprints)
+    setLoading(false)
+    setRefreshError('')
+    setAuthStatus('authenticated')
+    setAuthMessage('')
+  }
+
   useEffect(() => {
     function onPopState() {
       setRoute(parseRoute(window.location.pathname))
@@ -1271,38 +1535,43 @@ function App() {
   }, [sidebarWidth])
 
   useEffect(() => {
+    handleUnauthorizedRequest = () => {
+      clearProtectedState('Your session expired. Sign in again.')
+    }
+
+    return () => {
+      if (handleUnauthorizedRequest === null) {
+        return
+      }
+      handleUnauthorizedRequest = null
+    }
+  }, [])
+
+  useEffect(() => {
     let active = true
     async function hydrate() {
       setLoading(true)
-      const [swarmData, nextTeamBlueprints] = await Promise.all([
-        loadSwarmData(),
-        loadTeamBlueprints().catch(() => []),
-      ])
+      setAuthStatus('checking')
+      const session = await loadAuthSession()
 
       if (!active) {
         return
       }
 
-      setData(swarmData)
-      setTeamBlueprints(nextTeamBlueprints)
-      setProjects(normalizeProjects(
-        swarmData.projectSummaries.map((project) => ({
-          id: project.id,
-          name: project.name,
-          summary: project.description ?? '',
-          repositoryIds: swarmData.repositories
-            .filter((repository) => repository.projectId === project.id)
-            .map((repository) => repository.id),
-          createdAt: new Date(project.createdAt).toISOString(),
-          updatedAt: new Date(project.updatedAt).toISOString(),
-        })),
-      ))
-      setLoading(false)
-      setRefreshError('')
+      if (!session.authenticated || !session.identity) {
+        clearProtectedState('')
+        return
+      }
+
+      await hydrateWorkspace(session.identity)
     }
 
     void hydrate().catch((error: unknown) => {
       if (!active) {
+        return
+      }
+      if (error instanceof AuthenticationError) {
+        clearProtectedState('Your session expired. Sign in again.')
         return
       }
       setRefreshError(error instanceof Error ? error.message : 'Unable to refresh workspace')
@@ -1521,6 +1790,9 @@ function App() {
         if (disposed || activeController.signal.aborted) {
           return
         }
+        if (error instanceof AuthenticationError) {
+          return
+        }
 
         console.error('[run-stream] connection failed', error)
         scheduleReconnect()
@@ -1646,10 +1918,47 @@ function App() {
   }
 
   async function refresh() {
-    setLoading(true)
-    const nextData = await loadSwarmData()
-    setData(nextData)
-    setLoading(false)
+    await hydrateWorkspace(data.identity)
+  }
+
+  async function handleLogin(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!loginForm.email.trim() || !loginForm.password) {
+      return
+    }
+
+    setLoginBusy(true)
+    setAuthMessage('')
+
+    try {
+      const session = await loginWithPassword(loginForm.email.trim(), loginForm.password)
+      if (!session.authenticated || !session.identity) {
+        throw new Error('Authentication failed')
+      }
+
+      await hydrateWorkspace(session.identity)
+      setLoginForm({ email: '', password: '' })
+    } catch (error) {
+      if (error instanceof AuthenticationError) {
+        clearProtectedState('Your session expired. Sign in again.')
+        return
+      }
+      setAuthStatus('unauthenticated')
+      setAuthMessage(error instanceof Error ? error.message : 'Unable to sign in')
+      setLoading(false)
+    } finally {
+      setLoginBusy(false)
+    }
+  }
+
+  async function handleLogout() {
+    setLoginBusy(true)
+    try {
+      await logoutCurrentSession()
+    } finally {
+      setLoginBusy(false)
+      clearProtectedState('')
+    }
   }
 
   async function refreshRunSlices(runId: string, request: RunLiveRefreshRequest) {
@@ -2192,6 +2501,22 @@ function App() {
   const selectedTask = runTasks.find((task) => task.id === selectedTaskId) ?? runTasks[0] ?? null
   const selectedVerificationTask = filteredVerificationTasks.find((task) => task.id === selectedTaskId) ?? filteredVerificationTasks[0] ?? null
 
+  if (authStatus !== 'authenticated') {
+    return (
+      <AuthScreen
+        activeTheme={activeTheme}
+        authMessage={authMessage}
+        loading={loading || authStatus === 'checking'}
+        loginBusy={loginBusy}
+        loginForm={loginForm}
+        onLogin={handleLogin}
+        onLoginFormChange={setLoginForm}
+        onThemeChange={(theme) => setActiveTheme(theme as typeof activeTheme)}
+        themes={themes}
+      />
+    )
+  }
+
   return (
     <div className="app-shell">
       <header className="primary-header">
@@ -2216,6 +2541,10 @@ function App() {
         </nav>
 
         <div className="header-meta">
+          <div className="identity-chip" aria-label="Signed in user">
+            <span>{data.identity?.subject ?? data.identity?.principal ?? 'Authenticated user'}</span>
+            <strong>{data.identity?.workspace.name ?? 'Workspace'}</strong>
+          </div>
           <span className="status-chip">{data.workerNodes.filter((node) => node.status === 'online').length} Online Nodes</span>
           <span className="status-chip">{data.source === 'api' ? 'Live API' : 'Mock API'}</span>
           <label className="theme-picker">
@@ -2226,6 +2555,9 @@ function App() {
               ))}
             </select>
           </label>
+          <button type="button" className="ghost-pill" onClick={() => void handleLogout()} disabled={loginBusy}>
+            Log out
+          </button>
         </div>
       </header>
 
@@ -3796,6 +4128,94 @@ function TaskDetailPanel({
         </section>
       </div>
     </article>
+  )
+}
+
+function AuthScreen({
+  activeTheme,
+  authMessage,
+  loading,
+  loginBusy,
+  loginForm,
+  onLogin,
+  onLoginFormChange,
+  onThemeChange,
+  themes,
+}: {
+  activeTheme: string
+  authMessage: string
+  loading: boolean
+  loginBusy: boolean
+  loginForm: {
+    email: string
+    password: string
+  }
+  onLogin: (event: FormEvent<HTMLFormElement>) => void | Promise<void>
+  onLoginFormChange: (form: { email: string; password: string }) => void
+  onThemeChange: (theme: string) => void
+  themes: ReadonlyArray<{ value: string; label: string }>
+}) {
+  return (
+    <div className="auth-shell">
+      <section className="auth-hero">
+        <div className="auth-hero-panel">
+          <p className="eyebrow">Codex Swarm</p>
+          <h1>Operator access requires a live browser session.</h1>
+          <p className="auth-copy">
+            Sign in with the workspace admin created during bootstrap. Operational routes now hydrate through the session probe instead of a pasted API token.
+          </p>
+          <div className="auth-facts" aria-label="Authentication behavior">
+            <span>Landing stays public.</span>
+            <span>Operational UI stays protected.</span>
+            <span>Sessions use HttpOnly cookies.</span>
+          </div>
+        </div>
+      </section>
+      <section className="auth-panel">
+        <form className="auth-form" onSubmit={(event) => void onLogin(event)}>
+          <div className="auth-form-header">
+            <div>
+              <p className="eyebrow">Authentication</p>
+              <h2>{loading ? 'Checking session…' : 'Sign in'}</h2>
+            </div>
+            <label className="theme-picker">
+              <span>Appearance</span>
+              <select value={activeTheme} onChange={(event) => onThemeChange(event.target.value)}>
+                {themes.map((theme) => (
+                  <option key={theme.value} value={theme.value}>{theme.label}</option>
+                ))}
+              </select>
+            </label>
+          </div>
+          <label className="field">
+            <span>Email</span>
+            <input
+              autoComplete="username"
+              disabled={loading || loginBusy}
+              name="email"
+              type="email"
+              value={loginForm.email}
+              onChange={(event) => onLoginFormChange({ ...loginForm, email: event.target.value })}
+            />
+          </label>
+          <label className="field">
+            <span>Password</span>
+            <input
+              autoComplete="current-password"
+              disabled={loading || loginBusy}
+              name="password"
+              type="password"
+              value={loginForm.password}
+              onChange={(event) => onLoginFormChange({ ...loginForm, password: event.target.value })}
+            />
+          </label>
+          {authMessage ? <p className="form-error" role="alert">{authMessage}</p> : null}
+          <button type="submit" className="action-button auth-submit" disabled={loading || loginBusy}>
+            {loading ? 'Checking session…' : loginBusy ? 'Signing in…' : 'Sign in'}
+          </button>
+        </form>
+      </section>
+    </div>
   )
 }
 

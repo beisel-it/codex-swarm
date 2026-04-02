@@ -4,7 +4,7 @@ import { createServer } from "node:http";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { PassThrough } from "node:stream";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type {
   Repository,
   RunDetail,
@@ -590,6 +590,209 @@ describe("worker runtime helpers", () => {
     }
   });
 
+  it("sends the configured service token on control-plane requests", async () => {
+    const requests: Array<{ method: string | undefined; url: string | undefined; authorization: string | undefined }> = [];
+    const repoRoot = await mkdtemp(join(tmpdir(), "codex-swarm-service-token-source-"));
+    const runDetail: RunDetail = {
+      id: "22222222-2222-4222-8222-222222222222",
+      repositoryId: "55555555-5555-4555-8555-555555555555",
+      workspaceId: "default-workspace",
+      teamId: "default-team",
+      projectTeamId: null,
+      projectTeamName: null,
+      status: "pending",
+      branchName: "main",
+      planArtifactPath: null,
+      budgetTokens: null,
+      budgetCostUsd: null,
+      concurrencyCap: 1,
+      policyProfile: "standard",
+      publishedBranch: null,
+      branchPublishedAt: null,
+      branchPublishApprovalId: null,
+      pullRequestUrl: null,
+      pullRequestNumber: null,
+      pullRequestStatus: null,
+      pullRequestApprovalId: null,
+      handoffStatus: "pending",
+      handoff: {
+        mode: "manual",
+        provider: null,
+        baseBranch: null,
+        autoPublishBranch: false,
+        autoCreatePullRequest: false,
+        titleTemplate: null,
+        bodyTemplate: null
+      },
+      handoffExecution: {
+        state: "idle",
+        failureReason: null,
+        attemptedAt: null,
+        completedAt: null
+      },
+      goal: "Verify service auth",
+      metadata: {},
+      context: {
+        kind: "ad_hoc",
+        projectId: null,
+        projectSlug: null,
+        projectName: null,
+        projectDescription: null,
+        jobId: null,
+        jobName: null,
+        externalInput: null,
+        values: {}
+      },
+      createdBy: "tech-lead",
+      createdAt: new Date("2026-03-29T00:00:00.000Z"),
+      updatedAt: new Date("2026-03-29T00:00:00.000Z"),
+      completedAt: null,
+      tasks: [],
+      agents: [],
+      sessions: [],
+      taskDag: {
+        nodes: [],
+        edges: [],
+        rootTaskIds: [],
+        blockedTaskIds: [],
+        unblockPaths: []
+      }
+    };
+    const repository: Repository = {
+      id: "55555555-5555-4555-8555-555555555555",
+      workspaceId: "default-workspace",
+      teamId: "default-team",
+      projectId: null,
+      name: "codex-swarm",
+      url: repoRoot,
+      provider: "github",
+      defaultBranch: "main",
+      localPath: null,
+      trustLevel: "trusted",
+      approvalProfile: "standard",
+      providerSync: {
+        connectivityStatus: "validated",
+        validatedAt: null,
+        defaultBranch: "main",
+        branches: ["main"],
+        providerRepoUrl: repoRoot,
+        lastError: null
+      },
+      createdAt: new Date("2026-03-29T00:00:00.000Z"),
+      updatedAt: new Date("2026-03-29T00:00:00.000Z")
+    };
+    const assignment: WorkerDispatchAssignment = {
+      id: "99999999-9999-4999-8999-999999999999",
+      runId: runDetail.id,
+      taskId: "33333333-3333-4333-8333-333333333333",
+      agentId: "55555555-5555-4555-8555-555555555555",
+      sessionId: undefined,
+      repositoryId: repository.id,
+      repositoryName: "codex-swarm",
+      queue: "worker-dispatch",
+      branchName: "main",
+      worktreePath: "shared",
+      state: "claimed",
+      stickyNodeId: null,
+      preferredNodeId: null,
+      claimedByNodeId: "node-a",
+      requiredCapabilities: [],
+      prompt: "Verify service auth",
+      profile: "default",
+      sandbox: "workspace-write",
+      approvalPolicy: "on-request",
+      includePlanTool: false,
+      metadata: {},
+      attempt: 0,
+      maxAttempts: 3,
+      leaseTtlSeconds: 300,
+      createdAt: new Date("2026-03-29T00:00:00.000Z")
+    };
+
+    const workspaceRoot = await mkdtemp(join(tmpdir(), "codex-swarm-service-auth-"));
+
+    try {
+      git(["init", "--initial-branch=main"], repoRoot);
+      git(["config", "user.name", "Codex Swarm"], repoRoot);
+      git(["config", "user.email", "codex-swarm@example.com"], repoRoot);
+      await writeFile(join(repoRoot, "README.md"), "hello from source\n", "utf8");
+      git(["add", "README.md"], repoRoot);
+      git(["commit", "-m", "initial"], repoRoot);
+
+      const server = createServer((request, response) => {
+        requests.push({
+          method: request.method,
+          url: request.url,
+          authorization: request.headers.authorization
+        });
+
+        if (request.method === "POST" && request.url === "/api/v1/worker-nodes/node-a/claim-dispatch") {
+          response.writeHead(200, { "content-type": "application/json" });
+          response.end(JSON.stringify(assignment));
+          return;
+        }
+
+        if (request.method === "GET" && request.url === `/api/v1/runs/${runDetail.id}`) {
+          response.writeHead(200, { "content-type": "application/json" });
+          response.end(JSON.stringify(runDetail));
+          return;
+        }
+
+        if (request.method === "GET" && request.url === "/api/v1/repositories") {
+          response.writeHead(200, { "content-type": "application/json" });
+          response.end(JSON.stringify([repository]));
+          return;
+        }
+
+        response.writeHead(404, { "content-type": "application/json" });
+        response.end(JSON.stringify({ error: "not found" }));
+      });
+
+      await new Promise<void>((resolve) => {
+        server.listen(0, "127.0.0.1", () => resolve());
+      });
+
+      const address = server.address();
+
+      if (!address || typeof address === "string") {
+        throw new Error("failed to resolve test server address");
+      }
+
+      const provisioned = await claimAndProvisionDispatchWorkspace({
+        runtime: {
+          ...createRuntime(workspaceRoot),
+          controlPlaneUrl: `http://127.0.0.1:${address.port}`
+        },
+        controlPlane: {
+          baseUrl: `http://127.0.0.1:${address.port}`,
+          serviceToken: "service-token",
+          serviceName: "worker"
+        }
+      });
+
+      expect(provisioned?.assignment.id).toBe(assignment.id);
+      expect(requests).toHaveLength(3);
+      expect(requests.map((entry) => entry.authorization)).toEqual([
+        "Bearer service-token",
+        "Bearer service-token",
+        "Bearer service-token"
+      ]);
+      await new Promise<void>((resolve, reject) => {
+        server.close((error) => {
+          if (error) {
+            reject(error);
+            return;
+          }
+
+          resolve();
+        });
+      });
+    } finally {
+      await rm(repoRoot, { recursive: true, force: true });
+      await rm(workspaceRoot, { recursive: true, force: true });
+    }
+  });
+
   it("reuses an existing shared workspace when reuseExisting is enabled", async () => {
     const repoRoot = await mkdtemp(join(tmpdir(), "codex-swarm-shared-source-"));
     const workspaceRoot = await mkdtemp(join(tmpdir(), "codex-swarm-shared-workspaces-"));
@@ -645,6 +848,185 @@ describe("worker runtime helpers", () => {
 
       expect(second.path).toBe(first.path);
       expect(await readFile(join(second.path, "README.md"), "utf8")).toBe("shared workspace change\n");
+    } finally {
+      await rm(repoRoot, { recursive: true, force: true });
+      await rm(workspaceRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("sends release service credentials for control-plane worker claims", async () => {
+    const repoRoot = await mkdtemp(join(tmpdir(), "codex-swarm-service-auth-source-"));
+    const workspaceRoot = await mkdtemp(join(tmpdir(), "codex-swarm-service-auth-workspace-"));
+
+    try {
+      git(["init", "--initial-branch=main"], repoRoot);
+      git(["config", "user.name", "Codex Swarm"], repoRoot);
+      git(["config", "user.email", "codex-swarm@example.com"], repoRoot);
+      await writeFile(join(repoRoot, "README.md"), "service auth\n", "utf8");
+      git(["add", "README.md"], repoRoot);
+      git(["commit", "-m", "initial"], repoRoot);
+
+      const assignment: WorkerDispatchAssignment = {
+        id: "dispatch-1",
+        runId: "run-1",
+        taskId: "task-1",
+        agentId: "agent-1",
+        sessionId: undefined,
+        repositoryId: "repo-1",
+        repositoryName: "codex-swarm",
+        queue: "worker-dispatch",
+        state: "claimed",
+        stickyNodeId: null,
+        preferredNodeId: null,
+        claimedByNodeId: "node-a",
+        requiredCapabilities: [],
+        worktreePath: join(workspaceRoot, "dispatch-1"),
+        branchName: "main",
+        prompt: "Execute the task",
+        profile: "default",
+        sandbox: "workspace-write",
+        approvalPolicy: "never",
+        includePlanTool: false,
+        metadata: {},
+        attempt: 0,
+        maxAttempts: 3,
+        leaseTtlSeconds: 300,
+        createdAt: new Date("2026-03-29T00:00:00.000Z")
+      };
+      const runDetail: RunDetail = {
+        id: "run-1",
+        repositoryId: "repo-1",
+        workspaceId: "default-workspace",
+        teamId: "default-team",
+        projectTeamId: null,
+        projectTeamName: null,
+        goal: "Ship release auth",
+        status: "in_progress",
+        branchName: "main",
+        planArtifactPath: null,
+        budgetTokens: null,
+        budgetCostUsd: null,
+        concurrencyCap: 1,
+        policyProfile: "standard",
+        publishedBranch: null,
+        branchPublishedAt: null,
+        branchPublishApprovalId: null,
+        pullRequestUrl: null,
+        pullRequestNumber: null,
+        pullRequestStatus: null,
+        pullRequestApprovalId: null,
+        handoffStatus: "pending",
+        handoff: {
+          mode: "manual",
+          provider: null,
+          baseBranch: null,
+          autoPublishBranch: false,
+          autoCreatePullRequest: false,
+          titleTemplate: null,
+          bodyTemplate: null
+        },
+        handoffExecution: {
+          state: "idle",
+          failureReason: null,
+          attemptedAt: null,
+          completedAt: null
+        },
+        metadata: {},
+        context: {
+          kind: "ad_hoc",
+          projectId: null,
+          projectSlug: null,
+          projectName: null,
+          projectDescription: null,
+          jobId: null,
+          jobName: null,
+          externalInput: null,
+          values: {}
+        },
+        createdBy: "tech-lead",
+        createdAt: new Date("2026-03-29T00:00:00.000Z"),
+        updatedAt: new Date("2026-03-29T00:00:00.000Z"),
+        completedAt: null,
+        tasks: [],
+        agents: [],
+        sessions: [],
+        taskDag: {
+          nodes: [],
+          edges: [],
+          rootTaskIds: [],
+          blockedTaskIds: [],
+          unblockPaths: []
+        }
+      };
+      const repository: Repository = {
+      id: "repo-1",
+      workspaceId: "default-workspace",
+      teamId: "default-team",
+      projectId: null,
+      name: "codex-swarm",
+      url: repoRoot,
+      provider: "github",
+      defaultBranch: "main",
+      localPath: null,
+      trustLevel: "trusted",
+      approvalProfile: "standard",
+      providerSync: {
+        connectivityStatus: "validated",
+        validatedAt: null,
+        defaultBranch: "main",
+        branches: ["main"],
+        providerRepoUrl: "https://example.invalid/codex-swarm",
+        lastError: null
+      },
+      createdAt: new Date("2026-03-29T00:00:00.000Z"),
+      updatedAt: new Date("2026-03-29T00:00:00.000Z")
+      };
+      const fetchImpl = vi.fn(async (url: URL | RequestInfo, init?: RequestInit) => {
+        const requestUrl = typeof url === "string" ? new URL(url) : url instanceof URL ? url : new URL(url.url);
+        const headers = new Headers(init?.headers);
+
+        expect(headers.get("authorization")).toBe("Bearer release-service-token");
+        expect(headers.get("x-codex-service-name")).toBe("worker");
+
+        if (init?.method === "POST" && requestUrl.pathname === "/api/v1/worker-nodes/node-a/claim-dispatch") {
+          return new Response(JSON.stringify(assignment), {
+            status: 200,
+            headers: { "content-type": "application/json" }
+          });
+        }
+
+        if (init?.method === "GET" && requestUrl.pathname === "/api/v1/runs/run-1") {
+          return new Response(JSON.stringify(runDetail), {
+            status: 200,
+            headers: { "content-type": "application/json" }
+          });
+        }
+
+        if (init?.method === "GET" && requestUrl.pathname === "/api/v1/repositories") {
+          return new Response(JSON.stringify([repository]), {
+            status: 200,
+            headers: { "content-type": "application/json" }
+          });
+        }
+
+        return new Response(JSON.stringify({ error: "not found" }), {
+          status: 404,
+          headers: { "content-type": "application/json" }
+        });
+      });
+
+      const result = await claimAndProvisionDispatchWorkspace({
+        runtime: createRuntime(workspaceRoot),
+        controlPlane: {
+          baseUrl: "http://127.0.0.1:4010",
+          serviceToken: "release-service-token",
+          serviceName: "worker",
+          fetchImpl
+        }
+      });
+
+      expect(result?.assignment.id).toBe("dispatch-1");
+      expect(fetchImpl).toHaveBeenCalledTimes(3);
     } finally {
       await rm(repoRoot, { recursive: true, force: true });
       await rm(workspaceRoot, { recursive: true, force: true });

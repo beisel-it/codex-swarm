@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { buildApp } from "../src/app.js";
+import { getConfig } from "../src/config.js";
 import type { ControlPlaneService } from "../src/services/control-plane-service.js";
 
 const headers = {
@@ -70,9 +71,11 @@ describe("artifact detail routes", () => {
     } satisfies Pick<ControlPlaneService, "getArtifact">;
 
     const app = await buildApp({
-      config: {
+      config: getConfig({
+        NODE_ENV: "test",
+        AUTH_ENABLE_LEGACY_DEV_BEARER: true,
         ARTIFACT_STORAGE_ROOT: storageRoot
-      },
+      }),
       controlPlane: controlPlane as unknown as ControlPlaneService
     });
 
@@ -125,6 +128,10 @@ describe("artifact detail routes", () => {
     } satisfies Pick<ControlPlaneService, "getArtifact">;
 
     const app = await buildApp({
+      config: getConfig({
+        NODE_ENV: "test",
+        AUTH_ENABLE_LEGACY_DEV_BEARER: true
+      }),
       controlPlane: controlPlane as unknown as ControlPlaneService
     });
 

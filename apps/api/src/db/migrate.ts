@@ -318,6 +318,38 @@ const statements = [
     actor jsonb default null,
     metadata jsonb not null default '{}'::jsonb,
     created_at timestamptz not null default now()
+  )`,
+  `do $$
+  begin
+    create type governance_role as enum ('org_admin', 'workspace_admin', 'team_admin', 'member', 'reviewer', 'operator', 'service', 'system');
+  exception
+    when duplicate_object then null;
+  end $$`,
+  `create table if not exists users (
+    id text primary key,
+    email text not null unique,
+    display_name text not null,
+    is_active boolean not null default true,
+    primary_role governance_role not null default 'workspace_admin',
+    workspace_id text not null references workspaces(id),
+    team_id text not null references teams(id),
+    created_at timestamptz not null default now(),
+    updated_at timestamptz not null default now()
+  )`,
+  `create table if not exists password_credentials (
+    user_id text primary key references users(id),
+    password_hash text not null,
+    created_at timestamptz not null default now(),
+    updated_at timestamptz not null default now()
+  )`,
+  `create table if not exists browser_sessions (
+    id text primary key,
+    user_id text not null references users(id),
+    expires_at timestamptz not null,
+    revoked_at timestamptz,
+    created_at timestamptz not null default now(),
+    updated_at timestamptz not null default now(),
+    last_used_at timestamptz not null default now()
   )`
 ];
 
@@ -483,6 +515,38 @@ async function main() {
   await db.execute(sql.raw("alter table artifacts add column if not exists size_bytes integer"));
   await db.execute(sql.raw("alter table artifacts add column if not exists sha256 text"));
   await db.execute(sql.raw("alter table control_plane_events add column if not exists actor jsonb default null"));
+  await db.execute(sql.raw(`do $$
+  begin
+    create type governance_role as enum ('org_admin', 'workspace_admin', 'team_admin', 'member', 'reviewer', 'operator', 'service', 'system');
+  exception
+    when duplicate_object then null;
+  end $$`));
+  await db.execute(sql.raw(`create table if not exists users (
+    id text primary key,
+    email text not null unique,
+    display_name text not null,
+    is_active boolean not null default true,
+    primary_role governance_role not null default 'workspace_admin',
+    workspace_id text not null references workspaces(id),
+    team_id text not null references teams(id),
+    created_at timestamptz not null default now(),
+    updated_at timestamptz not null default now()
+  )`));
+  await db.execute(sql.raw(`create table if not exists password_credentials (
+    user_id text primary key references users(id),
+    password_hash text not null,
+    created_at timestamptz not null default now(),
+    updated_at timestamptz not null default now()
+  )`));
+  await db.execute(sql.raw(`create table if not exists browser_sessions (
+    id text primary key,
+    user_id text not null references users(id),
+    expires_at timestamptz not null,
+    revoked_at timestamptz,
+    created_at timestamptz not null default now(),
+    updated_at timestamptz not null default now(),
+    last_used_at timestamptz not null default now()
+  )`));
   await db.execute(sql.raw(controlPlaneMetadataTableSql));
   await db.execute(sql.raw("alter table control_plane_metadata add column if not exists config_version text not null default '1'"));
   await db.execute(sql.raw("alter table control_plane_metadata add column if not exists upgraded_at timestamptz not null default now()"));

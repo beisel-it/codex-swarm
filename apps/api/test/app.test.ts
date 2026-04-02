@@ -1447,6 +1447,7 @@ class FakeVerticalSliceControlPlane {
 describe("buildApp", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.stubEnv("AUTH_ENABLE_LEGACY_DEV_BEARER", "true");
     observability.getMetrics.mockResolvedValue({
       queueDepth: {
         runsPending: 0,
@@ -1498,8 +1499,12 @@ describe("buildApp", () => {
     await app.close();
   });
 
-  it("rejects protected routes without the configured bearer token", async () => {
+  it("rejects protected routes without a valid authenticated session", async () => {
     const app = await buildApp({
+      config: getConfig({
+        NODE_ENV: "test",
+        AUTH_ENABLE_LEGACY_DEV_BEARER: false
+      }),
       controlPlane: controlPlane as unknown as ControlPlaneService
     });
 
@@ -1510,7 +1515,7 @@ describe("buildApp", () => {
 
     expect(response.statusCode).toBe(401);
     expect(response.json()).toEqual({
-      error: "missing or invalid bearer token",
+      error: "missing or invalid session",
       details: null
     });
 
@@ -8391,15 +8396,70 @@ describe("buildApp", () => {
     }
   });
 
-  it("serves the built frontend shell from the API without auth", async () => {
+  it("limits anonymous frontend access to landing-only routes and serves the operational shell only with a session", async () => {
     const frontendRoot = await mkdtemp(join(tmpdir(), "codex-swarm-frontend-dist-"));
     await mkdir(join(frontendRoot, "assets"), { recursive: true });
-    await writeFile(join(frontendRoot, "index.html"), "<!doctype html><html><body>swarm-ui</body></html>");
-    await writeFile(join(frontendRoot, "runtime-config.js"), "window.__CODEX_SWARM_CONFIG__ = {\"apiBaseUrl\":\"http://127.0.0.1:3000\",\"apiToken\":\"test-token\"};\n");
-    await writeFile(join(frontendRoot, "runtime-config.json"), "{\"apiBaseUrl\":\"http://127.0.0.1:3000\",\"apiToken\":\"test-token\"}\n");
+    await writeFile(
+      join(frontendRoot, "index.html"),
+      "<!doctype html><html><head><script src=\"/runtime-config.js\"></script><script type=\"module\" crossorigin src=\"/assets/index-public.js\"></script><link rel=\"stylesheet\" crossorigin href=\"/assets/index-public.css\"></head><body>swarm-ui</body></html>"
+    );
+    await writeFile(join(frontendRoot, "runtime-config.js"), "window.__CODEX_SWARM_CONFIG__ = {\"apiBaseUrl\":\"http://127.0.0.1:3000\",\"enableLegacyDevBearer\":false};\n");
+    await writeFile(join(frontendRoot, "runtime-config.json"), "{\"apiBaseUrl\":\"http://127.0.0.1:3000\",\"enableLegacyDevBearer\":false}\n");
     await writeFile(join(frontendRoot, "favicon.svg"), "<svg xmlns=\"http://www.w3.org/2000/svg\"></svg>");
     await writeFile(join(frontendRoot, "icons.svg"), "<svg xmlns=\"http://www.w3.org/2000/svg\"></svg>");
-    await writeFile(join(frontendRoot, "assets", "index.js"), "console.log('asset');\n");
+    await writeFile(
+      join(frontendRoot, "assets", "index-public.js"),
+      "import './landing-chunk.js';\nconsole.log('asset');\n"
+    );
+    await writeFile(join(frontendRoot, "assets", "landing-chunk.js"), "console.log('landing chunk');\n");
+    await writeFile(
+      join(frontendRoot, "assets", "index-public.css"),
+      "@font-face{font-family:'Fixture';src:url('/assets/index-public.woff2') format('woff2');}body{font-family:'Fixture';}\n"
+    );
+    await writeFile(join(frontendRoot, "assets", "index-public.woff2"), "fixture-font\n");
+    await writeFile(join(frontendRoot, "assets", "private-shell.js"), "console.log('private');\n");
+    const authService = {
+      getAuthenticatedSession: vi.fn().mockImplementation(async (sessionId: string | null | undefined) => {
+        if (sessionId !== "session-1") {
+          return null;
+        }
+
+        return {
+          actor: {
+            principal: "admin@example.com",
+            actorId: "user-1",
+            actorType: "user" as const,
+            email: "admin@example.com",
+            role: "workspace_admin" as const,
+            roles: ["workspace_admin"] as ["workspace_admin"],
+            workspaceId: "default-workspace",
+            workspaceName: "Default Workspace",
+            teamId: "codex-swarm",
+            teamName: "Codex Swarm",
+            policyProfile: "standard"
+          },
+          identity: {
+            principal: "admin@example.com",
+            subject: "user-1",
+            email: "admin@example.com",
+            roles: ["workspace_admin"] as ["workspace_admin"],
+            workspace: {
+              id: "default-workspace",
+              name: "Default Workspace"
+            },
+            team: {
+              id: "codex-swarm",
+              workspaceId: "default-workspace",
+              name: "Codex Swarm"
+            },
+            actorType: "user" as const
+          },
+          sessionId: "session-1",
+          expiresAt: new Date("2026-04-09T12:00:00.000Z"),
+          userId: "user-1"
+        };
+      })
+    };
 
     const app = await buildApp({
       config: getConfig({
@@ -8408,29 +8468,110 @@ describe("buildApp", () => {
         HOST: "127.0.0.1",
         DATABASE_URL: "postgres://unused/test",
         DEV_AUTH_TOKEN: "test-token",
+        AUTH_ENABLE_LEGACY_DEV_BEARER: false,
         FRONTEND_DIST_ROOT: frontendRoot,
         OPENAI_TRACING_DISABLED: true
       }),
       controlPlane: controlPlane as unknown as ControlPlaneService,
+      authService: authService as never,
       observability: observability as any
     });
 
     try {
-      const shellResponse = await app.inject({
+      const landingResponse = await app.inject({
         method: "GET",
-        url: "/settings"
+        url: "/"
       });
 
-      expect(shellResponse.statusCode).toBe(200);
-      expect(shellResponse.body).toContain("swarm-ui");
+      const anonymousOperationalResponses = await Promise.all(
+        [
+          "/projects",
+          "/projects/10101010-1010-4010-8010-101010101010",
+          "/adhoc-runs",
+          "/runs",
+          "/runs/22222222-2222-4222-8222-222222222222",
+          "/settings"
+        ].map((url) =>
+          app.inject({
+            method: "GET",
+            url
+          })
+        )
+      );
+
+      const authenticatedShellResponse = await app.inject({
+        method: "GET",
+        url: "/settings",
+        headers: {
+          cookie: "codex_swarm_session=session-1"
+        }
+      });
+
+      expect(landingResponse.statusCode).toBe(200);
+      expect(landingResponse.body).toContain("swarm-ui");
+      for (const response of anonymousOperationalResponses) {
+        expect(response.statusCode).toBe(401);
+        expect(response.json()).toEqual({
+          error: "missing or invalid session",
+          details: null
+        });
+        expect(response.body).not.toContain("swarm-ui");
+        expect(response.body).not.toContain("<!doctype html>");
+        expect(response.headers["content-type"]).toContain("application/json");
+      }
+      expect(anonymousOperationalResponses.at(-1)?.body).not.toContain("swarm-ui");
+      expect(anonymousOperationalResponses.at(-1)?.body).not.toContain("<!doctype html>");
+      expect(anonymousOperationalResponses.at(-1)?.headers["content-type"]).toContain("application/json");
+      expect(authenticatedShellResponse.statusCode).toBe(200);
+      expect(authenticatedShellResponse.body).toContain("swarm-ui");
+      expect(authenticatedShellResponse.headers["content-type"]).toContain("text/html");
+      expect(authenticatedShellResponse.body).toContain("<!doctype html>");
 
       const configResponse = await app.inject({
         method: "GET",
         url: "/runtime-config.json"
       });
 
+      const publicEntryAsset = await app.inject({
+        method: "GET",
+        url: "/assets/index-public.js"
+      });
+
+      const publicStylesheet = await app.inject({
+        method: "GET",
+        url: "/assets/index-public.css"
+      });
+
+      const publicChunk = await app.inject({
+        method: "GET",
+        url: "/assets/landing-chunk.js"
+      });
+
+      const publicFont = await app.inject({
+        method: "GET",
+        url: "/assets/index-public.woff2"
+      });
+
+      const privateAssetDenied = await app.inject({
+        method: "GET",
+        url: "/assets/private-shell.js"
+      });
+
       expect(configResponse.statusCode).toBe(200);
       expect(configResponse.body).toContain("apiBaseUrl");
+      expect(publicEntryAsset.statusCode).toBe(200);
+      expect(publicEntryAsset.body).toContain("asset");
+      expect(publicStylesheet.statusCode).toBe(200);
+      expect(publicStylesheet.body).toContain("Fixture");
+      expect(publicChunk.statusCode).toBe(200);
+      expect(publicChunk.body).toContain("landing chunk");
+      expect(publicFont.statusCode).toBe(200);
+      expect(publicFont.body).toContain("fixture-font");
+      expect(privateAssetDenied.statusCode).toBe(401);
+      expect(privateAssetDenied.json()).toEqual({
+        error: "missing or invalid session",
+        details: null
+      });
 
       const apiResponse = await app.inject({
         method: "GET",
@@ -8441,6 +8582,117 @@ describe("buildApp", () => {
     } finally {
       await app.close();
       await rm(frontendRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("accepts release service credentials only on scoped worker routes while keeping legacy bearer fallback disabled", async () => {
+    controlPlane.updateRun.mockResolvedValue({
+      id: ids.run,
+      branchName: "feature/release-service-auth"
+    });
+
+    const app = await buildApp({
+      config: getConfig({
+        NODE_ENV: "test",
+        PORT: 3000,
+        HOST: "127.0.0.1",
+        DATABASE_URL: "postgres://unused/test",
+        AUTH_ENABLE_LEGACY_DEV_BEARER: false,
+        AUTH_SERVICE_TOKEN: "service-token",
+        DEV_AUTH_TOKEN: "dev-token",
+        OPENAI_TRACING_DISABLED: true
+      }),
+      controlPlane: controlPlane as unknown as ControlPlaneService,
+      observability: observability as any
+    });
+
+    try {
+      const allowedServiceRoute = await app.inject({
+        method: "PATCH",
+        url: `/api/v1/runs/${ids.run}`,
+        headers: {
+          authorization: "Bearer service-token",
+          "x-codex-service-name": "worker"
+        },
+        payload: {
+          branchName: "feature/release-service-auth"
+        }
+      });
+
+      const deniedNonServiceRoute = await app.inject({
+        method: "GET",
+        url: "/api/v1/me",
+        headers: {
+          authorization: "Bearer service-token",
+          "x-codex-service-name": "worker"
+        }
+      });
+
+      const missingServiceName = await app.inject({
+        method: "GET",
+        url: "/api/v1/repositories",
+        headers: {
+          authorization: "Bearer service-token"
+        }
+      });
+
+      const invalidServiceToken = await app.inject({
+        method: "GET",
+        url: "/api/v1/repositories",
+        headers: {
+          authorization: "Bearer wrong-service-token",
+          "x-codex-service-name": "worker"
+        }
+      });
+
+      const legacyBearerFallback = await app.inject({
+        method: "GET",
+        url: "/api/v1/repositories",
+        headers: {
+          authorization: "Bearer dev-token"
+        }
+      });
+
+      expect(allowedServiceRoute.statusCode).toBe(200);
+      expect(controlPlane.updateRun).toHaveBeenCalledWith(
+        ids.run,
+        expect.objectContaining({
+          branchName: "feature/release-service-auth"
+        }),
+        expect.objectContaining({
+          actorType: "service",
+          principal: "control-plane-service:worker",
+          actorId: "control-plane-service:worker",
+          role: "system",
+          roles: ["system", "service"]
+        })
+      );
+
+      expect(deniedNonServiceRoute.statusCode).toBe(403);
+      expect(deniedNonServiceRoute.json()).toEqual({
+        error: "service credential is not permitted for this route",
+        details: null
+      });
+
+      expect(missingServiceName.statusCode).toBe(401);
+      expect(missingServiceName.json()).toEqual({
+        error: "missing or invalid service credential",
+        details: null
+      });
+
+      expect(invalidServiceToken.statusCode).toBe(401);
+      expect(invalidServiceToken.json()).toEqual({
+        error: "missing or invalid session",
+        details: null
+      });
+
+      expect(legacyBearerFallback.statusCode).toBe(401);
+      expect(legacyBearerFallback.json()).toEqual({
+        error: "missing or invalid session",
+        details: null
+      });
+    } finally {
+      await app.close();
     }
   });
 });

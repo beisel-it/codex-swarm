@@ -4,8 +4,10 @@ import type { FastifyInstance } from "fastify";
 import { createDb, createPool } from "../db/client.js";
 import { ensureControlPlaneCompatibility } from "../db/versioning.js";
 import { systemClock } from "../lib/clock.js";
+import type { FrontendRouteAccess } from "../lib/frontend-route-access.js";
 import { ObservabilityService } from "../lib/observability.js";
 import { createShellProviderHandoffAdapter } from "../lib/provider-handoff.js";
+import { AuthService } from "../services/auth-service.js";
 import { ControlPlaneService } from "../services/control-plane-service.js";
 
 declare module "fastify" {
@@ -13,7 +15,9 @@ declare module "fastify" {
     db: ReturnType<typeof createDb>;
     dbPool: ReturnType<typeof createPool>;
     controlPlane: ControlPlaneService;
+    authService: AuthService;
     config: ReturnType<typeof import("../config.js").getConfig>;
+    frontendRouteAccess: FrontendRouteAccess;
     observability: ObservabilityService;
   }
 }
@@ -31,6 +35,7 @@ export const dependenciesPlugin = fp(async (app: FastifyInstance) => {
   app.decorate("dbPool", pool);
   app.decorate("db", db);
   app.decorate("observability", observability);
+  app.decorate("authService", new AuthService(db, systemClock, app.config));
   app.decorate("controlPlane", new ControlPlaneService(db, systemClock, {
     providerHandoff: createShellProviderHandoffAdapter({
       gitCommand: app.config.GIT_COMMAND,
