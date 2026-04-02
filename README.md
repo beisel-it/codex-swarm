@@ -74,12 +74,29 @@ After reviewing and editing `~/.config/codex-swarm/single-host.env`, start the s
 codex-swarm install --install-root ~/.local/share/codex-swarm/install --start --yes
 ```
 
-Then validate the install:
+Bootstrap the first workspace admin after the stack is up:
+
+```bash
+codex-swarm auth bootstrap-admin \
+  --email admin@example.com \
+  --password 'change-me-now' \
+  --display-name 'Initial Admin' \
+  --yes
+```
+
+Then validate the install and log in through the browser UI:
 
 ```bash
 codex-swarm doctor --install-root ~/.local/share/codex-swarm/install
 curl http://127.0.0.1:4300/health
 ```
+
+Release-1 auth defaults:
+
+- public without login: `GET /health`, `/webhooks/*`, and the landing site
+- login required: the operational UI and all non-webhook `/api/v1/*` routes
+- browser auth: email/password login backed by an HttpOnly session cookie
+- dev-only fallback: legacy bearer-token auth is disabled by default and only works when `AUTH_ENABLE_LEGACY_DEV_BEARER=true`
 
 If you want a checked-in local shell entrypoint instead of the remote one-liner, inspect the wrapper first:
 
@@ -254,7 +271,8 @@ release-1 managed deployment path.
 Important local environment values include:
 
 - `DATABASE_URL`
-- `DEV_AUTH_TOKEN`
+- `AUTH_ENABLE_LEGACY_DEV_BEARER`
+- `DEV_AUTH_TOKEN` for explicit local dev fallback only
 - `GIT_COMMAND`
 - `GITHUB_CLI_COMMAND`
 - artifact storage settings for your deployment mode
@@ -266,7 +284,9 @@ If you are running remote or shared-worker deployments, also set:
 - `ARTIFACT_STORAGE_ROOT`
 - `ARTIFACT_BASE_URL`
 
-All `/api/v1/*` requests use:
+Release installs do not use pasted bearer tokens for the browser UI. The frontend logs in through `POST /api/v1/auth/login`, receives an HttpOnly session cookie, and probes `GET /api/v1/auth/session` on load.
+
+For local development only, when `AUTH_ENABLE_LEGACY_DEV_BEARER=true`, you can still call protected routes with:
 
 ```text
 Authorization: Bearer <DEV_AUTH_TOKEN>
@@ -297,6 +317,7 @@ The intended command surface is:
 ```bash
 codex-swarm doctor
 codex-swarm install --version latest --dry-run
+codex-swarm auth bootstrap-admin --email <email> --password <password> --display-name <name> --yes
 codex-swarm api start
 codex-swarm worker start
 codex-swarm db migrate
@@ -312,6 +333,7 @@ npm install -g @beisel-it/codex-swarm --registry=https://npm.pkg.github.com
 codex-swarm install --version latest --dry-run
 codex-swarm install --version latest
 codex-swarm install --install-root ~/.local/share/codex-swarm/install --start --yes
+codex-swarm auth bootstrap-admin --email admin@example.com --password 'change-me-now' --display-name 'Initial Admin' --yes
 ```
 
 The local repo scripts remain for evaluation and development. The Quick Install

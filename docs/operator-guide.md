@@ -23,6 +23,8 @@ Use these assets together:
 
 ### Frontend
 
+- public without login:
+  - landing site only
 - `Projects`
 - `Ad-Hoc Runs`
 - `Settings`
@@ -32,9 +34,17 @@ Use these assets together:
   - `lifecycle`
   - `review`
 
+All operational frontend surfaces require a valid browser session. Operators
+bootstrap the first admin with `codex-swarm auth bootstrap-admin`, then log in
+through the browser login form backed by the release auth endpoints.
+
 ### Control plane
 
 - `/health`
+- `/webhooks/*`
+- `/api/v1/auth/login`
+- `/api/v1/auth/logout`
+- `/api/v1/auth/session`
 - `/api/v1/projects`
 - `/api/v1/repositories`
 - `/api/v1/runs`
@@ -51,6 +61,14 @@ Use these assets together:
 - `/api/v1/external-event-receipts`
 - `/api/v1/events`
 - `/api/v1/admin/*`
+
+Route boundary for release auth:
+
+- public without login: `GET /health`, `/webhooks/*`, and the landing/static frontend surface
+- protected after login: all operational UI routes and all non-webhook `/api/v1/*` routes
+- browser/session auth is the default release path
+- worker and local-daemon control-plane calls use the scoped `AUTH_SERVICE_TOKEN` / `CODEX_SWARM_SERVICE_TOKEN` path plus `CODEX_SWARM_SERVICE_NAME`
+- legacy bearer-token auth is a local/internal fallback only when `AUTH_ENABLE_LEGACY_DEV_BEARER=true`
 
 ### Operations
 
@@ -74,11 +92,13 @@ Use these assets together:
 
 ## Core operator walkthrough
 
-1. Start from the product surface that matches the question.
-2. Confirm backend truth with the matching `/api/v1` routes.
-3. Separate product-configuration questions from runtime-health questions.
-4. Use recovery only after diagnostics justify mutation.
-5. Capture evidence before and after any significant lifecycle or recovery
+1. Complete install and service startup for the target instance.
+2. Run `codex-swarm auth bootstrap-admin --email <email> --password <password> --display-name <name> --yes` once per fresh install to create the first workspace admin and default workspace/team boundary.
+3. Start from the product surface that matches the question after logging into the browser UI.
+4. Confirm backend truth with the matching protected `/api/v1` routes.
+5. Separate product-configuration questions from runtime-health questions.
+6. Use recovery only after diagnostics justify mutation.
+7. Capture evidence before and after any significant lifecycle or recovery
    action.
 
 ## DoD-Based Verification

@@ -5,8 +5,10 @@ import { fileURLToPath } from "node:url";
 import Fastify from "fastify";
 import fastifyStatic from "@fastify/static";
 import { ZodError } from "zod";
+import type { FrontendRouteAccess } from "./lib/frontend-route-access.js";
 
 import { getConfig } from "./config.js";
+import { createFrontendRouteAccess, normalizeFrontendPath } from "./lib/frontend-route-access.js";
 import { HttpError } from "./lib/http-error.js";
 import { authPlugin } from "./plugins/auth.js";
 import { corsPlugin } from "./plugins/cors.js";
@@ -17,6 +19,7 @@ import { approvalRoutes } from "./routes/approvals.js";
 import { artifactRoutes } from "./routes/artifacts.js";
 import { cleanupJobRoutes } from "./routes/cleanup-jobs.js";
 import { eventRoutes } from "./routes/events.js";
+import { authRoutes } from "./routes/auth.js";
 import { healthRoutes } from "./routes/health.js";
 import { identityRoutes } from "./routes/identity.js";
 import { ObservabilityService } from "./lib/observability.js";
@@ -35,6 +38,7 @@ import { validationRoutes } from "./routes/validations.js";
 import { webhookRoutes } from "./routes/webhooks.js";
 import { workerDispatchAssignmentRoutes } from "./routes/worker-dispatch-assignments.js";
 import { workerNodeRoutes } from "./routes/worker-nodes.js";
+import type { AuthService } from "./services/auth-service.js";
 import type { ControlPlaneService } from "./services/control-plane-service.js";
 
 function getErrorMessage(error: unknown) {
@@ -44,6 +48,7 @@ function getErrorMessage(error: unknown) {
 interface BuildAppOptions {
   config?: Partial<ReturnType<typeof getConfig>>;
   controlPlane?: ControlPlaneService;
+  authService?: AuthService;
   observability?: ObservabilityService;
 }
 
@@ -164,8 +169,10 @@ export async function buildApp(options: BuildAppOptions = {}) {
     logger: false
   });
   const frontendDistRoot = resolveFrontendDistRoot(config);
+  const frontendRouteAccess = createFrontendRouteAccess(frontendDistRoot);
 
   app.decorate("config", config);
+  app.decorate("frontendRouteAccess", frontendRouteAccess as FrontendRouteAccess);
 
   app.setErrorHandler((error, _request, reply) => {
     if (error instanceof HttpError) {
@@ -202,6 +209,9 @@ export async function buildApp(options: BuildAppOptions = {}) {
   if (options.controlPlane) {
     app.decorate("observability", (options.observability ?? createNoopObservability(config)) as ObservabilityService);
     app.decorate("controlPlane", options.controlPlane);
+    if (options.authService) {
+      app.decorate("authService", options.authService);
+    }
   } else {
     await app.register(dependenciesPlugin);
   }
@@ -209,6 +219,7 @@ export async function buildApp(options: BuildAppOptions = {}) {
   await app.register(corsPlugin);
   await app.register(authPlugin);
   await app.register(healthRoutes);
+  await app.register(authRoutes, { prefix: "/api/v1" });
   await app.register(adminRoutes, { prefix: "/api/v1" });
   await app.register(identityRoutes, { prefix: "/api/v1" });
   await app.register(projectRoutes, { prefix: "/api/v1" });
@@ -241,12 +252,23 @@ export async function buildApp(options: BuildAppOptions = {}) {
     });
 
     app.get("/*", async (request, reply) => {
-      if (request.url.startsWith("/api/") || request.url.startsWith("/webhooks/")) {
+      const pathname = normalizeFrontendPath(request.url);
+
+      if (pathname.startsWith("/api/") || pathname.startsWith("/webhooks/")) {
         reply.status(404).send({ error: "not_found" });
         return;
       }
 
-      return reply.sendFile("index.html");
+      if (pathname === "/" || app.frontendRouteAccess.isOperationalPath(pathname)) {
+        return reply.sendFile("index.html");
+      }
+
+      if (app.frontendRouteAccess.isPublicPath(pathname)) {
+        reply.status(404).send({ error: "not_found" });
+        return;
+      }
+
+      reply.status(404).send({ error: "not_found" });
     });
   }
 

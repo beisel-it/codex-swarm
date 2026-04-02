@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { ControlPlaneService } from "../src/services/control-plane-service.js";
 import { buildApp } from "../src/app.js";
+import { getConfig } from "../src/config.js";
 
 describe("admin authorization", () => {
   it("rejects admin retention writes for non-admin roles with deterministic details", async () => {
@@ -10,6 +11,10 @@ describe("admin authorization", () => {
     };
 
     const app = await buildApp({
+      config: getConfig({
+        NODE_ENV: "test",
+        AUTH_ENABLE_LEGACY_DEV_BEARER: true
+      }),
       controlPlane: controlPlane as unknown as ControlPlaneService
     });
 

@@ -43,7 +43,12 @@ Install `%h/.config/codex-swarm/tailnet.env` from
 - API port
 - loopback-only Postgres and Redis ports
 - DB password
-- auth token
+- release auth cookie and password-hash settings
+- explicit service credential settings for worker/internal traffic:
+  - `AUTH_SERVICE_TOKEN`
+  - `CODEX_SWARM_SERVICE_TOKEN`
+  - `CODEX_SWARM_SERVICE_NAME`
+- legacy dev bearer settings only if you explicitly enable the fallback
 - absolute artifact and workspace root paths
 - worker node identity and Codex command
 
@@ -53,6 +58,10 @@ Example:
 
 - frontend and API: `http://<tailnet-dns>:4300`
 - TUI against the hosted API: `corepack pnpm ops:tailnet:tui`
+
+For the browser path, operators log in with the bootstrap-admin account and use
+the release session-cookie flow. Only the landing site, `GET /health`, and
+`/webhooks/*` remain public without login.
 
 For the current host-local installation, the env file lives at:
 
@@ -90,7 +99,13 @@ corepack pnpm ops:tailnet:tui
 
 The helper reads `~/.config/codex-swarm/tailnet.env`, exports
 `CODEX_SWARM_API_BASE_URL` and `CODEX_SWARM_API_TOKEN`, then launches the
-repo-level TUI entrypoint in live mode.
+repo-level TUI entrypoint in live mode. That token-based path is for the TUI
+and service/operator tooling, not for the default browser login flow.
+
+Installed worker and local-daemon services do not use `CODEX_SWARM_API_TOKEN`
+in release mode. They authenticate with `CODEX_SWARM_SERVICE_TOKEN` and
+identify themselves with `CODEX_SWARM_SERVICE_NAME`, which the API validates
+against `AUTH_SERVICE_TOKEN`.
 
 The hosted browser UI is served by the API process from `frontend/dist`. The
 generated `/runtime-config.js` file is still written during the

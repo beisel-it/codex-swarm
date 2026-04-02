@@ -37,17 +37,23 @@ const apiBaseUrl =
     ? `http://${readEnv("CODEX_SWARM_HOST")}:${readEnv("CODEX_SWARM_API_PORT")}`
     : "");
 
-const apiToken =
-  readEnv("CODEX_SWARM_DEV_AUTH_TOKEN")
-  || readEnv("CODEX_SWARM_API_TOKEN")
-  || readEnv("CODEX_SWARM_AUTH_TOKEN")
-  || readEnv("DEV_AUTH_TOKEN")
-  || readEnv("VITE_API_TOKEN");
+const enableLegacyDevBearer =
+  readEnv("AUTH_ENABLE_LEGACY_DEV_BEARER") === "true"
+  || readEnv("VITE_ENABLE_LEGACY_DEV_BEARER") === "true";
 
 const config = {
   apiBaseUrl,
-  apiToken,
+  enableLegacyDevBearer,
 };
+
+if (enableLegacyDevBearer) {
+  config.apiToken =
+    readEnv("CODEX_SWARM_DEV_AUTH_TOKEN")
+    || readEnv("CODEX_SWARM_API_TOKEN")
+    || readEnv("CODEX_SWARM_AUTH_TOKEN")
+    || readEnv("DEV_AUTH_TOKEN")
+    || readEnv("VITE_API_TOKEN");
+}
 
 writeFileSync(
   join(repoRoot, "frontend", "dist", "runtime-config.js"),

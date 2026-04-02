@@ -1,4 +1,6 @@
 import os from "node:os";
+import { readFile } from "node:fs/promises";
+import path from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   envContainsInstallPlaceholders,
@@ -61,5 +63,30 @@ describe("single-host installer assets", () => {
       "codex-swarm-worker@.service",
       "codex-swarm.target"
     ]);
+  });
+
+  it("wires release service credentials through the shipped worker startup assets", async () => {
+    const templateRoot = path.resolve(import.meta.dirname, "..", "templates");
+    const envTemplate = await readFile(path.join(templateRoot, "single-host.env.example"), "utf8");
+    const workerTemplate = await readFile(path.join(templateRoot, "systemd-user", "codex-swarm-worker.service"), "utf8");
+    const workerTemplateScaled = await readFile(path.join(templateRoot, "systemd-user", "codex-swarm-worker@.service"), "utf8");
+
+    expect(envTemplate).toContain("AUTH_SERVICE_TOKEN=change-me-service-token");
+    expect(envTemplate).toContain("CODEX_SWARM_SERVICE_TOKEN=change-me-service-token");
+    expect(envTemplate).toContain("CODEX_SWARM_SERVICE_NAME=local-daemon");
+    expect(workerTemplate).toContain('CODEX_SWARM_SERVICE_TOKEN="${CODEX_SWARM_SERVICE_TOKEN:-${AUTH_SERVICE_TOKEN:');
+    expect(workerTemplate).toContain('CODEX_SWARM_SERVICE_NAME="${CODEX_SWARM_SERVICE_NAME:-local-daemon}"');
+    expect(workerTemplate).not.toContain("CODEX_SWARM_API_TOKEN");
+    expect(workerTemplateScaled).toContain('CODEX_SWARM_SERVICE_TOKEN="${CODEX_SWARM_SERVICE_TOKEN:-${AUTH_SERVICE_TOKEN:');
+    expect(workerTemplateScaled).toContain('CODEX_SWARM_SERVICE_NAME="${CODEX_SWARM_SERVICE_NAME:-local-daemon}"');
+    expect(workerTemplateScaled).not.toContain("CODEX_SWARM_API_TOKEN");
+  });
+
+  it("does not inject a legacy bearer token into the shipped api service runtime-config step", async () => {
+    const templateRoot = path.resolve(import.meta.dirname, "..", "templates");
+    const apiTemplate = await readFile(path.join(templateRoot, "systemd-user", "codex-swarm-api.service"), "utf8");
+
+    expect(apiTemplate).toContain("write-frontend-runtime-config.mjs");
+    expect(apiTemplate).not.toContain("VITE_API_TOKEN");
   });
 });

@@ -57,6 +57,23 @@ const configSchema = z.object({
   CORS_ALLOWED_ORIGINS: createCsvSchema(z.string().min(1), []),
   CONTROL_PLANE_SCHEMA_VERSION: z.string().min(1).default(CURRENT_CONTROL_PLANE_SCHEMA_VERSION),
   CONTROL_PLANE_CONFIG_VERSION: z.string().min(1).default(CURRENT_CONTROL_PLANE_CONFIG_VERSION),
+  AUTH_SESSION_COOKIE_NAME: z.string().min(1).default("codex_swarm_session"),
+  AUTH_SESSION_TTL_SECONDS: z.coerce.number().int().positive().default(60 * 60 * 24 * 7),
+  AUTH_SESSION_COOKIE_SAME_SITE: z.enum(["lax", "strict", "none"]).default("lax"),
+  AUTH_SESSION_COOKIE_SECURE: envBooleanSchema.optional(),
+  AUTH_SERVICE_TOKEN: z.string().min(1).optional(),
+  AUTH_SERVICE_PRINCIPAL: z.string().min(1).default("control-plane-service"),
+  AUTH_SERVICE_ACTOR_ID: z.string().min(1).default("control-plane-service"),
+  AUTH_SERVICE_WORKSPACE_ID: z.string().min(1).default("default-workspace"),
+  AUTH_SERVICE_WORKSPACE_NAME: z.string().min(1).default("Default Workspace"),
+  AUTH_SERVICE_TEAM_ID: z.string().min(1).default("codex-swarm"),
+  AUTH_SERVICE_TEAM_NAME: z.string().min(1).default("Codex Swarm"),
+  AUTH_SERVICE_POLICY_PROFILE: z.string().min(1).default("standard"),
+  AUTH_ENABLE_LEGACY_DEV_BEARER: envBooleanSchema,
+  AUTH_PASSWORD_SCRYPT_N: z.coerce.number().int().positive().default(16384),
+  AUTH_PASSWORD_SCRYPT_R: z.coerce.number().int().positive().default(8),
+  AUTH_PASSWORD_SCRYPT_P: z.coerce.number().int().positive().default(1),
+  AUTH_PASSWORD_SCRYPT_KEYLEN: z.coerce.number().int().positive().default(64),
   DEV_AUTH_TOKEN: z.string().min(1).default("codex-swarm-dev-token"),
   DEV_AUTH_PRINCIPAL: z.string().min(1).default("dev-user"),
   DEV_AUTH_ACTOR_ID: z.string().min(1).default("dev-user"),
@@ -99,8 +116,13 @@ const configSchema = z.object({
 export type AppConfig = z.infer<typeof configSchema>;
 
 export function getConfig(overrides: Record<string, unknown> = {}): AppConfig {
-  return configSchema.parse({
+  const parsed = configSchema.parse({
     ...process.env,
     ...overrides
   });
+
+  return {
+    ...parsed,
+    AUTH_SESSION_COOKIE_SECURE: parsed.AUTH_SESSION_COOKIE_SECURE ?? parsed.NODE_ENV === "production"
+  };
 }
