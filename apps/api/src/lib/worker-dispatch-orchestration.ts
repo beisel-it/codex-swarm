@@ -197,12 +197,16 @@ async function publishWorkerOutcomeMessages(
     messages: Array<{ target: string; body: string }>;
     blockingIssues?: string[];
     artifacts?: unknown[];
+  },
+  options?: {
+    suppressLeaderMessages?: boolean;
   }
 ) {
   const leaderAgent = runDetail.agents.find((agent) => agent.role === "tech-lead" && agent.id !== assignment.agentId) ?? null;
   const postedTargets = new Set<string>();
+  const suppressLeaderMessages = options?.suppressLeaderMessages ?? false;
 
-  if (leaderAgent) {
+  if (leaderAgent && !suppressLeaderMessages) {
     const leaderBody = `[${outcome.status}] ${summary}`;
     await postRunMessage(request, {
       runId: assignment.runId,
@@ -216,6 +220,10 @@ async function publishWorkerOutcomeMessages(
 
   for (const message of outcome.messages) {
     if (message.target === "leader" && leaderAgent) {
+      if (suppressLeaderMessages) {
+        continue;
+      }
+
       const dedupeKey = `agent:${leaderAgent.id}:${message.body}`;
 
       if (!postedTargets.has(dedupeKey)) {
@@ -329,22 +337,7 @@ function toLeaderResliceOutcomeFromVerification(outcome: VerifierTaskOutcome): W
     };
   }
 
-  const hasReworkSignal = outcome.changeRequests.length > 0 || outcome.findings.length > 0;
-
-  if (!hasReworkSignal) {
-    return null;
-  }
-
-  return {
-    summary: outcome.summary,
-    status: "needs_slicing",
-    messages: outcome.messages,
-    blockingIssues: [
-      ...outcome.changeRequests,
-      ...outcome.findings
-    ],
-    ...(outcome.artifacts ? { artifacts: outcome.artifacts } : {})
-  };
+  return null;
 }
 
 async function failAssignment(
@@ -729,10 +722,13 @@ export async function runManagedWorkerDispatch(
           outcome.summary,
           {
             summary: outcome.summary,
-            status: outcome.status === "passed" ? "completed" : "blocked",
+            status: outcome.status === "passed" ? "completed" : outcome.status,
             messages: outcome.messages,
             blockingIssues: outcome.blockingIssues,
             ...(outcome.artifacts ? { artifacts: outcome.artifacts } : {})
+          },
+          {
+            suppressLeaderMessages: outcome.status === "failed"
           }
         );
 

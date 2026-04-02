@@ -572,5 +572,42 @@ describe("ControlPlaneService task DAG shaping", () => {
         pathEdgeIds: ["22222222-2222-4222-8222-222222222222->33333333-3333-4333-8333-333333333333"]
       })
     ]));
+    expect(taskDag.hasIncompleteDependencies).toBe(false);
+    expect(taskDag.missingDependencies).toEqual([]);
+  });
+
+  it("preserves missing dependency targets as incomplete DAG metadata", () => {
+    const service = Object.create(ControlPlaneService.prototype) as any;
+    const runTasks = [
+      {
+        id: "22222222-2222-4222-8222-222222222222",
+        runId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        parentTaskId: null,
+        title: "Render graph",
+        description: "Depends on a task outside the returned slice",
+        role: "frontend-developer",
+        status: "blocked",
+        priority: 3,
+        ownerAgentId: null,
+        dependencyIds: ["11111111-1111-4111-8111-111111111111"],
+        acceptanceCriteria: [],
+        validationTemplates: [],
+        createdAt: new Date("2026-03-29T09:32:00.000Z"),
+        updatedAt: new Date("2026-03-29T09:32:00.000Z")
+      }
+    ];
+
+    const taskDag = service.buildTaskDag(runTasks);
+
+    expect(taskDag.rootTaskIds).toEqual([]);
+    expect(taskDag.edges).toEqual([]);
+    expect(taskDag.hasIncompleteDependencies).toBe(true);
+    expect(taskDag.missingDependencies).toEqual([
+      {
+        targetTaskId: "22222222-2222-4222-8222-222222222222",
+        missingTaskId: "11111111-1111-4111-8111-111111111111",
+        isBlocking: true
+      }
+    ]);
   });
 });

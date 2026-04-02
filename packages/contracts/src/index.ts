@@ -793,6 +793,12 @@ export const taskDagEdgeSchema = z.object({
   isBlocking: z.boolean()
 });
 
+export const taskDagMissingDependencySchema = z.object({
+  targetTaskId: z.uuid(),
+  missingTaskId: z.uuid(),
+  isBlocking: z.boolean()
+});
+
 export const taskDagUnblockPathSchema = z.object({
   taskId: z.uuid(),
   blockingTaskIds: z.array(z.uuid()).default([]),
@@ -805,7 +811,9 @@ export const taskDagGraphSchema = z.object({
   edges: z.array(taskDagEdgeSchema),
   rootTaskIds: z.array(z.uuid()).default([]),
   blockedTaskIds: z.array(z.uuid()).default([]),
-  unblockPaths: z.array(taskDagUnblockPathSchema).default([])
+  unblockPaths: z.array(taskDagUnblockPathSchema).default([]),
+  hasIncompleteDependencies: z.boolean().default(false),
+  missingDependencies: z.array(taskDagMissingDependencySchema).default([])
 });
 
 export const agentObservabilitySchema = z.object({
@@ -1761,6 +1769,7 @@ export type Task = z.infer<typeof taskSchema>;
 export type TaskVerificationStatus = typeof taskVerificationStatuses[number];
 export type TaskDagNode = z.infer<typeof taskDagNodeSchema>;
 export type TaskDagEdge = z.infer<typeof taskDagEdgeSchema>;
+export type TaskDagMissingDependency = z.infer<typeof taskDagMissingDependencySchema>;
 export type TaskDagUnblockPath = z.infer<typeof taskDagUnblockPathSchema>;
 export type TaskDagGraph = z.infer<typeof taskDagGraphSchema>;
 export type AgentObservability = z.infer<typeof agentObservabilitySchema>;

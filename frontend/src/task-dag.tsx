@@ -48,6 +48,11 @@ export function TaskDagGraphPanel({
           <span className="ghost-pill">{model.taskCount} tasks</span>
           <span className="ghost-pill">{model.edgeCount} links</span>
           <span className="ghost-pill">{model.blockedCount} blocked</span>
+          {model.state === 'ready' && model.hasIncompleteDependencies ? (
+            <span className="ghost-pill task-dag-warning-pill">
+              {model.missingDependencyCount > 0 ? `${model.missingDependencyCount} missing` : 'partial data'}
+            </span>
+          ) : null}
         </div>
       </div>
       <div className="task-dag-legend" aria-label="Dependency graph legend">
@@ -55,6 +60,7 @@ export function TaskDagGraphPanel({
         <span><i className="task-dag-swatch is-blocked" />Blocked</span>
         <span><i className="task-dag-swatch is-selected" />Selected</span>
         <span><i className="task-dag-swatch is-related" />Adjacent</span>
+        <span><i className="task-dag-swatch is-unblock-path" />Unblock path</span>
       </div>
       {model.state === 'loading' ? (
         <div className="task-dag-loading" aria-live="polite">
@@ -69,6 +75,11 @@ export function TaskDagGraphPanel({
       ) : null}
       {model.state === 'ready' ? (
         <>
+          {model.hasIncompleteDependencies ? (
+            <div className="task-dag-feedback is-warning" role="status">
+              Incomplete dependency data. {model.incompleteDependencyMessage}
+            </div>
+          ) : null}
           <div className="task-dag-viewport" role="group" aria-label="Task dependency graph">
             <div className="task-dag-canvas" style={{ width: `${model.width}px`, height: `${model.height}px` }}>
               <svg className="task-dag-svg" width={model.width} height={model.height} viewBox={`0 0 ${model.width} ${model.height}`} aria-hidden="true">
@@ -83,6 +94,8 @@ export function TaskDagGraphPanel({
                     className={[
                       'task-dag-edge',
                       edge.relatedToSelection ? 'is-related' : '',
+                      edge.isUnblockPath ? 'is-unblock-path' : '',
+                      edge.isSatisfied ? 'is-satisfied' : '',
                       edge.activelyBlocking ? 'is-blocking' : '',
                     ].filter(Boolean).join(' ')}
                     d={edge.path}
@@ -101,6 +114,9 @@ export function TaskDagGraphPanel({
                     node.isSelected ? 'is-selected' : '',
                     selectedTaskId && !node.isRelated ? 'is-dimmed' : '',
                     node.isRelated && !node.isSelected ? 'is-related' : '',
+                    node.isDirectDependency ? 'is-direct-dependency' : '',
+                    node.isDirectDependent ? 'is-direct-dependent' : '',
+                    node.isUnblockAncestor ? 'is-unblock-ancestor' : '',
                   ].filter(Boolean).join(' ')}
                   style={{
                     left: `${node.x}px`,
@@ -118,6 +134,14 @@ export function TaskDagGraphPanel({
                     <span>{node.role}</span>
                   </div>
                   <strong>{node.title}</strong>
+                  {node.isSelected || node.isDirectDependency || node.isDirectDependent || node.isUnblockAncestor ? (
+                    <span className="task-dag-node-relations">
+                      {node.isSelected ? 'selected' : null}
+                      {node.isDirectDependency ? 'dependency' : null}
+                      {node.isDirectDependent ? 'dependent' : null}
+                      {node.isUnblockAncestor ? 'unblock ancestor' : null}
+                    </span>
+                  ) : null}
                   <span className="task-dag-node-meta">
                     {node.blockedByTaskIds.length > 0 ? `blocked by ${node.blockedByTaskIds.length}` : `${node.dependencyIds.length} deps`}
                   </span>

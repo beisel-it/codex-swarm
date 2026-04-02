@@ -407,7 +407,7 @@ describe("formatRunExecutionContext", () => {
 });
 
 describe("buildVerifierTaskExecutionPrompt", () => {
-  it("includes definition of done, validations, artifacts, and non-remediation rules", () => {
+  it("includes definition of done, validations, artifacts, and self-remediation rules", () => {
     const prompt = buildVerifierTaskExecutionPrompt({
       repositoryName: "codex-swarm",
       runGoal: "Ship verifier pairing",
@@ -446,6 +446,8 @@ describe("buildVerifierTaskExecutionPrompt", () => {
     expect(prompt).toContain("typecheck: passed");
     expect(prompt).toContain(".swarm/reports/worker-summary.md");
     expect(prompt).toContain("Do not create follow-up tasks");
+    expect(prompt).toContain("You may fix the work yourself in the provided workspace");
+    expect(prompt).toContain("Only use failed at the end of your session");
     expect(prompt).toContain("\"failed\"");
     expect(prompt).toContain("\"blocked\"");
   });
@@ -531,7 +533,7 @@ describe("parseVerifierTaskOutcome", () => {
       messages: [
         {
           target: "leader",
-          body: "Verification failed; please create one rework task from the change requests."
+          body: "Verification failed after verifier remediation attempts; the original worker should address the remaining change requests."
         }
       ],
       blockingIssues: [],

@@ -23,7 +23,9 @@ export type TaskDagEdgeRecord = {
   sourceTaskId: string
   targetTaskId: string
   relatedToSelection: boolean
+  isUnblockPath: boolean
   activelyBlocking: boolean
+  isSatisfied: boolean
   path: string
 }
 
@@ -47,11 +49,16 @@ export type TaskDagRenderModel =
       edgeCount: number
       blockedCount: number
       helperText: string
+      hasIncompleteDependencies: boolean
+      missingDependencyCount: number
+      incompleteDependencyMessage: string | null
       emptyDependencies: boolean
       width: number
       height: number
       selectedTaskId: string | null
       relatedTaskIds: Set<string>
+      unblockPathTaskIds: Set<string>
+      unblockPathEdgeIds: Set<string>
       nodes: Array<TaskDagNodeRecord & {
         x: number
         y: number
@@ -61,6 +68,9 @@ export type TaskDagRenderModel =
         isBlocked: boolean
         isSelected: boolean
         isRelated: boolean
+        isDirectDependency: boolean
+        isDirectDependent: boolean
+        isUnblockAncestor: boolean
       }>
       edges: TaskDagEdgeRecord[]
     }
@@ -88,6 +98,12 @@ function titleSort(left: TaskDagNodeRecord, right: TaskDagNodeRecord) {
 
 function taskSort(left: TaskDagTask, right: TaskDagTask) {
   return left.title.localeCompare(right.title)
+}
+
+function describeIncompleteDependencies(missingDependencyCount: number, affectedTaskCount: number) {
+  const dependencyLabel = missingDependencyCount === 1 ? 'dependency is' : 'dependencies are'
+  const taskLabel = affectedTaskCount === 1 ? 'task' : 'tasks'
+  return `${missingDependencyCount} ${dependencyLabel} missing from ${affectedTaskCount} ${taskLabel}. Graph relationships are partial.`
 }
 
 export function buildTaskDagRenderModel({
@@ -176,6 +192,7 @@ export function buildTaskDagRenderModel({
   }
 
   const edgeIds = new Set<string>()
+  const edgeMetadataById = new Map<string, { isSatisfied: boolean, isBlocking: boolean }>()
   const rawEdges = taskDag?.edges.length
     ? taskDag.edges
     : tasks.flatMap((task) => task.dependencyIds.map((dependencyId) => ({
@@ -183,13 +200,20 @@ export function buildTaskDagRenderModel({
         sourceTaskId: dependencyId,
         targetTaskId: task.id,
         kind: 'dependency' as const,
+        isSatisfied: taskMap.get(dependencyId)?.status === 'completed',
+        isBlocking: task.status === 'blocked' && taskMap.get(dependencyId)?.status !== 'completed',
       })))
 
   for (const edge of rawEdges) {
     if (!nodeMap.has(edge.sourceTaskId) || !nodeMap.has(edge.targetTaskId)) {
       continue
     }
-    edgeIds.add(uniqueEdgeId(edge.sourceTaskId, edge.targetTaskId))
+    const edgeId = uniqueEdgeId(edge.sourceTaskId, edge.targetTaskId)
+    edgeIds.add(edgeId)
+    edgeMetadataById.set(edgeId, {
+      isSatisfied: edge.isSatisfied,
+      isBlocking: edge.isBlocking,
+    })
     const source = nodeMap.get(edge.sourceTaskId)
     const target = nodeMap.get(edge.targetTaskId)
     if (source && !source.dependentTaskIds.includes(edge.targetTaskId)) {
@@ -217,6 +241,7 @@ export function buildTaskDagRenderModel({
     (taskDag?.blockedTaskIds.length ? taskDag.blockedTaskIds : nodes.filter((node) => node.blockedByTaskIds.length > 0).map((node) => node.taskId))
       .filter((taskId) => nodeMap.has(taskId)),
   )
+  const unblockPathByTaskId = new Map((taskDag?.unblockPaths ?? []).map((path) => [path.taskId, path] as const))
 
   const queue = rootTaskIds.slice().sort()
   const seen = new Set<string>()
@@ -272,14 +297,33 @@ export function buildTaskDagRenderModel({
 
   const selectedId = selectedTaskId && nodeMap.has(selectedTaskId) ? selectedTaskId : nodes[0]?.taskId ?? null
   const relatedTaskIds = new Set<string>()
+  const unblockPathTaskIds = new Set<string>()
+  const unblockPathEdgeIds = new Set<string>()
+  let directDependencyIds = new Set<string>()
+  let directDependentIds = new Set<string>()
   if (selectedId) {
     relatedTaskIds.add(selectedId)
     const selectedNode = nodeMap.get(selectedId)
+    directDependencyIds = new Set(selectedNode?.dependencyIds ?? [])
+    directDependentIds = new Set(selectedNode?.dependentTaskIds ?? [])
     for (const dependencyId of selectedNode?.dependencyIds ?? []) {
       relatedTaskIds.add(dependencyId)
     }
     for (const dependentId of selectedNode?.dependentTaskIds ?? []) {
       relatedTaskIds.add(dependentId)
+    }
+    const unblockPath = unblockPathByTaskId.get(selectedId)
+    if (unblockPath) {
+      for (const taskId of unblockPath.pathTaskIds) {
+        if (taskId === selectedId) {
+          continue
+        }
+        unblockPathTaskIds.add(taskId)
+        relatedTaskIds.add(taskId)
+      }
+      for (const edgeId of unblockPath.pathEdgeIds) {
+        unblockPathEdgeIds.add(edgeId)
+      }
     }
   }
 
@@ -295,6 +339,9 @@ export function buildTaskDagRenderModel({
       isBlocked: blockedTaskIds.has(node.taskId),
       isSelected: node.taskId === selectedId,
       isRelated: selectedId ? relatedTaskIds.has(node.taskId) : false,
+      isDirectDependency: directDependencyIds.has(node.taskId),
+      isDirectDependent: directDependentIds.has(node.taskId),
+      isUnblockAncestor: unblockPathTaskIds.has(node.taskId),
     })))
 
   const positions = new Map(positionedNodes.map((node) => [node.taskId, node] as const))
@@ -312,12 +359,22 @@ export function buildTaskDagRenderModel({
       const endY = target.y + (target.height / 2)
       const delta = Math.max((endX - startX) / 2, 24)
       const path = `M ${startX} ${startY} C ${startX + delta} ${startY}, ${endX - delta} ${endY}, ${endX} ${endY}`
+      const edgeMetadata = edgeMetadataById.get(edgeId)
       return {
         id: edgeId,
         sourceTaskId,
         targetTaskId,
-        relatedToSelection: Boolean(selectedId && (sourceTaskId === selectedId || targetTaskId === selectedId)),
-        activelyBlocking: blockedTaskIds.has(targetTaskId) && (nodeMap.get(targetTaskId)?.blockedByTaskIds.includes(sourceTaskId) ?? false),
+        relatedToSelection: Boolean(
+          selectedId
+          && (
+            sourceTaskId === selectedId
+            || targetTaskId === selectedId
+            || unblockPathEdgeIds.has(edgeId)
+          ),
+        ),
+        isUnblockPath: unblockPathEdgeIds.has(edgeId),
+        activelyBlocking: edgeMetadata?.isBlocking ?? (blockedTaskIds.has(targetTaskId) && (nodeMap.get(targetTaskId)?.blockedByTaskIds.includes(sourceTaskId) ?? false)),
+        isSatisfied: edgeMetadata?.isSatisfied ?? (nodeMap.get(sourceTaskId)?.status === 'completed'),
         path,
       } satisfies TaskDagEdgeRecord
     })
@@ -325,8 +382,21 @@ export function buildTaskDagRenderModel({
 
   const edgeCount = edges.length
   const blockedCount = blockedTaskIds.size
-  const helperText = edgeCount === 0
-    ? 'No dependencies yet. All tasks are independent.'
+  const missingDependencies = taskDag?.missingDependencies ?? []
+  const missingDependencyCount = missingDependencies.length
+  const hasIncompleteDependencies = Boolean(taskDag?.hasIncompleteDependencies)
+  const incompleteDependencyMessage = hasIncompleteDependencies
+    ? missingDependencyCount > 0
+      ? describeIncompleteDependencies(
+          missingDependencyCount,
+          new Set(missingDependencies.map((entry) => entry.targetTaskId)).size,
+        )
+      : 'Graph relationships are partial. Some dependencies or unblock paths may be omitted.'
+    : null
+  const helperText = hasIncompleteDependencies
+    ? 'Dependency data is incomplete. Missing tasks can hide some edges and unblock paths.'
+    : edgeCount === 0
+      ? 'No dependencies yet. All tasks are independent.'
     : blockedCount > 0
       ? 'Execution order and unblock path. Select a task to inspect what is holding it back.'
       : 'Execution order and dependency flow across this run.'
@@ -337,11 +407,16 @@ export function buildTaskDagRenderModel({
     edgeCount,
     blockedCount,
     helperText,
-    emptyDependencies: edgeCount === 0,
+    hasIncompleteDependencies,
+    missingDependencyCount,
+    incompleteDependencyMessage,
+    emptyDependencies: edgeCount === 0 && !hasIncompleteDependencies,
     width,
     height,
     selectedTaskId: selectedId,
     relatedTaskIds,
+    unblockPathTaskIds,
+    unblockPathEdgeIds,
     nodes: positionedNodes,
     edges,
   }
