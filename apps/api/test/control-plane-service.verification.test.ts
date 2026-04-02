@@ -1120,7 +1120,7 @@ describe("ControlPlaneService verification lifecycle", () => {
     expect(runDetail.completedAt).toEqual(new Date("2026-03-31T09:40:00.000Z"));
   });
 
-  it("reuses the original worker agent when requeueing failed verification rework", async () => {
+  it("reuses the original worker agent when requeueing failed verification rework even if the agent is stopped", async () => {
     const runDetail = {
       id: "run-1",
       status: "in_progress",
@@ -1182,7 +1182,7 @@ describe("ControlPlaneService verification lifecycle", () => {
           name: "Builder",
           role: "backend-developer",
           profile: "backend-developer",
-          status: "idle",
+          status: "stopped",
           worktreePath: "/tmp/codex-swarm/run-1/shared",
           branchName: "main",
           currentTaskId: null,
@@ -1233,7 +1233,7 @@ describe("ControlPlaneService verification lifecycle", () => {
     const agentStore = [
       {
         id: "worker-agent-1",
-        status: "idle",
+        status: "stopped",
         currentTaskId: null,
         updatedAt: new Date("2026-03-31T09:00:00.000Z")
       }
@@ -1452,6 +1452,34 @@ describe("ControlPlaneService verification lifecycle", () => {
     expect(prompt).toContain("Verification change requests");
     expect(prompt).toContain("The JWT expiry is not set — fix before marking done.");
     expect(prompt).toContain("Missing input validation on the email field.");
+  });
+
+  it("includes verification findings in the worker execution prompt even when there are no change requests", () => {
+    const service = new ControlPlaneService({} as never, { now: () => new Date() });
+    const run = {
+      id: "run-1",
+      goal: "Add authentication",
+      context: null,
+      branchName: null
+    };
+    const repository = { name: "my-repo" };
+    const task = createTaskRecord({
+      title: "Implement login endpoint",
+      role: "backend-developer",
+      description: "Build the POST /auth/login handler.",
+      definitionOfDone: ["endpoint returns JWT"],
+      acceptanceCriteria: ["returns 200 on valid credentials"],
+      latestVerificationFindings: [
+        "The retry flow still drops verifier context when only findings are present."
+      ],
+      latestVerificationChangeRequests: []
+    });
+
+    const prompt = (service as any).buildTaskExecutionPrompt(run, repository, task);
+
+    expect(prompt).toContain("Verification findings");
+    expect(prompt).toContain("The retry flow still drops verifier context when only findings are present.");
+    expect(prompt).not.toContain("Verification change requests");
   });
 
   it("omits the change requests section from the worker prompt when there are none", () => {

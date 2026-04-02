@@ -3170,7 +3170,10 @@ export class ControlPlaneService {
       }
       const existingAgent = existingAgentsByTaskId.get(task.id)
         ?? (task.ownerAgentId
-          ? runDetail.agents.find((agent) => agent.id === task.ownerAgentId && agent.status === "idle")
+          ? runDetail.agents.find((agent) =>
+            agent.id === task.ownerAgentId
+            && (agent.status === "idle" || agent.status === "stopped")
+          )
           : null);
       const agent = existingAgent ?? await this.createAgent({
         runId,
@@ -4631,6 +4634,13 @@ export class ControlPlaneService {
       ? task.acceptanceCriteria.map((criterion) => `- ${criterion}`).join("\n")
       : "- Complete the assigned task and leave clear implementation notes.";
     const runContext = formatRunExecutionContext(run.context);
+    const findingsSection: string[] = task.latestVerificationFindings.length > 0
+      ? [
+        "",
+        "Verification findings (resolve all unresolved issues before considering this task complete):",
+        task.latestVerificationFindings.map((finding) => `- ${finding}`).join("\n")
+      ]
+      : [];
     const changeRequestsSection: string[] = task.latestVerificationChangeRequests.length > 0
       ? [
         "",
@@ -4653,6 +4663,7 @@ export class ControlPlaneService {
       "",
       "Acceptance criteria:",
       acceptanceCriteria,
+      ...findingsSection,
       ...changeRequestsSection
     ].join("\n");
   }
