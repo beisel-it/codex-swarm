@@ -213,7 +213,9 @@ function createRunDetail(): RunDetail {
       edges: [],
       rootTaskIds: ["task-1"],
       blockedTaskIds: [],
-      unblockPaths: []
+      unblockPaths: [],
+      hasIncompleteDependencies: false,
+      missingDependencies: []
     }
   };
 }
@@ -596,7 +598,7 @@ describe("runManagedWorkerDispatch verification prompts", () => {
     }
   });
 
-  it("creates leader-authored follow-on tasks from failed verification change requests", async () => {
+  it("does not create leader-authored follow-on tasks from failed verification change requests", async () => {
     const repoRoot = await mkdtemp(join(tmpdir(), "codex-swarm-verifier-reslice-repo-"));
     const worktreeRoot = await mkdtemp(join(tmpdir(), "codex-swarm-verifier-reslice-worktree-"));
 
@@ -654,7 +656,6 @@ describe("runManagedWorkerDispatch verification prompts", () => {
       });
 
       const assignment = createVerificationAssignment(join(worktreeRoot, "shared"));
-      const createdTasks: Array<Record<string, unknown>> = [];
       const postedMessages: Array<Record<string, unknown>> = [];
       const leaderPrompts: string[] = [];
 
@@ -705,34 +706,6 @@ describe("runManagedWorkerDispatch verification prompts", () => {
           return { ok: true } as T;
         }
 
-        if (method === "POST" && path === "/api/v1/tasks") {
-          const createdTask = {
-            id: `child-task-${createdTasks.length + 1}`,
-            runId: "run-1",
-            parentTaskId: payload?.parentTaskId ?? null,
-            title: payload?.title ?? "Untitled",
-            description: payload?.description ?? "",
-            role: payload?.role ?? "backend-developer",
-            status: "pending",
-            priority: payload?.priority ?? 2,
-            ownerAgentId: null,
-            verificationStatus: "pending",
-            verifierAgentId: null,
-            latestVerificationSummary: null,
-            latestVerificationFindings: [],
-            latestVerificationChangeRequests: [],
-            latestVerificationEvidence: [],
-            dependencyIds: (payload?.dependencyIds as string[] | undefined) ?? [],
-            definitionOfDone: (payload?.definitionOfDone as string[] | undefined) ?? [],
-            acceptanceCriteria: (payload?.acceptanceCriteria as string[] | undefined) ?? [],
-            validationTemplates: [],
-            createdAt: new Date("2026-03-31T09:03:00.000Z"),
-            updatedAt: new Date("2026-03-31T09:03:00.000Z")
-          };
-          createdTasks.push(createdTask);
-          return createdTask as T;
-        }
-
         if (method === "PATCH" && path === "/api/v1/worker-dispatch-assignments/dispatch-verifier-1") {
           return {
             ...assignment,
@@ -759,33 +732,7 @@ describe("runManagedWorkerDispatch verification prompts", () => {
 
           if (prompt.includes("You are continuing the leader orchestration session")) {
             leaderPrompts.push(prompt);
-
-            return {
-              threadId: "thread-leader-1",
-              output: JSON.stringify({
-                summary: "Create follow-up work from verification findings.",
-                tasks: [
-                  {
-                    key: "fix-dag-highlighting",
-                    title: "Fix unblock-path highlighting",
-                    role: "frontend-developer",
-                    description: "Use unblock-path metadata to render full blocking ancestry.",
-                    definitionOfDone: ["Selected blocked tasks render the full unblock path."],
-                    acceptanceCriteria: ["Blocked ancestry is fully visible."],
-                    dependencyKeys: []
-                  },
-                  {
-                    key: "cover-partial-data",
-                    title: "Add partial-data DAG coverage",
-                    role: "frontend-developer",
-                    description: "Cover partial dependency data and unblock-path behavior in tests.",
-                    definitionOfDone: ["Partial-data and branching unblock-path cases are covered by tests."],
-                    acceptanceCriteria: ["Representative DAG edge cases are covered."],
-                    dependencyKeys: ["fix-dag-highlighting"]
-                  }
-                ]
-              })
-            };
+            throw new Error("leader rework planning should not run for failed verification");
           }
 
           return {
@@ -816,47 +763,15 @@ describe("runManagedWorkerDispatch verification prompts", () => {
         assignmentId: "dispatch-verifier-1",
         status: "completed"
       });
-      expect(leaderPrompts).toHaveLength(1);
-      expect(leaderPrompts[0]).toContain("Parent task: Verify review gating");
-      expect(leaderPrompts[0]).toContain("Definition of done is not satisfied.");
-      expect(leaderPrompts[0]).toContain("Use unblock-path metadata when deriving related nodes and edges.");
-      expect(createdTasks).toEqual([
-        expect.objectContaining({
-          title: "Fix unblock-path highlighting",
-          parentTaskId: "task-1",
-          dependencyIds: []
-        }),
-        expect.objectContaining({
-          title: "Add partial-data DAG coverage",
-          parentTaskId: "task-1",
-          dependencyIds: ["child-task-1"]
-        })
-      ]);
-      expect(postedMessages).toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({
-            runId: "run-1",
-            senderAgentId: "verifier-agent-1",
-            recipientAgentId: "leader-agent-1",
-            kind: "direct",
-            body: "[blocked] Definition of done is not satisfied."
-          }),
-          expect.objectContaining({
-            runId: "run-1",
-            senderAgentId: "verifier-agent-1",
-            recipientAgentId: "leader-agent-1",
-            kind: "direct",
-            body: "Please open rework for unblock-path rendering and missing DAG coverage."
-          })
-        ])
-      );
+      expect(leaderPrompts).toHaveLength(0);
+      expect(postedMessages).toEqual([]);
     } finally {
       await rm(worktreeRoot, { recursive: true, force: true });
       await rm(repoRoot, { recursive: true, force: true });
     }
   });
 
-  it("keeps verification completion successful when leader rework planning fails", async () => {
+  it("completes failed verification without attempting leader rework planning", async () => {
     const repoRoot = await mkdtemp(join(tmpdir(), "codex-swarm-verifier-reslice-failure-repo-"));
     const worktreeRoot = await mkdtemp(join(tmpdir(), "codex-swarm-verifier-reslice-failure-worktree-"));
 
@@ -990,10 +905,7 @@ describe("runManagedWorkerDispatch verification prompts", () => {
           const prompt = toolRequest.input?.prompt ?? toolRequest.message?.params?.prompt ?? "";
 
           if (prompt.includes("You are continuing the leader orchestration session")) {
-            return {
-              threadId: "thread-leader-1",
-              output: "{not valid json"
-            };
+            throw new Error("leader rework planning should not run for failed verification");
           }
 
           return {
@@ -1035,13 +947,12 @@ describe("runManagedWorkerDispatch verification prompts", () => {
         })
       ]);
       expect(postedMessages).toEqual(
-        expect.arrayContaining([
+        expect.not.arrayContaining([
           expect.objectContaining({
-            runId: "run-1",
-            senderAgentId: "verifier-agent-1",
             recipientAgentId: "leader-agent-1",
-            kind: "direct",
-            body: "Leader follow-up planning failed after verification outcome: output must be exactly one JSON object"
+          }),
+          expect.objectContaining({
+            body: expect.stringContaining("Leader follow-up planning failed after verification outcome")
           })
         ])
       );

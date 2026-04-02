@@ -507,7 +507,10 @@ export function buildVerifierTaskExecutionPrompt(input: {
     "- Use passed only when the task satisfies the definitionOfDone and available evidence.",
     "- Use failed when the task is reviewable but does not satisfy definitionOfDone; include concrete findings and changeRequests.",
     "- Use blocked when you cannot verify because evidence or prerequisites are missing; explain the blocker in blockingIssues.",
-    "- Do not create follow-up tasks, do not fix the work yourself, and do not instruct other agents directly beyond routing messages.",
+    "- Do not create follow-up tasks.",
+    "- You may fix the work yourself in the provided workspace when you can do so safely.",
+    "- Only use failed at the end of your session when you still cannot bring the task to passed.",
+    "- Do not instruct other agents directly beyond routing messages.",
     "- Include leader messages when verification fails or is blocked.",
     "- If you produce durable evidence worth surfacing in codex-swarm, include it in artifacts.",
     "- do not add any properties beyond the schema"

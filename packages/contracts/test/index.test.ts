@@ -721,7 +721,9 @@ describe("runDetailSchema", () => {
             ],
             pathEdgeIds: ["550e8400-e29b-41d4-a716-446655440010->550e8400-e29b-41d4-a716-446655440011"]
           }
-        ]
+        ],
+        hasIncompleteDependencies: false,
+        missingDependencies: []
       }
     });
 

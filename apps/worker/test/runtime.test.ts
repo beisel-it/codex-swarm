@@ -480,7 +480,9 @@ describe("worker runtime helpers", () => {
           edges: [],
           rootTaskIds: [],
           blockedTaskIds: [],
-          unblockPaths: []
+          unblockPaths: [],
+          hasIncompleteDependencies: false,
+          missingDependencies: []
         }
       };
       const repository: Repository = {
@@ -655,7 +657,9 @@ describe("worker runtime helpers", () => {
         edges: [],
         rootTaskIds: [],
         blockedTaskIds: [],
-        unblockPaths: []
+        unblockPaths: [],
+        hasIncompleteDependencies: false,
+        missingDependencies: []
       }
     };
     const repository: Repository = {
@@ -955,7 +959,9 @@ describe("worker runtime helpers", () => {
           edges: [],
           rootTaskIds: [],
           blockedTaskIds: [],
-          unblockPaths: []
+          unblockPaths: [],
+          hasIncompleteDependencies: false,
+          missingDependencies: []
         }
       };
       const repository: Repository = {

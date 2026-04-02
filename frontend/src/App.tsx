@@ -1337,8 +1337,8 @@ function buildTaskPresentation(task: Task, allTasks: Task[], agentsById: Map<str
     awaiting_verification: 'Worker finished. Waiting for verifier assignment.',
     verification_running: 'Verifier is checking delivered work against the definition of done.',
     verified_complete: 'Passed verification against the definition of done.',
-    verification_failed: 'Verifier found unmet definition-of-done items.',
-    rework_requested: 'Leader opened follow-up work from verifier change requests.',
+    verification_failed: 'Verifier left unresolved definition-of-done findings and returned the task to the original worker.',
+    rework_requested: 'Verifier findings are driving active rework on the original task.',
     verification_blocked: 'Verifier escalated a blocker to the leader.',
   }
   const verificationSubtitleMap: Record<VerificationViewState, string> = {
@@ -1347,8 +1347,8 @@ function buildTaskPresentation(task: Task, allTasks: Task[], agentsById: Map<str
     awaiting_verification: 'Execution is finished. Verification has not started yet.',
     verification_running: 'Verifier is reviewing delivered work against the stored definition of done.',
     verified_complete: 'All required definition-of-done checks passed.',
-    verification_failed: 'Verification failed. Review findings are listed below.',
-    rework_requested: 'Rework was requested from verifier findings. The original task stays open until follow-up work lands.',
+    verification_failed: 'Verification failed. The same worker should address the findings listed below before the next retry.',
+    rework_requested: 'Verifier findings remain open on the original task while rework is in progress.',
     verification_blocked: 'Verification could not complete and was escalated to the leader.',
   }
 
@@ -4094,7 +4094,7 @@ function TaskDetailPanel({
             ) : null}
             {presentation.reworkTasks.length > 0 ? (
               <>
-                <strong>Rework follow-ups</strong>
+                <strong>Related rework tasks</strong>
                 <ul className="plain-list">
                   {presentation.reworkTasks.map((reworkTask) => (
                     <li key={reworkTask.id}>{reworkTask.title} ({formatLabel(reworkTask.status)})</li>

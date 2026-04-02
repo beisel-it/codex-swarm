@@ -3168,7 +3168,13 @@ export class ControlPlaneService {
       if (runDetail.projectTeamId && !projectTeamMember) {
         throw new HttpError(409, `project team ${runDetail.projectTeamName ?? runDetail.projectTeamId} has no member for role ${task.role}`);
       }
-      const existingAgent = existingAgentsByTaskId.get(task.id);
+      const existingAgent = existingAgentsByTaskId.get(task.id)
+        ?? (task.ownerAgentId
+          ? runDetail.agents.find((agent) =>
+            agent.id === task.ownerAgentId
+            && (agent.status === "idle" || agent.status === "stopped")
+          )
+          : null);
       const agent = existingAgent ?? await this.createAgent({
         runId,
         projectTeamMemberId: projectTeamMember?.id,
@@ -4610,6 +4616,16 @@ export class ControlPlaneService {
     return process.env.CODEX_SWARM_WORKSPACE_ROOT?.trim() || ".swarm/worktrees";
   }
 
+  private getVerificationRetryOwnerAgentId(
+    task: typeof tasks.$inferSelect,
+    assignment: WorkerDispatchAssignment
+  ) {
+    const workerAgentId = assignment.metadata?.workerAgentId;
+    return typeof workerAgentId === "string" && workerAgentId.trim().length > 0
+      ? workerAgentId
+      : task.ownerAgentId;
+  }
+
   private buildTaskExecutionPrompt(run: RunDetail, repository: Repository, task: Task) {
     const definitionOfDone = task.definitionOfDone.length > 0
       ? task.definitionOfDone.map((criterion) => `- ${criterion}`).join("\n")
@@ -4618,6 +4634,20 @@ export class ControlPlaneService {
       ? task.acceptanceCriteria.map((criterion) => `- ${criterion}`).join("\n")
       : "- Complete the assigned task and leave clear implementation notes.";
     const runContext = formatRunExecutionContext(run.context);
+    const findingsSection: string[] = task.latestVerificationFindings.length > 0
+      ? [
+        "",
+        "Verification findings (resolve all unresolved issues before considering this task complete):",
+        task.latestVerificationFindings.map((finding) => `- ${finding}`).join("\n")
+      ]
+      : [];
+    const changeRequestsSection: string[] = task.latestVerificationChangeRequests.length > 0
+      ? [
+        "",
+        "Verification change requests (address all of the following before considering this task complete):",
+        task.latestVerificationChangeRequests.map((req) => `- ${req}`).join("\n")
+      ]
+      : [];
 
     return [
       `Repository: ${repository.name}`,
@@ -4632,7 +4662,9 @@ export class ControlPlaneService {
       definitionOfDone,
       "",
       "Acceptance criteria:",
-      acceptanceCriteria
+      acceptanceCriteria,
+      ...findingsSection,
+      ...changeRequestsSection
     ].join("\n");
   }
 
@@ -4817,13 +4849,26 @@ export class ControlPlaneService {
             ? "completed"
             : verificationStatus === "blocked"
               ? "blocked"
-              : "awaiting_review";
+              : verificationStatus === "failed"
+                ? "pending"
+                : "awaiting_review";
 
-          if (task.status !== expectedStatus || task.ownerAgentId !== assignment.agentId || task.verifierAgentId !== assignment.agentId) {
+          const expectedOwnerAgentId = verificationStatus === "failed"
+            ? this.getVerificationRetryOwnerAgentId(task, this.mapWorkerDispatchAssignment(assignment))
+            : assignment.agentId;
+          const expectedVerifierAgentId = verificationStatus === "failed"
+            ? null
+            : assignment.agentId;
+
+          if (
+            task.status !== expectedStatus
+            || task.ownerAgentId !== expectedOwnerAgentId
+            || task.verifierAgentId !== expectedVerifierAgentId
+          ) {
             await this.db.update(tasks).set({
               status: expectedStatus,
-              ownerAgentId: assignment.agentId,
-              verifierAgentId: assignment.agentId,
+              ownerAgentId: expectedOwnerAgentId,
+              verifierAgentId: expectedVerifierAgentId,
               updatedAt: now
             }).where(eq(tasks.id, task.id));
           }
@@ -5537,16 +5582,19 @@ export class ControlPlaneService {
 
       if (assignmentKind === "verification" && input.outcome?.kind === "verification") {
         const verificationStatus = input.outcome.outcomeStatus;
+        const verificationRetryOwnerAgentId = verificationStatus === "failed"
+          ? this.getVerificationRetryOwnerAgentId(task, assignment)
+          : assignment.agentId;
         const taskStatus: Task["status"] = verificationStatus === "passed"
           ? "completed"
           : verificationStatus === "blocked"
             ? "blocked"
-            : "awaiting_review";
+            : "pending";
         await this.db.update(tasks).set({
           status: taskStatus,
-          ownerAgentId: assignment.agentId,
+          ownerAgentId: verificationRetryOwnerAgentId,
           verificationStatus,
-          verifierAgentId: assignment.agentId,
+          verifierAgentId: verificationStatus === "failed" ? null : assignment.agentId,
           latestVerificationSummary: input.outcome.summary,
           latestVerificationFindings: input.outcome.findings,
           latestVerificationChangeRequests: input.outcome.changeRequests,
@@ -5706,6 +5754,7 @@ export class ControlPlaneService {
   private buildTaskDag(runTasks: Task[]): TaskDagGraph {
     const tasksById = new Map(runTasks.map((task) => [task.id, task] as const));
     const dependentTaskIds = new Map<string, string[]>();
+    const missingDependencies: TaskDagGraph["missingDependencies"] = [];
 
     for (const task of runTasks) {
       dependentTaskIds.set(task.id, []);
@@ -5713,7 +5762,16 @@ export class ControlPlaneService {
 
     for (const task of runTasks) {
       for (const dependencyId of task.dependencyIds) {
-        dependentTaskIds.get(dependencyId)?.push(task.id);
+        if (tasksById.has(dependencyId)) {
+          dependentTaskIds.get(dependencyId)?.push(task.id);
+          continue;
+        }
+
+        missingDependencies.push({
+          targetTaskId: task.id,
+          missingTaskId: dependencyId,
+          isBlocking: task.status === "blocked"
+        });
       }
     }
 
@@ -5802,7 +5860,9 @@ export class ControlPlaneService {
       edges,
       rootTaskIds,
       blockedTaskIds,
-      unblockPaths
+      unblockPaths,
+      hasIncompleteDependencies: missingDependencies.length > 0,
+      missingDependencies
     };
   }
 

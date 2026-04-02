@@ -771,7 +771,7 @@ describe("ControlPlaneService verification lifecycle", () => {
     expect(taskRecord.verifierAgentId).toBe("verifier-agent-2");
   });
 
-  it("marks verifier failures on the task without creating follow-up work directly", async () => {
+  it("resets a failed-verification task to pending and restores the original worker for rework", async () => {
     const verifierAssignment = createWorkerAssignment({
       id: "dispatch-verifier-1",
       agentId: "verifier-agent-1",
@@ -791,6 +791,11 @@ describe("ControlPlaneService verification lifecycle", () => {
     const db = new FakeVerificationDb(
       [verifierAssignment],
       [
+        {
+          id: "worker-agent-1",
+          status: "idle",
+          currentTaskId: null
+        },
         {
           id: "verifier-agent-1",
           status: "busy",
@@ -817,7 +822,8 @@ describe("ControlPlaneService verification lifecycle", () => {
     (service as any).assertTaskExists = async () => taskRecord;
     (service as any).recordControlPlaneEvent = recordControlPlaneEvent;
     (service as any).maybeUnblockDependentTasks = maybeUnblockDependentTasks;
-    (service as any).enqueueRunnableWorkerDispatches = vi.fn(async () => []);
+    const enqueueRunnableWorkerDispatches = vi.fn(async () => []);
+    (service as any).enqueueRunnableWorkerDispatches = enqueueRunnableWorkerDispatches;
     (service as any).reconcileRunExecutionState = vi.fn(async () => undefined);
     (service as any).createTask = vi.fn(async () => {
       throw new Error("verifier must not create tasks directly");
@@ -836,8 +842,10 @@ describe("ControlPlaneService verification lifecycle", () => {
       }
     });
 
-    expect(taskRecord.status).toBe("awaiting_review");
+    expect(taskRecord.status).toBe("pending");
+    expect(taskRecord.ownerAgentId).toBe("worker-agent-1");
     expect(taskRecord.verificationStatus).toBe("failed");
+    expect(taskRecord.verifierAgentId).toBeNull();
     expect(taskRecord.latestVerificationSummary).toBe("Definition of done is not satisfied.");
     expect(taskRecord.latestVerificationFindings).toEqual([
       "Worker completion still closes the task immediately."
@@ -846,6 +854,7 @@ describe("ControlPlaneService verification lifecycle", () => {
       "Route worker completion into awaiting_review and queue a verifier assignment."
     ]);
     expect(maybeUnblockDependentTasks).not.toHaveBeenCalled();
+    expect(enqueueRunnableWorkerDispatches).toHaveBeenCalledWith("run-1");
     expect(recordControlPlaneEvent).toHaveBeenCalledWith(
       expect.objectContaining({ eventType: "task.verification_failed" }),
       expect.objectContaining({
@@ -1013,7 +1022,9 @@ describe("ControlPlaneService verification lifecycle", () => {
         edges: [],
         rootTaskIds: [],
         blockedTaskIds: [],
-        unblockPaths: []
+        unblockPaths: [],
+        hasIncompleteDependencies: false,
+        missingDependencies: []
       }
     };
     const agentStore: Array<Record<string, unknown>> = [];
@@ -1107,6 +1118,171 @@ describe("ControlPlaneService verification lifecycle", () => {
 
     expect(runDetail.status).toBe("completed");
     expect(runDetail.completedAt).toEqual(new Date("2026-03-31T09:40:00.000Z"));
+  });
+
+  it("reuses the original worker agent when requeueing failed verification rework even if the agent is stopped", async () => {
+    const runDetail = {
+      id: "run-1",
+      status: "in_progress",
+      repositoryId: "repo-1",
+      branchName: "main",
+      concurrencyCap: 1,
+      projectTeamId: null,
+      projectTeamName: null,
+      goal: "Retry the original worker after failed verification",
+      handoffConfig: {
+        enabled: false,
+        provider: null,
+        baseBranch: null,
+        autoPublishBranch: false,
+        autoCreatePullRequest: false,
+        titleTemplate: null,
+        bodyTemplate: null
+      },
+      handoffExecution: {
+        state: "idle",
+        failureReason: null,
+        attemptedAt: null,
+        completedAt: null
+      },
+      metadata: {},
+      context: {
+        kind: "ad_hoc",
+        projectId: null,
+        projectSlug: null,
+        projectName: null,
+        projectDescription: null,
+        jobId: null,
+        jobName: null,
+        externalInput: null,
+        values: {}
+      },
+      completedAt: null,
+      createdBy: "leader",
+      createdAt: new Date("2026-03-31T09:00:00.000Z"),
+      updatedAt: new Date("2026-03-31T09:00:00.000Z"),
+      tasks: [
+        {
+          ...createTaskRecord({
+            id: "task-rework",
+            title: "Fix failed verification findings",
+            status: "pending",
+            verificationStatus: "failed",
+            verifierAgentId: null,
+            ownerAgentId: "worker-agent-1",
+            latestVerificationChangeRequests: ["Address the remaining definition-of-done gaps."]
+          })
+        }
+      ],
+      agents: [
+        {
+          id: "worker-agent-1",
+          runId: "run-1",
+          projectTeamMemberId: null,
+          name: "Builder",
+          role: "backend-developer",
+          profile: "backend-developer",
+          status: "stopped",
+          worktreePath: "/tmp/codex-swarm/run-1/shared",
+          branchName: "main",
+          currentTaskId: null,
+          lastHeartbeatAt: null,
+          observability: {
+            mode: "unavailable",
+            currentSessionId: null,
+            currentSessionState: null,
+            visibleTranscriptSessionId: null,
+            visibleTranscriptSessionState: null,
+            visibleTranscriptUpdatedAt: null,
+            lineageSource: "not_started"
+          },
+          createdAt: new Date("2026-03-31T09:00:00.000Z"),
+          updatedAt: new Date("2026-03-31T09:00:00.000Z")
+        }
+      ],
+      sessions: [
+        {
+          id: "session-worker-1",
+          agentId: "worker-agent-1",
+          threadId: "thread-worker-1",
+          cwd: "/tmp/codex-swarm/run-1/shared",
+          sandbox: "workspace-write",
+          approvalPolicy: "on-request",
+          includePlanTool: false,
+          workerNodeId: null,
+          stickyNodeId: null,
+          placementConstraintLabels: ["workspace-write"],
+          lastHeartbeatAt: null,
+          state: "stopped",
+          staleReason: null,
+          metadata: {},
+          createdAt: new Date("2026-03-31T09:00:00.000Z"),
+          updatedAt: new Date("2026-03-31T09:00:00.000Z")
+        }
+      ],
+      taskDag: {
+        nodes: [],
+        edges: [],
+        rootTaskIds: [],
+        blockedTaskIds: [],
+        unblockPaths: [],
+        hasIncompleteDependencies: false,
+        missingDependencies: []
+      }
+    };
+    const agentStore = [
+      {
+        id: "worker-agent-1",
+        status: "stopped",
+        currentTaskId: null,
+        updatedAt: new Date("2026-03-31T09:00:00.000Z")
+      }
+    ];
+    const db = new FakeVerificationSchedulingDb(
+      [runDetail],
+      [],
+      agentStore
+    );
+    const service = new ControlPlaneService(db as never, {
+      now: () => new Date("2026-03-31T09:45:00.000Z")
+    });
+    const createWorkerDispatchAssignment = vi.fn(async (input: Record<string, unknown>) => ({
+      id: "dispatch-worker-retry",
+      ...input,
+      state: "queued",
+      claimedByNodeId: null,
+      stickyNodeId: null,
+      preferredNodeId: null,
+      attempt: 0,
+      createdAt: new Date("2026-03-31T09:45:00.000Z"),
+      updatedAt: new Date("2026-03-31T09:45:00.000Z")
+    }));
+
+    (service as any).getRun = async () => runDetail;
+    (service as any).assertRepositoryExists = async () => ({
+      id: "repo-1",
+      name: "codex-swarm",
+      defaultBranch: "main",
+      projectId: null
+    });
+    (service as any).loadRunProjectTeam = async () => null;
+    (service as any).createAgent = vi.fn(async () => {
+      throw new Error("rework retry should reuse the original worker agent");
+    });
+    (service as any).createWorkerDispatchAssignment = createWorkerDispatchAssignment;
+    (service as any).createMessage = vi.fn(async () => undefined);
+    (service as any).maybeExecuteAutoHandoff = vi.fn(async () => undefined);
+
+    await (service as any).enqueueRunnableWorkerDispatches("run-1");
+
+    expect(createWorkerDispatchAssignment).toHaveBeenCalledWith(expect.objectContaining({
+      taskId: "task-rework",
+      agentId: "worker-agent-1",
+      sessionId: "session-worker-1",
+      metadata: expect.objectContaining({
+        assignmentKind: "worker"
+      })
+    }));
   });
 
   it("invalidates stale claimed worker assignments instead of reviving blocked tasks during repair", async () => {
@@ -1248,5 +1424,79 @@ describe("ControlPlaneService verification lifecycle", () => {
       verificationStatus: "requested",
       verifierAgentId: "verifier-agent-new"
     });
+  });
+
+  it("includes verification change requests in the worker execution prompt", () => {
+    const service = new ControlPlaneService({} as never, { now: () => new Date() });
+    const run = {
+      id: "run-1",
+      goal: "Add authentication",
+      context: null,
+      branchName: null
+    };
+    const repository = { name: "my-repo" };
+    const task = createTaskRecord({
+      title: "Implement login endpoint",
+      role: "backend-developer",
+      description: "Build the POST /auth/login handler.",
+      definitionOfDone: ["endpoint returns JWT"],
+      acceptanceCriteria: ["returns 200 on valid credentials"],
+      latestVerificationChangeRequests: [
+        "The JWT expiry is not set — fix before marking done.",
+        "Missing input validation on the email field."
+      ]
+    });
+
+    const prompt = (service as any).buildTaskExecutionPrompt(run, repository, task);
+
+    expect(prompt).toContain("Verification change requests");
+    expect(prompt).toContain("The JWT expiry is not set — fix before marking done.");
+    expect(prompt).toContain("Missing input validation on the email field.");
+  });
+
+  it("includes verification findings in the worker execution prompt even when there are no change requests", () => {
+    const service = new ControlPlaneService({} as never, { now: () => new Date() });
+    const run = {
+      id: "run-1",
+      goal: "Add authentication",
+      context: null,
+      branchName: null
+    };
+    const repository = { name: "my-repo" };
+    const task = createTaskRecord({
+      title: "Implement login endpoint",
+      role: "backend-developer",
+      description: "Build the POST /auth/login handler.",
+      definitionOfDone: ["endpoint returns JWT"],
+      acceptanceCriteria: ["returns 200 on valid credentials"],
+      latestVerificationFindings: [
+        "The retry flow still drops verifier context when only findings are present."
+      ],
+      latestVerificationChangeRequests: []
+    });
+
+    const prompt = (service as any).buildTaskExecutionPrompt(run, repository, task);
+
+    expect(prompt).toContain("Verification findings");
+    expect(prompt).toContain("The retry flow still drops verifier context when only findings are present.");
+    expect(prompt).not.toContain("Verification change requests");
+  });
+
+  it("omits the change requests section from the worker prompt when there are none", () => {
+    const service = new ControlPlaneService({} as never, { now: () => new Date() });
+    const run = {
+      id: "run-1",
+      goal: "Add authentication",
+      context: null,
+      branchName: null
+    };
+    const repository = { name: "my-repo" };
+    const task = createTaskRecord({
+      latestVerificationChangeRequests: []
+    });
+
+    const prompt = (service as any).buildTaskExecutionPrompt(run, repository, task);
+
+    expect(prompt).not.toContain("Verification change requests");
   });
 });
