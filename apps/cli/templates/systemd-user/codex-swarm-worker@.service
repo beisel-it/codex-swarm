@@ -12,7 +12,7 @@ EnvironmentFile=-%h/.config/codex-swarm/workers/%i.env
 Restart=always
 RestartSec=5
 ExecStartPre=/bin/sh -lc 'mkdir -p "$CODEX_SWARM_WORKSPACE_ROOT"'
-ExecStart=/bin/sh -lc 'export CODEX_SWARM_API_TOKEN="${CODEX_SWARM_API_TOKEN:-${CODEX_SWARM_DEV_AUTH_TOKEN:-$DEV_AUTH_TOKEN}}"; node apps/api/dist/src/ops/local-worker-daemon.js'
+ExecStart=/bin/sh -lc 'export CODEX_SWARM_SERVICE_TOKEN="${CODEX_SWARM_SERVICE_TOKEN:-${AUTH_SERVICE_TOKEN:?missing CODEX_SWARM_SERVICE_TOKEN or AUTH_SERVICE_TOKEN}}" CODEX_SWARM_SERVICE_NAME="${CODEX_SWARM_SERVICE_NAME:-local-daemon}"; node apps/api/dist/src/ops/local-worker-daemon.js'
 
 [Install]
 WantedBy=default.target

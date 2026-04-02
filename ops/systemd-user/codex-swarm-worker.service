@@ -12,7 +12,7 @@ Restart=always
 RestartSec=5
 ExecStartPre=/bin/sh -lc 'corepack pnpm install --frozen-lockfile'
 ExecStartPre=/bin/sh -lc 'mkdir -p "$CODEX_SWARM_WORKSPACE_ROOT"'
-ExecStart=/bin/sh -lc 'export CODEX_SWARM_API_TOKEN="${CODEX_SWARM_API_TOKEN:-${CODEX_SWARM_DEV_AUTH_TOKEN:-$DEV_AUTH_TOKEN}}"; corepack pnpm --dir apps/api exec tsx src/ops/local-worker-daemon.ts'
+ExecStart=/bin/sh -lc 'export CODEX_SWARM_SERVICE_TOKEN="${CODEX_SWARM_SERVICE_TOKEN:-${AUTH_SERVICE_TOKEN:?missing CODEX_SWARM_SERVICE_TOKEN or AUTH_SERVICE_TOKEN}}" CODEX_SWARM_SERVICE_NAME="${CODEX_SWARM_SERVICE_NAME:-local-daemon}"; corepack pnpm --dir apps/api exec tsx src/ops/local-worker-daemon.ts'
 
 [Install]
 WantedBy=default.target

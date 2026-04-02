@@ -110,11 +110,18 @@ if (process.argv[1] && import.meta.url.endsWith(process.argv[1])) {
       heartbeatIntervalSeconds: Number(process.env.CODEX_SWARM_HEARTBEAT_INTERVAL_SECONDS ?? "30")
     };
 
-    const authToken = process.env.CODEX_SWARM_AUTH_TOKEN ?? process.env.DEV_AUTH_TOKEN;
+    const serviceToken = process.env.CODEX_SWARM_SERVICE_TOKEN
+      ?? process.env.AUTH_SERVICE_TOKEN;
+    const authToken = serviceToken
+      ?? process.env.CODEX_SWARM_API_TOKEN
+      ?? process.env.CODEX_SWARM_AUTH_TOKEN
+      ?? process.env.DEV_AUTH_TOKEN;
     const controlPlane = authToken
       ? {
           baseUrl: controlPlaneUrl,
-          authToken
+          ...(serviceToken ? { serviceToken } : {}),
+          ...(serviceToken ? { serviceName: process.env.CODEX_SWARM_SERVICE_NAME ?? "worker" } : {}),
+          ...(!serviceToken ? { authToken } : {})
         }
       : {
           baseUrl: controlPlaneUrl

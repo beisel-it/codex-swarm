@@ -264,7 +264,8 @@ function buildRuntime(): WorkerNodeRuntime {
 function buildHeaders(authToken: string) {
   return {
     Authorization: `Bearer ${authToken}`,
-    Accept: "application/json"
+    Accept: "application/json",
+    "x-codex-service-name": getOptionalEnv("CODEX_SWARM_SERVICE_NAME") ?? "local-daemon"
   };
 }
 
@@ -436,13 +437,15 @@ function createRequest(baseUrl: string, authToken: string): WorkerDispatchOrches
 
 async function main() {
   const runtime = buildRuntime();
-  const authToken = getOptionalEnv("CODEX_SWARM_API_TOKEN")
+  const authToken = getOptionalEnv("CODEX_SWARM_SERVICE_TOKEN")
+    ?? getOptionalEnv("AUTH_SERVICE_TOKEN")
+    ?? getOptionalEnv("CODEX_SWARM_API_TOKEN")
     ?? getOptionalEnv("CODEX_SWARM_AUTH_TOKEN")
     ?? getOptionalEnv("CODEX_SWARM_DEV_AUTH_TOKEN")
     ?? getOptionalEnv("DEV_AUTH_TOKEN");
 
   if (!authToken) {
-    throw new Error("Missing CODEX_SWARM_API_TOKEN / CODEX_SWARM_AUTH_TOKEN / CODEX_SWARM_DEV_AUTH_TOKEN / DEV_AUTH_TOKEN");
+    throw new Error("Missing CODEX_SWARM_SERVICE_TOKEN / AUTH_SERVICE_TOKEN / CODEX_SWARM_API_TOKEN / CODEX_SWARM_AUTH_TOKEN / CODEX_SWARM_DEV_AUTH_TOKEN / DEV_AUTH_TOKEN");
   }
 
   const pollIntervalMs = parseIntegerEnv("CODEX_SWARM_WORKER_POLL_INTERVAL_MS", 2000, 250);

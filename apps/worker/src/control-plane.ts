@@ -17,6 +17,8 @@ import {
 
 export interface WorkerControlPlaneClientConfig {
   baseUrl: string;
+  serviceToken?: string;
+  serviceName?: string;
   authToken?: string;
   fetchImpl?: typeof fetch;
 }
@@ -35,10 +37,12 @@ export interface ClaimedDispatchWorkspace {
   bootstrap: RemoteWorkerBootstrap;
 }
 
-function buildHeaders(authToken?: string) {
+function buildHeaders(client: WorkerControlPlaneClientConfig) {
   return {
     Accept: "application/json",
-    ...(authToken ? { Authorization: `Bearer ${authToken}` } : {})
+    ...(client.serviceToken ? { Authorization: `Bearer ${client.serviceToken}` } : {}),
+    ...(client.serviceName ? { "x-codex-service-name": client.serviceName } : {}),
+    ...(!client.serviceToken && client.authToken ? { Authorization: `Bearer ${client.authToken}` } : {})
   };
 }
 
@@ -50,7 +54,7 @@ async function requestJson<T>(
   const fetchImpl = client.fetchImpl ?? fetch;
   const response = await fetchImpl(new URL(path, client.baseUrl), {
     method,
-    headers: buildHeaders(client.authToken)
+    headers: buildHeaders(client)
   });
 
   if (!response.ok) {

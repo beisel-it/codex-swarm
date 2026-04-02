@@ -40,7 +40,7 @@ echo
 echo
 echo "worker nodes:"
 curl -fsS "http://${CODEX_SWARM_TAILNET_DNS}:${CODEX_SWARM_API_PORT}/api/v1/worker-nodes" \
-  -H "Authorization: Bearer ${CODEX_SWARM_API_TOKEN:-${CODEX_SWARM_DEV_AUTH_TOKEN}}" || true
+  -H "Authorization: Bearer ${CODEX_SWARM_SERVICE_TOKEN:-${AUTH_SERVICE_TOKEN:-${CODEX_SWARM_API_TOKEN:-${CODEX_SWARM_DEV_AUTH_TOKEN:-}}}}" || true
 echo
 
 echo "recent worker logs:"
@@ -49,5 +49,5 @@ journalctl --user -u 'codex-swarm-worker*.service' -n 40 --no-pager || true
 echo
 echo "worker dispatch assignments:"
 curl -fsS "http://${CODEX_SWARM_TAILNET_DNS}:${CODEX_SWARM_API_PORT}/api/v1/worker-dispatch-assignments" \
-  -H "Authorization: Bearer ${CODEX_SWARM_API_TOKEN:-${CODEX_SWARM_DEV_AUTH_TOKEN}}" || true
+  -H "Authorization: Bearer ${CODEX_SWARM_SERVICE_TOKEN:-${AUTH_SERVICE_TOKEN:-${CODEX_SWARM_API_TOKEN:-${CODEX_SWARM_DEV_AUTH_TOKEN:-}}}}" || true
 echo

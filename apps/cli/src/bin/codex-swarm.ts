@@ -55,6 +55,7 @@ const HELP_TEXT = `codex-swarm
 Usage:
   codex-swarm doctor [--install-root <path>] [--env-file <path>]
   codex-swarm install [--bundle <path> | --version <version>] [--install-root <path>] [--env-file <path>] [--dry-run] [--yes] [--start]
+  codex-swarm auth bootstrap-admin --email <email> --password <password> --display-name <name> [--workspace-id <id>] [--workspace-name <name>] [--team-id <id>] [--team-name <name>] [--install-root <path>] [--env-file <path>] --yes
   codex-swarm api start [--install-root <path>]
   codex-swarm worker start [--install-root <path>]
   codex-swarm db migrate [--install-root <path>]
@@ -87,6 +88,9 @@ async function main() {
     case "api":
       result = runServiceCommand("api", rest);
       break;
+    case "auth":
+      result = runServiceCommand("auth", rest);
+      break;
     case "worker":
       result = runServiceCommand("worker", rest);
       break;
@@ -111,6 +115,10 @@ function parseSharedOptions(argv: string[]): SharedOptions {
 
   for (let index = 0; index < argv.length; index += 1) {
     const token = argv[index];
+
+    if (!token) {
+      continue;
+    }
 
     if (token === "--install-root") {
       installRoot = path.resolve(requireValue(argv[index + 1], token));
@@ -476,7 +484,7 @@ async function runServiceCommand(group: string, argv: string[]) {
   }
 
   const [subcommand, ...rest] = argv;
-  const shared = parseSharedOptions(rest);
+  const { passthroughArgs, shared } = splitSharedOptions(rest);
   const installRoot = shared.installRoot ?? defaultInstallRoot();
 
   if (group === "api" && subcommand === "start") {
@@ -491,14 +499,53 @@ async function runServiceCommand(group: string, argv: string[]) {
     return runBuiltNodeEntry(path.join(installRoot, "apps", "api", "dist", "src", "db", "migrate.js"));
   }
 
+  if (group === "auth" && subcommand === "bootstrap-admin") {
+    return runBuiltNodeEntry(
+      path.join(installRoot, "apps", "api", "dist", "src", "ops", "bootstrap-admin.js"),
+      ["--env-file", shared.envFile, ...passthroughArgs]
+    );
+  }
+
   output.write(`${HELP_TEXT}\n`);
   throw new Error(`Unknown command combination: ${group} ${subcommand ?? ""}`.trim());
 }
 
-async function runBuiltNodeEntry(entryPath: string) {
+function splitSharedOptions(argv: string[]) {
+  let installRoot: string | null = null;
+  let envFile = defaultEnvFile();
+  const passthroughArgs: string[] = [];
+
+  for (let index = 0; index < argv.length; index += 1) {
+    const token = argv[index];
+
+    if (token === "--install-root") {
+      installRoot = path.resolve(requireValue(argv[index + 1], token));
+      index += 1;
+      continue;
+    }
+
+    if (token === "--env-file") {
+      envFile = path.resolve(requireValue(argv[index + 1], token));
+      index += 1;
+      continue;
+    }
+
+    passthroughArgs.push(argv[index]!);
+  }
+
+  return {
+    shared: {
+      installRoot,
+      envFile
+    },
+    passthroughArgs
+  };
+}
+
+async function runBuiltNodeEntry(entryPath: string, args: string[] = []) {
   await access(entryPath, constants.R_OK);
   return new Promise<number>((resolve, reject) => {
-    const child = spawn(process.execPath, [entryPath], {
+    const child = spawn(process.execPath, [entryPath, ...args], {
       stdio: "inherit",
       env: process.env
     });
