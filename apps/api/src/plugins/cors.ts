@@ -13,22 +13,39 @@ function isOriginAllowed(origin: string | undefined, allowedOrigins: string[]) {
   return allowedOrigins.includes(origin);
 }
 
+export function getCorsHeaders(
+  request: FastifyRequest,
+  allowedOrigins: string[],
+): Record<string, string> | null {
+  const origin = request.headers.origin;
+
+  if (!isOriginAllowed(origin, allowedOrigins)) {
+    return null;
+  }
+
+  return {
+    Vary: "Origin",
+    "Access-Control-Allow-Origin": origin as string,
+    "Access-Control-Allow-Methods": "GET,POST,PATCH,PUT,DELETE,OPTIONS",
+    "Access-Control-Allow-Headers": "Authorization, Content-Type, X-Codex-Role, X-Codex-Roles, X-Codex-Principal, X-Codex-Actor-Id, X-Codex-Actor-Type, X-Codex-Email, X-Codex-Workspace-Id, X-Codex-Workspace-Name, X-Codex-Team-Id, X-Codex-Team-Name, X-Codex-Policy-Profile",
+    "Access-Control-Allow-Credentials": "true"
+  };
+}
+
 function applyCorsHeaders(
   request: FastifyRequest,
   reply: FastifyReply,
   allowedOrigins: string[],
 ) {
-  const origin = request.headers.origin;
+  const headers = getCorsHeaders(request, allowedOrigins);
 
-  if (!isOriginAllowed(origin, allowedOrigins)) {
+  if (!headers) {
     return false;
   }
 
-  reply.header("Vary", "Origin");
-  reply.header("Access-Control-Allow-Origin", origin as string);
-  reply.header("Access-Control-Allow-Methods", "GET,POST,PATCH,PUT,DELETE,OPTIONS");
-  reply.header("Access-Control-Allow-Headers", "Authorization, Content-Type, X-Codex-Role, X-Codex-Roles, X-Codex-Principal, X-Codex-Actor-Id, X-Codex-Actor-Type, X-Codex-Email, X-Codex-Workspace-Id, X-Codex-Workspace-Name, X-Codex-Team-Id, X-Codex-Team-Name, X-Codex-Policy-Profile");
-  reply.header("Access-Control-Allow-Credentials", "true");
+  for (const [name, value] of Object.entries(headers)) {
+    reply.header(name, value);
+  }
 
   return true;
 }
@@ -36,6 +53,7 @@ function applyCorsHeaders(
 export const corsPlugin = fp(async (app: FastifyInstance) => {
   app.addHook("onRequest", async (request, reply) => {
     if (request.method !== "OPTIONS") {
+      applyCorsHeaders(request, reply, app.config.CORS_ALLOWED_ORIGINS);
       return;
     }
 
@@ -48,10 +66,5 @@ export const corsPlugin = fp(async (app: FastifyInstance) => {
 
     reply.status(204).send();
     return reply;
-  });
-
-  app.addHook("onSend", async (request, reply, payload) => {
-    applyCorsHeaders(request, reply, app.config.CORS_ALLOWED_ORIGINS);
-    return payload;
   });
 });

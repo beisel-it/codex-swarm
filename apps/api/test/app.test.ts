@@ -2982,12 +2982,14 @@ describe("buildApp", () => {
     const controller = new AbortController();
     const response = await fetch(`http://127.0.0.1:${address.port}/api/v1/runs/${ids.run}/stream`, {
       headers: {
-        authorization: "Bearer test-token"
+        authorization: "Bearer test-token",
+        origin: "http://localhost:5173"
       },
       signal: controller.signal
     });
 
     expect(response.status).toBe(200);
+    expect(response.headers.get("access-control-allow-origin")).toBe("http://localhost:5173");
     expect(response.headers.get("content-type")).toContain("text/event-stream");
     expect(streamObservability.subscribeToRunEvents).toHaveBeenCalledWith(ids.run, expect.any(Function));
 

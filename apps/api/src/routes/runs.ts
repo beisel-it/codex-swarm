@@ -20,6 +20,7 @@ import { getRetentionPolicy } from "../lib/governance-config.js";
 import { isRecoverableDatabaseError } from "../lib/database-fallback.js";
 import { requireValue } from "../lib/require-value.js";
 import { startRunNow } from "../lib/start-run.js";
+import { getCorsHeaders } from "../plugins/cors.js";
 
 export const runRoutes: FastifyPluginAsync = async (app) => {
   app.get("/runs", async (request) => {
@@ -60,8 +61,11 @@ export const runRoutes: FastifyPluginAsync = async (app) => {
     const { id } = idParamSchema.parse(request.params);
     await app.controlPlane.getRun(id, request.authContext);
 
+    const corsHeaders = getCorsHeaders(request, app.config.CORS_ALLOWED_ORIGINS) ?? {};
+
     reply.hijack();
     reply.raw.writeHead(200, {
+      ...corsHeaders,
       "content-type": "text/event-stream; charset=utf-8",
       "cache-control": "no-cache, no-transform",
       connection: "keep-alive",
