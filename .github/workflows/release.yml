@@ -50,18 +50,32 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and verify single-host bundle
-        if: steps.changesets.outputs.published == 'true'
-        run: |
-          VERSION="$(node -p 'JSON.parse(require("node:fs").readFileSync("./apps/cli/package.json", "utf8")).version')"
-          corepack pnpm release:bundle
-          node ./scripts/release/verify-single-host-bundle.mjs "dist/release/codex-swarm-single-host-${VERSION}.tar.gz"
-
-      - name: Upload single-host bundle to GitHub Release
-        if: steps.changesets.outputs.published == 'true'
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Resolve release metadata
+        id: release_meta
         run: |
           VERSION="$(node -p 'JSON.parse(require("node:fs").readFileSync("./apps/cli/package.json", "utf8")).version')"
           PACKAGE_NAME="$(node -p 'JSON.parse(require("node:fs").readFileSync("./apps/cli/package.json", "utf8")).name')"
-          gh release upload "${PACKAGE_NAME}@${VERSION}" "dist/release/codex-swarm-single-host-${VERSION}.tar.gz" --clobber
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "package_name=${PACKAGE_NAME}" >> "$GITHUB_OUTPUT"
+          echo "tag_name=${PACKAGE_NAME}@${VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Ensure GitHub release exists for manual asset repair
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release view "${{ steps.release_meta.outputs.tag_name }}" >/dev/null 2>&1 \
+            || gh release create "${{ steps.release_meta.outputs.tag_name }}" --verify-tag --generate-notes
+
+      - name: Build and verify single-host bundle
+        if: steps.changesets.outputs.published == 'true' || github.event_name == 'workflow_dispatch'
+        run: |
+          corepack pnpm release:bundle
+          node ./scripts/release/verify-single-host-bundle.mjs "dist/release/codex-swarm-single-host-${{ steps.release_meta.outputs.version }}.tar.gz"
+
+      - name: Upload single-host bundle to GitHub Release
+        if: steps.changesets.outputs.published == 'true' || github.event_name == 'workflow_dispatch'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload "${{ steps.release_meta.outputs.tag_name }}" "dist/release/codex-swarm-single-host-${{ steps.release_meta.outputs.version }}.tar.gz" --clobber
