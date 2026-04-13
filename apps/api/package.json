@@ -17,8 +17,8 @@
     "@codex-swarm/contracts": "workspace:*",
     "@codex-swarm/orchestration": "workspace:*",
     "@codex-swarm/worker": "workspace:*",
-    "@fastify/static": "^9.0.0",
-    "@openai/agents": "^0.8.2",
+    "@fastify/static": "^9.1.0",
+    "@openai/agents": "^0.8.3",
     "drizzle-orm": "^0.45.2",
     "fastify": "^5.6.1",
     "fastify-plugin": "^5.0.1",
@@ -26,10 +26,10 @@
     "zod": "^4.1.5"
   },
   "devDependencies": {
-    "@types/node": "^25.5.0",
+    "@types/node": "^25.6.0",
     "@types/pg": "^8.15.5",
     "tsx": "^4.20.6",
     "typescript": "^6.0.2",
-    "vitest": "^4.1.2"
+    "vitest": "^4.1.4"
   }
 }
