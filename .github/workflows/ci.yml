@@ -22,7 +22,7 @@ jobs:
       pull-requests: read
     steps:
       - name: Review dependency changes
-        uses: actions/dependency-review-action@v4.9.0
+        uses: actions/dependency-review-action@v5.0.0
         with:
           fail-on-severity: high
 
