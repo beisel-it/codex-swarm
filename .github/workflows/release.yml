@@ -23,7 +23,7 @@ jobs:
       published: ${{ steps.changesets.outputs.published }}
     steps:
       - name: Check out repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -31,7 +31,7 @@ jobs:
         uses: ./.github/actions/setup-workspace
 
       - name: Configure Node for GitHub Packages
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v7
         with:
           node-version-file: .nvmrc
           registry-url: https://npm.pkg.github.com
